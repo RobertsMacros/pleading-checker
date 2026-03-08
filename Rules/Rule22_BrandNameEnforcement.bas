@@ -244,7 +244,9 @@ LoadError:
     Close #fileNum
     On Error GoTo 0
     ' If file could not be loaded, fall back to defaults
-    If brandRules.Count = 0 Then
+    If brandRules Is Nothing Then
+        InitDefaultBrands
+    ElseIf brandRules.Count = 0 Then
         InitDefaultBrands
     End If
 End Sub
