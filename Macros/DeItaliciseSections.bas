@@ -24,9 +24,10 @@ Attribute VB_Name = "DeItaliciseSections"
 '   Bank of Uganda Act
 '   Bank of Uganda Act, 1966
 '
-' Optimised for large documents (100+ pages): uses string-based
-' word parsing to minimise COM round-trips, disables screen
-' updating during execution.
+' Optimised for large documents (100+ pages): uses native italic
+' Find filter, Duplicate/Collapse range pattern, cached document
+' boundaries, string-based word parsing, and batched italic
+' checks to minimise COM round-trips.
 '
 ' Usage: run DeItaliciseSectionReferences from the Macros dialog
 '        or assign to a keyboard shortcut / QAT button.
@@ -53,40 +54,19 @@ Private Function AlphaCount(ByVal s As String) As Long
 End Function
 
 ' ────────────────────────────────────────────────────────────
-'  Helper: check whether a range is (at least partly) italic.
-'  Checks the first character to resolve wdUndefined ranges.
-' ────────────────────────────────────────────────────────────
-Private Function IsRangeItalic(doc As Document, _
-                                rStart As Long, _
-                                rEnd As Long) As Boolean
-    On Error Resume Next
-    Dim rng As Range
-    Set rng = doc.Range(rStart, rEnd)
-    If rng.Font.Italic = True Then
-        IsRangeItalic = True
-    ElseIf rng.Font.Italic = wdUndefined Then
-        ' Mixed — check first character only
-        Set rng = doc.Range(rStart, rStart + 1)
-        IsRangeItalic = (rng.Font.Italic = True)
-    Else
-        IsRangeItalic = False
-    End If
-    On Error GoTo 0
-End Function
-
-' ────────────────────────────────────────────────────────────
 '  Helper: block-quote guard.  Returns True when both the
 '  20 chars before AND the 20 chars after the span are
 '  entirely italic — indicating a larger italic block.
+'  Accepts pre-cached document boundaries to avoid
+'  recalculating doc.Content.Start/End on every call.
 ' ────────────────────────────────────────────────────────────
 Private Function IsInItalicBlock(doc As Document, _
                                   spanStart As Long, _
-                                  spanEnd As Long) As Boolean
+                                  spanEnd As Long, _
+                                  docStart As Long, _
+                                  docEnd As Long) As Boolean
     On Error Resume Next
     Const PAD As Long = 20
-
-    Dim docStart As Long: docStart = doc.Content.Start
-    Dim docEnd  As Long:  docEnd = doc.Content.End
 
     ' ── Check text BEFORE the span ───────────────────────────
     Dim befStart As Long
@@ -124,24 +104,29 @@ End Function
 
 ' ────────────────────────────────────────────────────────────
 '  Core: given a trigger-word match that is already confirmed
-'  italic, determine the full reference span by parsing the
-'  paragraph text as a VBA string (no per-character COM calls),
-'  then de-italicise.  Returns True on success.
+'  italic (by Find's format filter), determine the full
+'  reference span using string-based word parsing, then
+'  de-italicise.  Returns True on success.
+'
+'  Word parsing is pure VBA string ops (zero COM calls).
+'  Italic validation uses a batched check first: if the
+'  whole candidate span is italic (single COM call), we skip
+'  per-word checks entirely.  Only falls back to per-word
+'  on mixed-format spans (wdUndefined).
 ' ────────────────────────────────────────────────────────────
 Private Function DeItaliciseSpan(doc As Document, _
                                   matchStart As Long, _
-                                  matchEnd As Long) As Boolean
+                                  matchEnd As Long, _
+                                  docStart As Long, _
+                                  docEnd As Long) As Boolean
     DeItaliciseSpan = False
 
-    ' ── Get paragraph boundaries (single COM call) ───────────
+    ' ── Get paragraph boundary (single COM call) ─────────────
     Dim paraRng As Range
     Set paraRng = doc.Range(matchStart, matchEnd).Paragraphs(1).Range
-    Dim paraStart As Long: paraStart = paraRng.Start
-    Dim paraEnd   As Long: paraEnd = paraRng.End
+    Dim paraEnd As Long: paraEnd = paraRng.End
 
-    ' ── Read the rest of the paragraph after the trigger word
-    '    as a plain VBA string — all word parsing happens here
-    '    with zero COM calls ──────────────────────────────────
+    ' ── Read the rest of the paragraph as a VBA string ───────
     If matchEnd >= paraEnd Then Exit Function
 
     Dim tailRng As Range
@@ -149,16 +134,24 @@ Private Function DeItaliciseSpan(doc As Document, _
     Dim tail As String
     tail = tailRng.Text
 
-    ' Offset within `tail`: 1-based VBA string position
+    ' ── Parse words from the string (zero COM calls) ─────────
     Dim pos As Long: pos = 1
     Dim tailLen As Long: tailLen = Len(tail)
-
-    ' spanEnd tracks the document position of the last included word
-    Dim spanEnd As Long: spanEnd = matchEnd
     Dim ch As String
+    Dim lastGoodOffset As Long: lastGoodOffset = 0  ' offset into tail of last included word-end
+
+    ' We collect word boundaries (as offsets into tail) first,
+    ' then do a batched italic check.
+    Dim wordStarts() As Long
+    Dim wordEnds() As Long
+    Dim wordTexts() As String
+    Dim wordCount As Long: wordCount = 0
+    ReDim wordStarts(0 To 31)
+    ReDim wordEnds(0 To 31)
+    ReDim wordTexts(0 To 31)
 
     Do While pos <= tailLen
-        ' ── Skip spaces / non-breaking spaces ────────────────
+        ' Skip spaces / non-breaking spaces
         Do While pos <= tailLen
             ch = Mid$(tail, pos, 1)
             If ch <> " " And ch <> Chr$(160) Then Exit Do
@@ -166,7 +159,7 @@ Private Function DeItaliciseSpan(doc As Document, _
         Loop
         If pos > tailLen Then Exit Do
 
-        ' ── Gather a word (contiguous non-space run) ─────────
+        ' Gather a word (contiguous non-space run)
         Dim wordPos As Long: wordPos = pos
         Do While pos <= tailLen
             ch = Mid$(tail, pos, 1)
@@ -179,23 +172,65 @@ Private Function DeItaliciseSpan(doc As Document, _
         word = Mid$(tail, wordPos, pos - wordPos)
         If Len(word) = 0 Then Exit Do
 
-        ' ── Translate string offset to document position ─────
-        Dim wordDocStart As Long: wordDocStart = matchEnd + wordPos - 1
-        Dim wordDocEnd   As Long: wordDocEnd = matchEnd + pos - 1
-
-        ' ── Stop if this word is no longer italic (1 COM call
-        '    per word, not per character) ─────────────────────
-        If Not IsRangeItalic(doc, wordDocStart, wordDocEnd) Then Exit Do
-
-        ' ── Stop BEFORE a word with more than 3 alpha chars ──
+        ' Stop BEFORE a word with more than 3 alpha characters
         If AlphaCount(word) > 3 Then Exit Do
 
-        ' Include this word
-        spanEnd = wordDocEnd
+        ' Store this word for italic checking
+        If wordCount > UBound(wordStarts) Then
+            ReDim Preserve wordStarts(0 To wordCount * 2)
+            ReDim Preserve wordEnds(0 To wordCount * 2)
+            ReDim Preserve wordTexts(0 To wordCount * 2)
+        End If
+        wordStarts(wordCount) = wordPos
+        wordEnds(wordCount) = pos
+        wordTexts(wordCount) = word
+        wordCount = wordCount + 1
     Loop
 
+    ' ── Determine span end via batched italic check ──────────
+    Dim spanEnd As Long: spanEnd = matchEnd
+
+    If wordCount > 0 Then
+        ' Candidate span: from matchEnd to end of last parsed word
+        Dim candidateEnd As Long
+        candidateEnd = matchEnd + wordEnds(wordCount - 1) - 1
+
+        Dim candidateRng As Range
+        Set candidateRng = doc.Range(matchEnd, candidateEnd)
+        Dim italicState As Long
+        italicState = candidateRng.Font.Italic
+
+        If italicState = True Then
+            ' Entire candidate span is italic — include all words
+            spanEnd = candidateEnd
+        ElseIf italicState = wdUndefined Then
+            ' Mixed formatting — check per-word (still few COM calls)
+            Dim w As Long
+            For w = 0 To wordCount - 1
+                Dim wDocStart As Long: wDocStart = matchEnd + wordStarts(w) - 1
+                Dim wDocEnd   As Long: wDocEnd = matchEnd + wordEnds(w) - 1
+                Dim wRng As Range
+                Set wRng = doc.Range(wDocStart, wDocEnd)
+                If wRng.Font.Italic = True Then
+                    spanEnd = wDocEnd
+                ElseIf wRng.Font.Italic = wdUndefined Then
+                    ' Check first char
+                    Set wRng = doc.Range(wDocStart, wDocStart + 1)
+                    If wRng.Font.Italic = True Then
+                        spanEnd = wDocEnd
+                    Else
+                        Exit For
+                    End If
+                Else
+                    Exit For
+                End If
+            Next w
+        End If
+        ' If italicState = False, spanEnd stays at matchEnd (trigger only)
+    End If
+
     ' ── Block-quote guard ────────────────────────────────────
-    If IsInItalicBlock(doc, matchStart, spanEnd) Then Exit Function
+    If IsInItalicBlock(doc, matchStart, spanEnd, docStart, docEnd) Then Exit Function
 
     ' ── De-italicise (single COM call) ───────────────────────
     Dim target As Range
@@ -221,11 +256,19 @@ Public Sub DeItaliciseSectionReferences()
     origTrack = doc.TrackRevisions
     doc.TrackRevisions = True
 
+    ' ── Cache document boundaries once ───────────────────────
+    Dim docStart As Long: docStart = doc.Content.Start
+    Dim docEnd   As Long: docEnd = doc.Content.End
+
     Dim hitCount As Long
     hitCount = 0
 
     ' ==========================================================
     '  PART 1 — Trigger-word references
+    '  Uses Find with .Font.Italic = True so Word's native
+    '  search engine only returns italic matches (skips 80-90%
+    '  of non-italic text).  Duplicate/Collapse pattern avoids
+    '  recreating Range and Find objects each iteration.
     ' ==========================================================
     Dim triggers As Variant
     triggers = Array("Section", "Regulation", "Article", "Paragraph")
@@ -233,43 +276,34 @@ Public Sub DeItaliciseSectionReferences()
     Dim t As Long
     For t = LBound(triggers) To UBound(triggers)
 
-        Dim searchStart As Long
-        searchStart = doc.Content.Start
+        Dim rng As Range
+        Set rng = doc.Content.Duplicate
 
-        Do
-            Dim rng As Range
-            Set rng = doc.Range(searchStart, doc.Content.End)
+        With rng.Find
+            .ClearFormatting
+            .Font.Italic = True
+            .Replacement.ClearFormatting
+            .Text = CStr(triggers(t))
+            .Forward = True
+            .Wrap = wdFindStop
+            .Format = True
+            .MatchCase = False
+            .MatchWholeWord = False
+            .MatchWildcards = False
+        End With
 
-            With rng.Find
-                .ClearFormatting
-                .Replacement.ClearFormatting
-                .Text = CStr(triggers(t))
-                .Forward = True
-                .Wrap = wdFindStop
-                .Format = False
-                .MatchCase = False
-                .MatchWholeWord = False
-                .MatchWildcards = False
-            End With
-
-            If Not rng.Find.Execute Then Exit Do
-
-            ' Post-find italic check (1 COM call)
-            If IsRangeItalic(doc, rng.Start, rng.End) Then
-                If DeItaliciseSpan(doc, rng.Start, rng.End) Then
-                    hitCount = hitCount + 1
-                End If
+        Do While rng.Find.Execute
+            If DeItaliciseSpan(doc, rng.Start, rng.End, docStart, docEnd) Then
+                hitCount = hitCount + 1
             End If
-
-            ' Advance past this match
-            searchStart = rng.End
-            If searchStart >= doc.Content.End Then Exit Do
+            rng.Collapse wdCollapseEnd
         Loop
 
     Next t
 
     ' ==========================================================
     '  PART 2 — Specific statutory phrases (longest first)
+    '  Same optimised Find pattern with italic filter.
     ' ==========================================================
     Dim phrases As Variant
     phrases = Array( _
@@ -282,37 +316,30 @@ Public Sub DeItaliciseSectionReferences()
     Dim p As Long
     For p = LBound(phrases) To UBound(phrases)
 
-        searchStart = doc.Content.Start
+        Dim rng2 As Range
+        Set rng2 = doc.Content.Duplicate
 
-        Do
-            Dim rng2 As Range
-            Set rng2 = doc.Range(searchStart, doc.Content.End)
+        With rng2.Find
+            .ClearFormatting
+            .Font.Italic = True
+            .Replacement.ClearFormatting
+            .Text = CStr(phrases(p))
+            .Forward = True
+            .Wrap = wdFindStop
+            .Format = True
+            .MatchCase = False
+            .MatchWholeWord = False
+            .MatchWildcards = False
+        End With
 
-            With rng2.Find
-                .ClearFormatting
-                .Replacement.ClearFormatting
-                .Text = CStr(phrases(p))
-                .Forward = True
-                .Wrap = wdFindStop
-                .Format = False
-                .MatchCase = False
-                .MatchWholeWord = False
-                .MatchWildcards = False
-            End With
-
-            If Not rng2.Find.Execute Then Exit Do
-
-            If IsRangeItalic(doc, rng2.Start, rng2.End) Then
-                If Not IsInItalicBlock(doc, rng2.Start, rng2.End) Then
-                    Dim target As Range
-                    Set target = doc.Range(rng2.Start, rng2.End)
-                    target.Font.Italic = False
-                    hitCount = hitCount + 1
-                End If
+        Do While rng2.Find.Execute
+            If Not IsInItalicBlock(doc, rng2.Start, rng2.End, docStart, docEnd) Then
+                Dim target As Range
+                Set target = doc.Range(rng2.Start, rng2.End)
+                target.Font.Italic = False
+                hitCount = hitCount + 1
             End If
-
-            searchStart = rng2.End
-            If searchStart >= doc.Content.End Then Exit Do
+            rng2.Collapse wdCollapseEnd
         Loop
 
     Next p
