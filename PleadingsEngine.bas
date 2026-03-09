@@ -29,6 +29,7 @@ Private ruleConfig      As Scripting.Dictionary   ' rule name (String) -> enable
 Private PAGE_RANGE_START As Long                  ' 0 = no restriction
 Private PAGE_RANGE_END   As Long                  ' 0 = no restriction
 Private whitelistDict   As Scripting.Dictionary   ' custom term whitelist
+Private m_useTrackedChanges As Boolean            ' default True (UK magic circle convention)
 
 ' ════════════════════════════════════════════════════════════
 '  ENTRY POINT
@@ -48,6 +49,9 @@ End Sub
 ' ════════════════════════════════════════════════════════════
 Public Function InitRuleConfig() As Scripting.Dictionary
     Dim cfg As New Scripting.Dictionary
+
+    ' Default: tracked changes ON (UK magic circle convention)
+    m_useTrackedChanges = True
 
     cfg.Add "british_spelling", True
     cfg.Add "repeated_words", True
@@ -395,16 +399,58 @@ Public Function RunAllPleadingsRules(doc As Document, _
 End Function
 
 ' ════════════════════════════════════════════════════════════
-'  APPLY HIGHLIGHTS AND COMMENTS
-'  Loops all issues and marks them in the document with
-'  yellow highlighting and optional review comments.
+'  SET TRACKED CHANGES MODE
+'  Controls whether ApplyIssuesToDocument uses tracked changes.
+'  Default is True (UK magic circle convention: all markup
+'  should be reviewable as tracked changes).
 ' ════════════════════════════════════════════════════════════
-Public Sub ApplyHighlights(doc As Document, _
-                           issues As Collection, _
-                           Optional addComments As Boolean = True)
+Public Sub SetTrackedChanges(useTracked As Boolean)
+    m_useTrackedChanges = useTracked
+End Sub
+
+' ════════════════════════════════════════════════════════════
+'  UNIFIED ISSUE APPLIER
+'  Applies issues to the document, respecting the tracked
+'  changes toggle. Called by both standalone macros and the
+'  UserForm.
+'
+'  When useTrackedChanges = True (default):
+'    - Enables doc.TrackRevisions so highlights/comments
+'      appear as tracked changes the lawyer can accept/reject
+'    - For AutoFixSafe issues: replaces text via revision
+'
+'  When useTrackedChanges = False (brute force off):
+'    - Forces doc.TrackRevisions = False regardless of the
+'      document's current state, so markup is applied directly
+'
+'  Always restores the document's original TrackRevisions
+'  state when finished.
+' ════════════════════════════════════════════════════════════
+Public Sub ApplyIssuesToDocument(doc As Document, _
+                                  issues As Collection, _
+                                  Optional useTrackedChanges As Variant, _
+                                  Optional addComments As Boolean = True)
     Dim issue As PleadingsIssue
     Dim rng As Range
     Dim i As Long
+    Dim wasTracking As Boolean
+    Dim doTrack As Boolean
+
+    ' Use explicit parameter if provided, else module-level default
+    If IsMissing(useTrackedChanges) Then
+        doTrack = m_useTrackedChanges
+    Else
+        doTrack = CBool(useTrackedChanges)
+    End If
+
+    ' Save and override tracking state
+    wasTracking = doc.TrackRevisions
+    If doTrack Then
+        doc.TrackRevisions = True
+    Else
+        ' Brute-force disable — overrides whatever the doc had
+        doc.TrackRevisions = False
+    End If
 
     For i = 1 To issues.Count
         Set issue = issues(i)
@@ -414,11 +460,26 @@ Public Sub ApplyHighlights(doc As Document, _
             On Error Resume Next: Err.Clear
             Set rng = doc.Range(issue.RangeStart, issue.RangeEnd)
             If Err.Number = 0 Then
-                ' Apply yellow highlight
-                rng.HighlightColorIndex = wdYellow
-
-                ' Add review comment if requested
-                If addComments Then
+                If doTrack And issue.AutoFixSafe And Len(issue.Suggestion) > 0 Then
+                    ' Auto-fix: replace text as a tracked change
+                    rng.Text = issue.Suggestion
+                Else
+                    ' Diagnostic: highlight + optional comment
+                    rng.HighlightColorIndex = wdYellow
+                    If addComments Then
+                        doc.Comments.Add Range:=rng, _
+                            Text:="[" & issue.RuleName & "] " & issue.Issue & _
+                                  " " & Chr(8212) & " Suggestion: " & issue.Suggestion
+                    End If
+                End If
+            End If
+            On Error GoTo 0
+        ElseIf addComments Then
+            ' Document-level issues with no range: comment at start
+            On Error Resume Next: Err.Clear
+            If doc.Content.Start < doc.Content.End Then
+                Set rng = doc.Range(doc.Content.Start, doc.Content.Start + 1)
+                If Err.Number = 0 Then
                     doc.Comments.Add Range:=rng, _
                         Text:="[" & issue.RuleName & "] " & issue.Issue & _
                               " " & Chr(8212) & " Suggestion: " & issue.Suggestion
@@ -427,6 +488,18 @@ Public Sub ApplyHighlights(doc As Document, _
             On Error GoTo 0
         End If
     Next i
+
+    ' Restore original tracking state
+    doc.TrackRevisions = wasTracking
+End Sub
+
+' ════════════════════════════════════════════════════════════
+'  LEGACY: APPLY HIGHLIGHTS (kept for backward compatibility)
+' ════════════════════════════════════════════════════════════
+Public Sub ApplyHighlights(doc As Document, _
+                           issues As Collection, _
+                           Optional addComments As Boolean = True)
+    ApplyIssuesToDocument doc, issues, False, addComments
 End Sub
 
 ' ════════════════════════════════════════════════════════════
@@ -671,61 +744,13 @@ Public Function GetLocationString(rng As Range, doc As Document) As String
 End Function
 
 ' ════════════════════════════════════════════════════════════
-'  APPLY SUGGESTIONS VIA TRACKED CHANGES
-'  For issues flagged as auto-fix safe, applies the suggestion
-'  text using Word's tracked changes so the user can accept
-'  or reject each change individually.
-'  For non-auto-fix issues, adds a comment with the suggestion.
+'  LEGACY: APPLY SUGGESTIONS AS TRACKED CHANGES
+'  (kept for backward compatibility — delegates to unified applier)
 ' ════════════════════════════════════════════════════════════
 Public Sub ApplySuggestionsAsTrackedChanges(doc As Document, _
                                              issues As Collection, _
                                              Optional addComments As Boolean = True)
-    Dim issue As PleadingsIssue
-    Dim rng As Range
-    Dim i As Long
-    Dim wasTrackingChanges As Boolean
-
-    ' Remember current tracking state
-    wasTrackingChanges = doc.TrackRevisions
-
-    For i = 1 To issues.Count
-        Set issue = issues(i)
-
-        ' Skip issues without valid range positions
-        If issue.RangeStart >= 0 And issue.RangeEnd > issue.RangeStart Then
-            On Error Resume Next: Err.Clear
-            Set rng = doc.Range(issue.RangeStart, issue.RangeEnd)
-            If Err.Number = 0 Then
-                If issue.AutoFixSafe And Len(issue.Suggestion) > 0 Then
-                    ' Apply replacement via tracked changes
-                    doc.TrackRevisions = True
-                    rng.Text = issue.Suggestion
-                    doc.TrackRevisions = wasTrackingChanges
-                Else
-                    ' Highlight and comment for suggest-only issues
-                    rng.HighlightColorIndex = wdYellow
-                    If addComments Then
-                        doc.Comments.Add Range:=rng, _
-                            Text:="[" & issue.RuleName & "] " & issue.Issue & _
-                                  " " & Chr(8212) & " Suggestion: " & issue.Suggestion
-                    End If
-                End If
-            End If
-            On Error GoTo 0
-        ElseIf addComments Then
-            ' Document-level issues with no range: add comment at start
-            On Error Resume Next: Err.Clear
-            If doc.Content.Start < doc.Content.End Then
-                Set rng = doc.Range(doc.Content.Start, doc.Content.Start + 1)
-                If Err.Number = 0 Then
-                    doc.Comments.Add Range:=rng, _
-                        Text:="[" & issue.RuleName & "] " & issue.Issue & _
-                              " " & Chr(8212) & " Suggestion: " & issue.Suggestion
-                End If
-            End If
-            On Error GoTo 0
-        End If
-    Next i
+    ApplyIssuesToDocument doc, issues, True, addComments
 End Sub
 
 ' ════════════════════════════════════════════════════════════
