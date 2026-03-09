@@ -13,11 +13,18 @@ Option Explicit
 
 Private Const RULE_NAME As String = "slash_style"
 
+' Cached document boundary — set once per run, avoids repeated
+' doc.Content.End traversals inside Find loops and helpers
+Private m_docEnd As Long
+
 ' ════════════════════════════════════════════════════════════
 '  MAIN ENTRY POINT
 ' ════════════════════════════════════════════════════════════
 Public Function Check_SlashStyle(doc As Document) As Collection
     Dim issues As New Collection
+
+    ' ── Cache document boundary once ─────────────────────────
+    m_docEnd = doc.Content.End
 
     ' ── Forward slashes: determine dominant style ────────────
     Dim tightCount As Long
@@ -278,7 +285,7 @@ Private Sub FlagBackslashes(doc As Document, ByRef issues As Collection)
         contextStart = rng.Start - 5
         If contextStart < 0 Then contextStart = 0
         contextEnd = rng.End + 10
-        If contextEnd > doc.Content.End Then contextEnd = doc.Content.End
+        If contextEnd > m_docEnd Then contextEnd = m_docEnd
 
         Set contextRng = doc.Range(contextStart, contextEnd)
         If Err.Number <> 0 Then
@@ -346,7 +353,7 @@ Private Function IsURLContext(rng As Range, doc As Document) As Boolean
     contextStart = rng.Start - 30
     If contextStart < 0 Then contextStart = 0
     contextEnd = rng.End + 30
-    If contextEnd > doc.Content.End Then contextEnd = doc.Content.End
+    If contextEnd > m_docEnd Then contextEnd = m_docEnd
 
     Set contextRng = doc.Range(contextStart, contextEnd)
     If Err.Number <> 0 Then

@@ -24,6 +24,9 @@ Private Const STRAIGHT_SINGLE As Long = 39         ' Chr(39) '
 Private Const CURLY_SINGLE_OPEN As Long = 8216     ' ChrW(8216)
 Private Const CURLY_SINGLE_CLOSE As Long = 8217    ' ChrW(8217)
 
+' Cached document boundary — set once per run
+Private m_docEnd As Long
+
 ' ════════════════════════════════════════════════════════════
 '  MAIN ENTRY POINT
 ' ════════════════════════════════════════════════════════════
@@ -62,6 +65,9 @@ Public Function Check_QuotationMarkConsistency(doc As Document) As Collection
         Set Check_QuotationMarkConsistency = issues
         Exit Function
     End If
+
+    ' ── Cache document boundary once ─────────────────────────
+    m_docEnd = doc.Content.End
 
     ' ── First pass: count quotation mark types ───────────────
     For i = 1 To textLen
@@ -276,29 +282,23 @@ Private Sub FlagSingleQuotationMarks(doc As Document, _
 
         If Not PleadingsEngine.IsInPageRange(rng) Then GoTo ContinueSingle
 
-        ' Skip apostrophes: check if preceded AND followed by a letter
+        ' Skip apostrophes: check if preceded AND followed by a letter.
+        ' Uses a single 3-char range read (1 COM call) instead of
+        ' two per-character Range objects (2 COM calls per match).
         If checkApostrophe Then
-            Dim prevChar As String
-            Dim nextChar As String
             Dim isApost As Boolean
             isApost = False
 
-            If rng.Start > 0 Then
-                Dim prevRng As Range
-                Set prevRng = doc.Range(rng.Start - 1, rng.Start)
+            If rng.Start > 0 And rng.End < m_docEnd Then
+                Dim ctxRng As Range
+                Set ctxRng = doc.Range(rng.Start - 1, rng.End + 1)
                 If Err.Number = 0 Then
-                    prevChar = prevRng.Text
-                    If IsLetterChar(prevChar) Then
-                        Dim nextRng As Range
-                        If rng.End < doc.Content.End Then
-                            Set nextRng = doc.Range(rng.End, rng.End + 1)
-                            If Err.Number = 0 Then
-                                nextChar = nextRng.Text
-                                If IsLetterChar(nextChar) Then
-                                    isApost = True
-                                End If
-                            End If
-                            If Err.Number <> 0 Then Err.Clear
+                    Dim ctxText As String
+                    ctxText = ctxRng.Text
+                    If Len(ctxText) >= 3 Then
+                        If IsLetterChar(Left$(ctxText, 1)) And _
+                           IsLetterChar(Right$(ctxText, 1)) Then
+                            isApost = True
                         End If
                     End If
                 End If

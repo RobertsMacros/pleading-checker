@@ -79,6 +79,9 @@ Public Function Check_DefinedTerms(doc As Document) As Collection
     Dim paraIdx As Long
     Dim paraText As String
 
+    ' ── Cache document boundary once ────────────────────────
+    Dim docEnd As Long: docEnd = doc.Content.End
+
     ' ══════════════════════════════════════════════════════════
     '  PASS 1: Scan for defined terms
     ' ══════════════════════════════════════════════════════════
@@ -115,7 +118,7 @@ Public Function Check_DefinedTerms(doc As Document) As Collection
         ' Search forward for closing curly quote (max 100 chars)
         Dim endSearch As Long
         endSearch = startPos + 100
-        If endSearch > doc.Content.End Then endSearch = doc.Content.End
+        If endSearch > docEnd Then endSearch = docEnd
         Set expandedRng = doc.Range(startPos, endSearch)
         Dim fullText As String
         fullText = expandedRng.Text
@@ -223,7 +226,7 @@ NextParaMeans:
 
         startPos = rng.Start
         endSearch = startPos + 120
-        If endSearch > doc.Content.End Then endSearch = doc.Content.End
+        If endSearch > docEnd Then endSearch = docEnd
         Set expandedRng = doc.Range(startPos, endSearch)
         fullText = expandedRng.Text
 

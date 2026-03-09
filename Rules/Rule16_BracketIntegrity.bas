@@ -52,6 +52,37 @@ Public Function Check_BracketIntegrity(doc As Document) As Collection
         Exit Function
     End If
 
+    ' ── Quick check: does the document contain any code fonts?
+    '    If not (typical for legal docs), skip all per-bracket
+    '    font checks — saves thousands of COM calls. ───────────
+    Dim hasCodeFont As Boolean
+    hasCodeFont = False
+    Dim testRng As Range
+    Set testRng = doc.Content.Duplicate
+    On Error Resume Next
+    With testRng.Find
+        .ClearFormatting
+        .Font.Name = "Courier New"
+        .Text = ""
+        .Forward = True
+        .Wrap = wdFindStop
+        .Format = True
+    End With
+    If testRng.Find.Execute Then hasCodeFont = True
+    If Not hasCodeFont Then
+        Set testRng = doc.Content.Duplicate
+        With testRng.Find
+            .ClearFormatting
+            .Font.Name = "Consolas"
+            .Text = ""
+            .Forward = True
+            .Wrap = wdFindStop
+            .Format = True
+        End With
+        If testRng.Find.Execute Then hasCodeFont = True
+    End If
+    On Error GoTo 0
+
     ' ── Iterate character by character ───────────────────────
     For i = 1 To textLen
         ch = Mid(docText, i, 1)
@@ -60,8 +91,11 @@ Public Function Check_BracketIntegrity(doc As Document) As Collection
         If ch = "(" Or ch = "[" Or ch = "{" Or _
            ch = ")" Or ch = "]" Or ch = "}" Then
 
-            ' Skip brackets in code-font runs
-            If IsCodeFont(doc, i - 1) Then GoTo NextChar
+            ' Skip brackets in code-font runs (only check if
+            ' the document actually contains code fonts)
+            If hasCodeFont Then
+                If IsCodeFont(doc, i - 1) Then GoTo NextChar
+            End If
 
             If ch = "(" Or ch = "[" Or ch = "{" Then
                 ' ── Push opening bracket onto stack ──────────
