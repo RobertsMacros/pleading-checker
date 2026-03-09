@@ -76,7 +76,7 @@ US_TO_UK = {
     "realize": "realise", "realized": "realised",
     "authorize": "authorise", "authorized": "authorised",
     "authorization": "authorisation",
-    "minimize": "minimise", "maximise": "maximise",
+    "minimize": "minimise", "maximize": "maximise",
     "analyze": "analyse", "analyzed": "analysed",
     "defense": "defence", "offense": "offence",
     # NB: "practice" (noun) is correct UK English; "practise" is the verb.
