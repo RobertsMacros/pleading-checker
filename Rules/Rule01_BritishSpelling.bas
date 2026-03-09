@@ -31,7 +31,9 @@ Public Function Check_BritishSpelling(doc As Document) As Collection
     BuildSpellingArrays usWords, ukWords
 
     ' ── Exceptions: US terms to skip even if found ────────
-    exceptions = Split("program", ",")
+    ' "judgment" is standard in UK legal writing (not "judgement")
+    ' "practice" is the correct UK noun form (verb: "practise")
+    exceptions = Split("program,judgment,practice", ",")
 
     ' ── Search main document body ─────────────────────────
     SearchRangeForUSSpellings doc.Content, doc, usWords, ukWords, exceptions, issues

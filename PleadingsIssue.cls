@@ -132,7 +132,7 @@ Public Function ToJSON() As String
     s = s & "      ""severity"": """ & EscJSON(Severity) & """," & vbCrLf
     s = s & "      ""issue"": """ & EscJSON(pIssue) & """," & vbCrLf
     s = s & "      ""suggestion"": """ & EscJSON(pSuggestion) & """," & vbCrLf
-    s = s & "      ""auto_fix_safe"": " & IIf(pAutoFixSafe, "true", "false") & "" & vbCrLf
+    s = s & "      ""auto_fix_safe"": " & IIf(pAutoFixSafe, "true", "false") & vbCrLf
     s = s & "    }"
     ToJSON = s
 End Function

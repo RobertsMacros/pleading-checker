@@ -12,14 +12,10 @@ Usage:
 """
 
 import re
-import copy
-import sys
 from pathlib import Path
-from datetime import datetime
 
 from docx import Document
 from docx.shared import Pt, RGBColor
-from docx.enum.text import WD_ALIGN_PARAGRAPH
 from docx.oxml.ns import qn
 from docx.oxml import OxmlElement
 
@@ -80,17 +76,16 @@ US_TO_UK = {
     "realize": "realise", "realized": "realised",
     "authorize": "authorise", "authorized": "authorised",
     "authorization": "authorisation",
-    "minimize": "minimise", "minimize": "minimise",
-    "maximize": "maximise",
+    "minimize": "minimise", "maximise": "maximise",
     "analyze": "analyse", "analyzed": "analysed",
     "defense": "defence", "offense": "offence",
-    "practice": "practise",  # verb form
+    # NB: "practice" (noun) is correct UK English; "practise" is the verb.
+    # NB: "judgment" (no 'e') is standard in UK legal writing.
+    # Neither is flagged here to avoid legal false positives.
     "center": "centre", "centers": "centres",
     "meter": "metre",
     "theater": "theatre",
     "catalog": "catalogue", "dialog": "dialogue",
-    "program": "programme",
-    "judgment": "judgement",
     "acknowledgment": "acknowledgement",
     "aging": "ageing",
     "gray": "grey",
@@ -316,14 +311,16 @@ def rule12_licence_license(paragraphs):
 
 
 # ── Rule 13: Colour Formatting ───────────────────────────────
+# NB: "color" is already caught by Rule 1 (british_spelling).
+# This rule catches compound forms that Rule 1 misses (e.g. "colorful").
 def rule13_colour_formatting(paragraphs):
     issues = []
     for idx, para in enumerate(paragraphs):
-        for m in re.finditer(r'\bcolor\b', para.text, re.IGNORECASE):
+        for m in re.finditer(r'\bcolor(?:ful|ing|ise|ize|ed|less)\b', para.text, re.IGNORECASE):
             issues.append(PleadingIssue(
                 "colour_formatting", get_para_location(idx),
-                f"US spelling 'color' detected.",
-                "Use 'colour'.",
+                f"US spelling '{m.group()}' detected.",
+                f"Use '{m.group().replace('color', 'colour').replace('ize', 'ise')}'.",
                 "warning", True
             ))
     return issues
@@ -443,9 +440,6 @@ def rule19_currency_number_format(paragraphs):
                 "Use GBP (£) or specify currency explicitly.",
                 "warning"
             ))
-        # Detect inconsistent thousands separators
-        for m in re.finditer(r'\b\d{1,3}(,\d{3})+\b', para.text):
-            pass  # commas in numbers are acceptable
     return issues
 
 
@@ -523,7 +517,7 @@ def rule23_phrase_consistency(paragraphs):
     phrase_groups = [
         (["notwithstanding", "despite", "in spite of"], "despite"),
         (["hereinafter", "hereafter"], "hereafter"),
-        (["pursuant to", "in accordance with", "under"], "under"),
+        (["pursuant to", "in accordance with"], "in accordance with"),
     ]
     for group, preferred in phrase_groups:
         found = {}
@@ -844,7 +838,7 @@ def create_test_document(path):
     # Rule 1: US spellings
     doc.add_paragraph(
         "The color of the organization was favorable to the defense. "
-        "We must analyze the judgment carefully."
+        "We must analyze this matter and recognize the gray area."
     )
 
     # Rule 2: Repeated words
@@ -919,11 +913,13 @@ def create_test_document(path):
     # Rule 22: Brand name enforcement
     doc.add_paragraph("The audit was conducted by pwc and reviewed by hmrc officials.")
 
-    # Rule 23: Phrase consistency
+    # Rule 23: Phrase consistency (notwithstanding vs despite; pursuant to vs in accordance with)
     doc.add_paragraph(
         "Notwithstanding the terms above, and despite earlier agreements, "
-        "the parties acted in accordance with the new protocol. "
-        "Pursuant to clause 5, the obligations remain."
+        "the parties acted in accordance with the new protocol."
+    )
+    doc.add_paragraph(
+        "Pursuant to clause 5, the obligations remain in full force."
     )
 
     # Rule 24: Footnotes not endnotes

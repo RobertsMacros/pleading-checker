@@ -341,24 +341,14 @@ Private Function IsPartOfRange(ByRef txt As String, _
     End If
 
     ' Check for "to" pattern: digit + space + "to" + space + digit
-    ' Forward check
-    If pos + 1 <= textLen Then
-        If Mid(txt, pos + 1, 1) = " " Then
-            If pos + 4 <= textLen Then
-                If LCase(Mid(txt, pos + 2, 2)) = "to" Then
-                    If pos + 4 <= textLen Then
-                        If Mid(txt, pos + 4, 1) = " " Then
-                            If pos + 5 <= textLen Then
-                                Dim afterTo As String
-                                afterTo = Mid(txt, pos + 5, 1)
-                                If afterTo >= "0" And afterTo <= "9" Then
-                                    IsPartOfRange = True
-                                    Exit Function
-                                End If
-                            End If
-                        End If
-                    End If
-                End If
+    ' Forward check — need at least 5 chars after pos: " to X"
+    If pos + 5 <= textLen Then
+        If Mid(txt, pos + 1, 4) = " to " Then
+            Dim afterTo As String
+            afterTo = Mid(txt, pos + 5, 1)
+            If afterTo >= "0" And afterTo <= "9" Then
+                IsPartOfRange = True
+                Exit Function
             End If
         End If
     End If
