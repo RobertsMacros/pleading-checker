@@ -13,7 +13,7 @@ Attribute VB_Name = "PleadingsEngine"
 '   - Microsoft Scripting Runtime (Tools > References)
 '
 ' Optional rule modules (import any subset):
-'   - Rules_Spelling.bas        (Rule 1)
+'   - Rules_Spelling.bas        (Rules 1, 12, 13)
 '   - Rules_TextScan.bas        (Rules 2, 34)
 '   - Rules_Numbering.bas       (Rules 3, 8)
 '   - Rules_Headings.bas        (Rules 4, 21)
@@ -21,7 +21,6 @@ Attribute VB_Name = "PleadingsEngine"
 '   - Rules_Formatting.bas      (Rules 6, 11)
 '   - Rules_NumberFormats.bas    (Rules 9, 18, 19)
 '   - Rules_Lists.bas           (Rules 10, 15)
-'   - Rules_UKUSVariants.bas    (Rules 12, 13)
 '   - Rules_Punctuation.bas     (Rules 14, 16)
 '   - Rules_Quotes.bas          (Rules 17, 32, 33)
 '   - Rules_FootnoteIntegrity.bas (Rule 20)
@@ -279,15 +278,15 @@ Public Function RunAllPleadingsRules(doc As Document, _
             TryRunRule("Rules_Lists.Check_ListPunctuation", doc)
     End If
 
-    ' -- UK/US variant rules --
+    ' -- UK/US variant rules (in Rules_Spelling) --
     If IsRuleEnabled(config, "licence_license") Then
         AddIssuesToCollection allIssues, _
-            TryRunRule("Rules_UKUSVariants.Check_LicenceLicense", doc)
+            TryRunRule("Rules_Spelling.Check_LicenceLicense", doc)
     End If
 
     If IsRuleEnabled(config, "colour_formatting") Then
         AddIssuesToCollection allIssues, _
-            TryRunRule("Rules_UKUSVariants.Check_ColourFormatting", doc)
+            TryRunRule("Rules_Spelling.Check_ColourFormatting", doc)
     End If
 
     ' -- Punctuation rules --

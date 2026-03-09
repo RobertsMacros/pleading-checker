@@ -1,18 +1,53 @@
+#!/usr/bin/env python3
+"""
+generate_form.py
+Generates frmPleadingsChecker.frm programmatically.
+
+All controls are created at runtime in UserForm_Initialize so no
+.frx binary file is needed.  The form is sized generously to avoid
+a squished layout on standard displays.
+
+Usage:
+    python3 generate_form.py            # writes Combined/frmPleadingsChecker.frm
+    python3 generate_form.py OUT.frm    # writes to a custom path
+"""
+
+import sys
+import os
+
+# ── Form dimensions (twips: 1 pt = 20 twips, 1 inch = 1440 twips) ──
+FORM_WIDTH  = 10800   # ~540 px / 7.5 in
+FORM_HEIGHT = 16200   # ~810 px / 11.25 in
+
+# ── Section layout constants (points — used in VBA code) ──
+# These appear in the generated VBA, not in the FRM header.
+# The FRM header uses twips; VBA controls use points.
+
+def generate_frm(output_path: str) -> None:
+    """Generate the complete frmPleadingsChecker.frm file."""
+
+    # ── FRM header (twips) ──────────────────────────────────
+    header = f"""\
 VERSION 5.00
-Begin {C62A69F0-16DC-11CE-9E98-00AA00574A4F} frmPleadingsChecker
+Begin {{C62A69F0-16DC-11CE-9E98-00AA00574A4F}} frmPleadingsChecker
    Caption         =   "Pleadings Checker"
-   ClientHeight    =   16200
+   ClientHeight    =   {FORM_HEIGHT}
    ClientLeft      =   120
    ClientTop       =   465
-   ClientWidth     =   10800
+   ClientWidth     =   {FORM_WIDTH}
    StartUpPosition =   1  'CenterOwner
-End
+End"""
+
+    # ── VB Attributes ───────────────────────────────────────
+    attributes = """\
 Attribute VB_Name = "frmPleadingsChecker"
 Attribute VB_GlobalNameSpace = False
 Attribute VB_Creatable = False
 Attribute VB_PredeclaredId = True
-Attribute VB_Exposed = False
-' ============================================================
+Attribute VB_Exposed = False"""
+
+    # ── VBA code ────────────────────────────────────────────
+    vba_code = r"""' ============================================================
 ' frmPleadingsChecker.frm
 ' UserForm for the Pleadings Checker rule engine.
 '
@@ -607,4 +642,28 @@ End Sub
 ' ════════════════════════════════════════════════════════════
 Private Sub btnClose_Click()
     Unload Me
-End Sub
+End Sub"""
+
+    # ── Assemble the file ───────────────────────────────────
+    content = header + "\n" + attributes + "\n" + vba_code + "\n"
+
+    # Write with CRLF line endings for Office compatibility
+    content_crlf = content.replace("\r\n", "\n").replace("\n", "\r\n")
+
+    with open(output_path, "w", encoding="utf-8", newline="") as f:
+        f.write(content_crlf)
+
+    print(f"Generated: {output_path}")
+    print(f"  Form size: {FORM_WIDTH}x{FORM_HEIGHT} twips "
+          f"({FORM_WIDTH / 20:.0f}x{FORM_HEIGHT / 20:.0f} pt, "
+          f"~{FORM_WIDTH / 20 * 96 / 72:.0f}x{FORM_HEIGHT / 20 * 96 / 72:.0f} px)")
+    print(f"  No .frx dependency — all controls created at runtime")
+
+
+if __name__ == "__main__":
+    if len(sys.argv) > 1:
+        out = sys.argv[1]
+    else:
+        out = os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                           "frmPleadingsChecker.frm")
+    generate_frm(out)
