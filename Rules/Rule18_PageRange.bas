@@ -45,3 +45,22 @@ Public Function Check_PageRange(doc As Document) As Collection
 
     Set Check_PageRange = issues
 End Function
+
+' ════════════════════════════════════════════════════════════
+'  STANDALONE ENTRY POINT
+'  Run this macro directly from the Macros dialog (Alt+F8).
+'  Applies page range configuration from the document.
+' ════════════════════════════════════════════════════════════
+Public Sub RunPageRange()
+    If ActiveDocument Is Nothing Then
+        MsgBox "Please open a document first.", vbExclamation, "Page Range"
+        Exit Sub
+    End If
+
+    Dim doc As Document: Set doc = ActiveDocument
+    Dim issues As Collection
+    Set issues = Check_PageRange(doc)
+
+    MsgBox "Page range configuration applied.", _
+           vbInformation, "Page Range"
+End Sub

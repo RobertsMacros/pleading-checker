@@ -421,3 +421,43 @@ End Function
 Private Function IsUNCPath(ByVal context As String) As Boolean
     IsUNCPath = (InStr(1, context, "\\") > 0)
 End Function
+
+' ════════════════════════════════════════════════════════════
+'  STANDALONE ENTRY POINT
+'  Run this macro directly from the Macros dialog (Alt+F8).
+'  Checks the active document and highlights all issues found.
+' ════════════════════════════════════════════════════════════
+Public Sub RunSlashStyle()
+    If ActiveDocument Is Nothing Then
+        MsgBox "Please open a document first.", vbExclamation, "Slash Style"
+        Exit Sub
+    End If
+
+    Application.ScreenUpdating = False
+
+    Dim doc As Document: Set doc = ActiveDocument
+    Dim issues As Collection
+    Set issues = Check_SlashStyle(doc)
+
+    ' ── Highlight issues in document ─────────────────────────
+    Dim iss As PleadingsIssue
+    Dim rng As Range
+    Dim i As Long
+    For i = 1 To issues.Count
+        Set iss = issues(i)
+        If iss.RangeStart >= 0 And iss.RangeEnd > iss.RangeStart Then
+            On Error Resume Next
+            Set rng = doc.Range(iss.RangeStart, iss.RangeEnd)
+            rng.HighlightColorIndex = wdYellow
+            doc.Comments.Add Range:=rng, _
+                Text:="[" & iss.RuleName & "] " & iss.Issue & _
+                      " " & Chr(8212) & " Suggestion: " & iss.Suggestion
+            On Error GoTo 0
+        End If
+    Next i
+
+    Application.ScreenUpdating = True
+
+    MsgBox "Found " & issues.Count & " issue(s).", _
+           vbInformation, "Slash Style"
+End Sub

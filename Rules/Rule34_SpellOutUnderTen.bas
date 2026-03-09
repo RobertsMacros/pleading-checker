@@ -442,3 +442,43 @@ Private Function IsLetterChar(ByVal ch As String) As Boolean
                    (code >= 97 And code <= 122) Or _
                    (code >= 192 And code <= 687) ' Extended Latin
 End Function
+
+' ════════════════════════════════════════════════════════════
+'  STANDALONE ENTRY POINT
+'  Run this macro directly from the Macros dialog (Alt+F8).
+'  Checks the active document and highlights all issues found.
+' ════════════════════════════════════════════════════════════
+Public Sub RunSpellOutUnderTen()
+    If ActiveDocument Is Nothing Then
+        MsgBox "Please open a document first.", vbExclamation, "Spell Out Under Ten"
+        Exit Sub
+    End If
+
+    Application.ScreenUpdating = False
+
+    Dim doc As Document: Set doc = ActiveDocument
+    Dim issues As Collection
+    Set issues = Check_SpellOutUnderTen(doc)
+
+    ' ── Highlight issues in document ─────────────────────────
+    Dim iss As PleadingsIssue
+    Dim rng As Range
+    Dim i As Long
+    For i = 1 To issues.Count
+        Set iss = issues(i)
+        If iss.RangeStart >= 0 And iss.RangeEnd > iss.RangeStart Then
+            On Error Resume Next
+            Set rng = doc.Range(iss.RangeStart, iss.RangeEnd)
+            rng.HighlightColorIndex = wdYellow
+            doc.Comments.Add Range:=rng, _
+                Text:="[" & iss.RuleName & "] " & iss.Issue & _
+                      " " & Chr(8212) & " Suggestion: " & iss.Suggestion
+            On Error GoTo 0
+        End If
+    Next i
+
+    Application.ScreenUpdating = True
+
+    MsgBox "Found " & issues.Count & " issue(s).", _
+           vbInformation, "Spell Out Under Ten"
+End Sub
