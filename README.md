@@ -66,7 +66,7 @@ A Word VBA macro-based document proofreading system designed for legal pleadings
    - `PleadingsEngine.bas` — core engine
    - `PleadingsIssue.cls` — structured issue class
    - `frmPleadingsChecker.frm` — user interface form
-   - All 34 rule files from the `Rules/` directory (`Rule01_BritishSpelling.bas` through `Rule34_SpellOutUnderTen.bas`)
+   - All 34 rule files from the `Rules/` directory (`Rule01_british-spelling.bas` through `Rule34_spell-out-under-ten.bas`)
    - *(Optional)* `TestBucket1Rules.bas` — unit tests for Hart-style rules
 4. Close the VBA Editor
 
@@ -156,10 +156,10 @@ pleading-checker/
 ├── TestBucket1Rules.bas         Unit tests for Rules 24–34
 ├── run_checks.py                Python-based test harness
 ├── Rules/
-│   ├── Rule01_BritishSpelling.bas
-│   ├── Rule02_RepeatedWords.bas
+│   ├── Rule01_british-spelling.bas
+│   ├── Rule02_repeated-words.bas
 │   ├── ...
-│   └── Rule34_SpellOutUnderTen.bas
+│   └── Rule34_spell-out-under-ten.bas
 ├── test_pleading.docx           Test input document
 └── test_pleading_TEST1OUTPUT.docx  Annotated output
 ```

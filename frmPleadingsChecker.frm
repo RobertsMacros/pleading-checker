@@ -256,7 +256,7 @@ End Sub
 Private Sub RefreshBrandList()
     lstBrands.Clear
     Dim brands As Object
-    Set brands = Rule22_BrandNameEnforcement.GetBrandRules()
+    Set brands = Rule22_brand_name_enforcement.GetBrandRules()
     If brands Is Nothing Then Exit Sub
     Dim key As Variant
     For Each key In brands.keys
@@ -276,7 +276,7 @@ Private Sub btnAddBrand_Click()
         Exit Sub
     End If
 
-    Rule22_BrandNameEnforcement.AddBrandRule correctForm, incorrectVariants
+    Rule22_brand_name_enforcement.AddBrandRule correctForm, incorrectVariants
     txtBrandCorrect.Text = ""
     txtBrandIncorrect.Text = ""
     RefreshBrandList
@@ -294,7 +294,7 @@ Private Sub btnRemoveBrand_Click()
     Dim correctForm As String
     correctForm = Left(entry, InStr(entry, " -> ") - 1)
 
-    Rule22_BrandNameEnforcement.RemoveBrandRule correctForm
+    Rule22_brand_name_enforcement.RemoveBrandRule correctForm
     RefreshBrandList
 End Sub
 
@@ -307,7 +307,7 @@ Private Sub btnSaveBrands_Click()
     MkDir Environ("APPDATA") & "\PleadingsChecker"
     On Error GoTo 0
 
-    Rule22_BrandNameEnforcement.SaveBrandRules brandFile
+    Rule22_brand_name_enforcement.SaveBrandRules brandFile
     MsgBox "Brand rules saved to:" & vbCrLf & brandFile, vbInformation, "Brand Rules"
 End Sub
 
@@ -321,7 +321,7 @@ Private Sub btnLoadBrands_Click()
         Exit Sub
     End If
 
-    Rule22_BrandNameEnforcement.LoadBrandRules brandFile
+    Rule22_brand_name_enforcement.LoadBrandRules brandFile
     RefreshBrandList
     MsgBox "Brand rules loaded.", vbInformation, "Brand Rules"
 End Sub
