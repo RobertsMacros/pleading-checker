@@ -653,26 +653,17 @@ End Sub
 Public Function GetLocationString(rng As Range, doc As Document) As String
     Dim pageNum As Long
     Dim paraNum As Long
-    Dim para As Paragraph
-    Dim paraIdx As Long
 
     On Error Resume Next
 
     ' Page number from Word's adjusted page counter
     pageNum = rng.Information(wdActiveEndAdjustedPageNumber)
 
-    ' Count paragraphs from document start to the range position
-    paraIdx = 0
-    For Each para In doc.Paragraphs
-        paraIdx = paraIdx + 1
-        If para.Range.Start >= rng.Start Then
-            paraNum = paraIdx
-            Exit For
-        End If
-    Next para
-
-    ' Fallback if loop completed without match
-    If paraNum = 0 Then paraNum = paraIdx
+    ' Paragraph number via single COM call — Word counts internally,
+    ' vastly faster than iterating For Each para in VBA (which was
+    ' O(n) per call and caused minute-long runtimes on large docs)
+    paraNum = doc.Range(doc.Content.Start, rng.Start).Paragraphs.Count
+    If Err.Number <> 0 Then paraNum = 0: Err.Clear
 
     On Error GoTo 0
 

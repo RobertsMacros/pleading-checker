@@ -24,6 +24,9 @@ Private Const STRAIGHT_SINGLE As Long = 39         ' Chr(39) '
 Private Const CURLY_SINGLE_OPEN As Long = 8216     ' ChrW(8216)
 Private Const CURLY_SINGLE_CLOSE As Long = 8217    ' ChrW(8217)
 
+' Cached document boundary — set once per run
+Private m_docEnd As Long
+
 ' ════════════════════════════════════════════════════════════
 '  MAIN ENTRY POINT
 ' ════════════════════════════════════════════════════════════
@@ -62,6 +65,9 @@ Public Function Check_QuotationMarkConsistency(doc As Document) As Collection
         Set Check_QuotationMarkConsistency = issues
         Exit Function
     End If
+
+    ' ── Cache document boundary once ─────────────────────────
+    m_docEnd = doc.Content.End
 
     ' ── First pass: count quotation mark types ───────────────
     For i = 1 To textLen
@@ -276,29 +282,23 @@ Private Sub FlagSingleQuotationMarks(doc As Document, _
 
         If Not PleadingsEngine.IsInPageRange(rng) Then GoTo ContinueSingle
 
-        ' Skip apostrophes: check if preceded AND followed by a letter
+        ' Skip apostrophes: check if preceded AND followed by a letter.
+        ' Uses a single 3-char range read (1 COM call) instead of
+        ' two per-character Range objects (2 COM calls per match).
         If checkApostrophe Then
-            Dim prevChar As String
-            Dim nextChar As String
             Dim isApost As Boolean
             isApost = False
 
-            If rng.Start > 0 Then
-                Dim prevRng As Range
-                Set prevRng = doc.Range(rng.Start - 1, rng.Start)
+            If rng.Start > 0 And rng.End < m_docEnd Then
+                Dim ctxRng As Range
+                Set ctxRng = doc.Range(rng.Start - 1, rng.End + 1)
                 If Err.Number = 0 Then
-                    prevChar = prevRng.Text
-                    If IsLetterChar(prevChar) Then
-                        Dim nextRng As Range
-                        If rng.End < doc.Content.End Then
-                            Set nextRng = doc.Range(rng.End, rng.End + 1)
-                            If Err.Number = 0 Then
-                                nextChar = nextRng.Text
-                                If IsLetterChar(nextChar) Then
-                                    isApost = True
-                                End If
-                            End If
-                            If Err.Number <> 0 Then Err.Clear
+                    Dim ctxText As String
+                    ctxText = ctxRng.Text
+                    If Len(ctxText) >= 3 Then
+                        If IsLetterChar(Left$(ctxText, 1)) And _
+                           IsLetterChar(Right$(ctxText, 1)) Then
+                            isApost = True
                         End If
                     End If
                 End If
@@ -329,4 +329,44 @@ ContinueSingle:
         If Err.Number <> 0 Then Exit Do
     Loop
     On Error GoTo 0
+End Sub
+
+' ════════════════════════════════════════════════════════════
+'  STANDALONE ENTRY POINT
+'  Run this macro directly from the Macros dialog (Alt+F8).
+'  Checks the active document and highlights all issues found.
+' ════════════════════════════════════════════════════════════
+Public Sub RunQuotationMarkConsistency()
+    If ActiveDocument Is Nothing Then
+        MsgBox "Please open a document first.", vbExclamation, "Quotation Mark Consistency"
+        Exit Sub
+    End If
+
+    Application.ScreenUpdating = False
+
+    Dim doc As Document: Set doc = ActiveDocument
+    Dim issues As Collection
+    Set issues = Check_QuotationMarkConsistency(doc)
+
+    ' ── Highlight issues in document ─────────────────────────
+    Dim iss As PleadingsIssue
+    Dim rng As Range
+    Dim i As Long
+    For i = 1 To issues.Count
+        Set iss = issues(i)
+        If iss.RangeStart >= 0 And iss.RangeEnd > iss.RangeStart Then
+            On Error Resume Next
+            Set rng = doc.Range(iss.RangeStart, iss.RangeEnd)
+            rng.HighlightColorIndex = wdYellow
+            doc.Comments.Add Range:=rng, _
+                Text:="[" & iss.RuleName & "] " & iss.Issue & _
+                      " " & Chr(8212) & " Suggestion: " & iss.Suggestion
+            On Error GoTo 0
+        End If
+    Next i
+
+    Application.ScreenUpdating = True
+
+    MsgBox "Found " & issues.Count & " issue(s).", _
+           vbInformation, "Quotation Mark Consistency"
 End Sub

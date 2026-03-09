@@ -13,11 +13,18 @@ Option Explicit
 
 Private Const RULE_NAME As String = "slash_style"
 
+' Cached document boundary — set once per run, avoids repeated
+' doc.Content.End traversals inside Find loops and helpers
+Private m_docEnd As Long
+
 ' ════════════════════════════════════════════════════════════
 '  MAIN ENTRY POINT
 ' ════════════════════════════════════════════════════════════
 Public Function Check_SlashStyle(doc As Document) As Collection
     Dim issues As New Collection
+
+    ' ── Cache document boundary once ─────────────────────────
+    m_docEnd = doc.Content.End
 
     ' ── Forward slashes: determine dominant style ────────────
     Dim tightCount As Long
@@ -278,7 +285,7 @@ Private Sub FlagBackslashes(doc As Document, ByRef issues As Collection)
         contextStart = rng.Start - 5
         If contextStart < 0 Then contextStart = 0
         contextEnd = rng.End + 10
-        If contextEnd > doc.Content.End Then contextEnd = doc.Content.End
+        If contextEnd > m_docEnd Then contextEnd = m_docEnd
 
         Set contextRng = doc.Range(contextStart, contextEnd)
         If Err.Number <> 0 Then
@@ -346,7 +353,7 @@ Private Function IsURLContext(rng As Range, doc As Document) As Boolean
     contextStart = rng.Start - 30
     If contextStart < 0 Then contextStart = 0
     contextEnd = rng.End + 30
-    If contextEnd > doc.Content.End Then contextEnd = doc.Content.End
+    If contextEnd > m_docEnd Then contextEnd = m_docEnd
 
     Set contextRng = doc.Range(contextStart, contextEnd)
     If Err.Number <> 0 Then
@@ -421,3 +428,43 @@ End Function
 Private Function IsUNCPath(ByVal context As String) As Boolean
     IsUNCPath = (InStr(1, context, "\\") > 0)
 End Function
+
+' ════════════════════════════════════════════════════════════
+'  STANDALONE ENTRY POINT
+'  Run this macro directly from the Macros dialog (Alt+F8).
+'  Checks the active document and highlights all issues found.
+' ════════════════════════════════════════════════════════════
+Public Sub RunSlashStyle()
+    If ActiveDocument Is Nothing Then
+        MsgBox "Please open a document first.", vbExclamation, "Slash Style"
+        Exit Sub
+    End If
+
+    Application.ScreenUpdating = False
+
+    Dim doc As Document: Set doc = ActiveDocument
+    Dim issues As Collection
+    Set issues = Check_SlashStyle(doc)
+
+    ' ── Highlight issues in document ─────────────────────────
+    Dim iss As PleadingsIssue
+    Dim rng As Range
+    Dim i As Long
+    For i = 1 To issues.Count
+        Set iss = issues(i)
+        If iss.RangeStart >= 0 And iss.RangeEnd > iss.RangeStart Then
+            On Error Resume Next
+            Set rng = doc.Range(iss.RangeStart, iss.RangeEnd)
+            rng.HighlightColorIndex = wdYellow
+            doc.Comments.Add Range:=rng, _
+                Text:="[" & iss.RuleName & "] " & iss.Issue & _
+                      " " & Chr(8212) & " Suggestion: " & iss.Suggestion
+            On Error GoTo 0
+        End If
+    Next i
+
+    Application.ScreenUpdating = True
+
+    MsgBox "Found " & issues.Count & " issue(s).", _
+           vbInformation, "Slash Style"
+End Sub

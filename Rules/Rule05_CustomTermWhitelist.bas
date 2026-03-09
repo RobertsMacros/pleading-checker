@@ -63,3 +63,22 @@ Public Function Check_CustomTermWhitelist(doc As Document) As Collection
     ' This rule returns no issues — it is purely a setup rule
     Set Check_CustomTermWhitelist = issues
 End Function
+
+' ════════════════════════════════════════════════════════════
+'  STANDALONE ENTRY POINT
+'  Run this macro directly from the Macros dialog (Alt+F8).
+'  Loads the custom term whitelist into the engine.
+' ════════════════════════════════════════════════════════════
+Public Sub RunCustomTermWhitelist()
+    If ActiveDocument Is Nothing Then
+        MsgBox "Please open a document first.", vbExclamation, "Custom Term Whitelist"
+        Exit Sub
+    End If
+
+    Dim doc As Document: Set doc = ActiveDocument
+    Dim issues As Collection
+    Set issues = Check_CustomTermWhitelist(doc)
+
+    MsgBox "Custom term whitelist loaded.", _
+           vbInformation, "Custom Term Whitelist"
+End Sub

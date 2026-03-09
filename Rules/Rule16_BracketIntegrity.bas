@@ -52,6 +52,37 @@ Public Function Check_BracketIntegrity(doc As Document) As Collection
         Exit Function
     End If
 
+    ' ── Quick check: does the document contain any code fonts?
+    '    If not (typical for legal docs), skip all per-bracket
+    '    font checks — saves thousands of COM calls. ───────────
+    Dim hasCodeFont As Boolean
+    hasCodeFont = False
+    Dim testRng As Range
+    Set testRng = doc.Content.Duplicate
+    On Error Resume Next
+    With testRng.Find
+        .ClearFormatting
+        .Font.Name = "Courier New"
+        .Text = ""
+        .Forward = True
+        .Wrap = wdFindStop
+        .Format = True
+    End With
+    If testRng.Find.Execute Then hasCodeFont = True
+    If Not hasCodeFont Then
+        Set testRng = doc.Content.Duplicate
+        With testRng.Find
+            .ClearFormatting
+            .Font.Name = "Consolas"
+            .Text = ""
+            .Forward = True
+            .Wrap = wdFindStop
+            .Format = True
+        End With
+        If testRng.Find.Execute Then hasCodeFont = True
+    End If
+    On Error GoTo 0
+
     ' ── Iterate character by character ───────────────────────
     For i = 1 To textLen
         ch = Mid(docText, i, 1)
@@ -60,8 +91,11 @@ Public Function Check_BracketIntegrity(doc As Document) As Collection
         If ch = "(" Or ch = "[" Or ch = "{" Or _
            ch = ")" Or ch = "]" Or ch = "}" Then
 
-            ' Skip brackets in code-font runs
-            If IsCodeFont(doc, i - 1) Then GoTo NextChar
+            ' Skip brackets in code-font runs (only check if
+            ' the document actually contains code fonts)
+            If hasCodeFont Then
+                If IsCodeFont(doc, i - 1) Then GoTo NextChar
+            End If
 
             If ch = "(" Or ch = "[" Or ch = "{" Then
                 ' ── Push opening bracket onto stack ──────────
@@ -217,4 +251,44 @@ Private Sub CreateBracketIssue(doc As Document, _
                pos + 1, _
                "error"
     issues.Add issue
+End Sub
+
+' ════════════════════════════════════════════════════════════
+'  STANDALONE ENTRY POINT
+'  Run this macro directly from the Macros dialog (Alt+F8).
+'  Checks the active document and highlights all issues found.
+' ════════════════════════════════════════════════════════════
+Public Sub RunBracketIntegrity()
+    If ActiveDocument Is Nothing Then
+        MsgBox "Please open a document first.", vbExclamation, "Bracket Integrity"
+        Exit Sub
+    End If
+
+    Application.ScreenUpdating = False
+
+    Dim doc As Document: Set doc = ActiveDocument
+    Dim issues As Collection
+    Set issues = Check_BracketIntegrity(doc)
+
+    ' ── Highlight issues in document ─────────────────────────
+    Dim iss As PleadingsIssue
+    Dim rng As Range
+    Dim i As Long
+    For i = 1 To issues.Count
+        Set iss = issues(i)
+        If iss.RangeStart >= 0 And iss.RangeEnd > iss.RangeStart Then
+            On Error Resume Next
+            Set rng = doc.Range(iss.RangeStart, iss.RangeEnd)
+            rng.HighlightColorIndex = wdYellow
+            doc.Comments.Add Range:=rng, _
+                Text:="[" & iss.RuleName & "] " & iss.Issue & _
+                      " " & Chr(8212) & " Suggestion: " & iss.Suggestion
+            On Error GoTo 0
+        End If
+    Next i
+
+    Application.ScreenUpdating = True
+
+    MsgBox "Found " & issues.Count & " issue(s).", _
+           vbInformation, "Bracket Integrity"
 End Sub
