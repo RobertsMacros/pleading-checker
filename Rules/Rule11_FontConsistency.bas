@@ -324,22 +324,8 @@ Public Sub RunFontConsistency()
     Dim issues As Collection
     Set issues = Check_FontConsistency(doc)
 
-    ' ── Highlight issues in document ─────────────────────────
-    Dim iss As PleadingsIssue
-    Dim rng As Range
-    Dim i As Long
-    For i = 1 To issues.Count
-        Set iss = issues(i)
-        If iss.RangeStart >= 0 And iss.RangeEnd > iss.RangeStart Then
-            On Error Resume Next
-            Set rng = doc.Range(iss.RangeStart, iss.RangeEnd)
-            rng.HighlightColorIndex = wdYellow
-            doc.Comments.Add Range:=rng, _
-                Text:="[" & iss.RuleName & "] " & iss.Issue & _
-                      " " & Chr(8212) & " Suggestion: " & iss.Suggestion
-            On Error GoTo 0
-        End If
-    Next i
+    ' Apply results with tracked changes (UK magic circle default)
+    PleadingsEngine.ApplyIssuesToDocument doc, issues
 
     Application.ScreenUpdating = True
 

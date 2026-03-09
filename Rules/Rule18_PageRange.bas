@@ -57,10 +57,17 @@ Public Sub RunPageRange()
         Exit Sub
     End If
 
+    Application.ScreenUpdating = False
+
     Dim doc As Document: Set doc = ActiveDocument
     Dim issues As Collection
     Set issues = Check_PageRange(doc)
 
-    MsgBox "Page range configuration applied.", _
+    ' Apply results with tracked changes (UK magic circle default)
+    PleadingsEngine.ApplyIssuesToDocument doc, issues
+
+    Application.ScreenUpdating = True
+
+    MsgBox "Found " & issues.Count & " issue(s).", _
            vbInformation, "Page Range"
 End Sub

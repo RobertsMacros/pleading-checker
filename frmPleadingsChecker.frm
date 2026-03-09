@@ -186,13 +186,13 @@ Private Sub btnHighlight_Click()
     Me.Repaint
     DoEvents
 
-    If chkTrackedChanges.value = True Then
-        ' Use tracked-changes mode: auto-fix-safe -> revisions, others -> comments
-        PleadingsEngine.ApplySuggestionsAsTrackedChanges ActiveDocument, lastResults, addComments
-    Else
-        ' Legacy mode: highlight + optional comments only
-        PleadingsEngine.ApplyHighlights ActiveDocument, lastResults, addComments
-    End If
+    ' Tracked changes is assumed ON by default. When unchecked,
+    ' brute-force disables tracking so markup applies directly
+    ' without generating revision marks.
+    Dim useTracked As Boolean
+    useTracked = (chkTrackedChanges.value = True)
+
+    PleadingsEngine.ApplyIssuesToDocument ActiveDocument, lastResults, useTracked, addComments
 
     lblStatus.Caption = lastResults.Count & " issue(s) processed."
     MsgBox lastResults.Count & " issue(s) processed in document." & vbCrLf & _
