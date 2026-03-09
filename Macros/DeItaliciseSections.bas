@@ -24,6 +24,10 @@ Attribute VB_Name = "DeItaliciseSections"
 '   Bank of Uganda Act
 '   Bank of Uganda Act, 1966
 '
+' Optimised for large documents (100+ pages): uses string-based
+' word parsing to minimise COM round-trips, disables screen
+' updating during execution.
+'
 ' Usage: run DeItaliciseSectionReferences from the Macros dialog
 '        or assign to a keyboard shortcut / QAT button.
 '
@@ -49,26 +53,21 @@ Private Function AlphaCount(ByVal s As String) As Long
 End Function
 
 ' ────────────────────────────────────────────────────────────
-'  Helper: check whether a single-character range is italic
-' ────────────────────────────────────────────────────────────
-Private Function IsCharItalic(doc As Document, pos As Long) As Boolean
-    On Error Resume Next
-    Dim cr As Range
-    Set cr = doc.Range(pos, pos + 1)
-    IsCharItalic = (cr.Font.Italic = True)
-    On Error GoTo 0
-End Function
-
-' ────────────────────────────────────────────────────────────
 '  Helper: check whether a range is (at least partly) italic.
 '  Checks the first character to resolve wdUndefined ranges.
 ' ────────────────────────────────────────────────────────────
-Private Function IsRangeItalic(rng As Range) As Boolean
+Private Function IsRangeItalic(doc As Document, _
+                                rStart As Long, _
+                                rEnd As Long) As Boolean
     On Error Resume Next
+    Dim rng As Range
+    Set rng = doc.Range(rStart, rEnd)
     If rng.Font.Italic = True Then
         IsRangeItalic = True
     ElseIf rng.Font.Italic = wdUndefined Then
-        IsRangeItalic = IsCharItalic(rng.Document, rng.Start)
+        ' Mixed — check first character only
+        Set rng = doc.Range(rStart, rStart + 1)
+        IsRangeItalic = (rng.Font.Italic = True)
     Else
         IsRangeItalic = False
     End If
@@ -124,70 +123,83 @@ Private Function IsInItalicBlock(doc As Document, _
 End Function
 
 ' ────────────────────────────────────────────────────────────
-'  Core: given a range covering a trigger word that is already
-'  confirmed italic, scan forward to find the full legislative
-'  reference and de-italicise it.  Returns True on success.
+'  Core: given a trigger-word match that is already confirmed
+'  italic, determine the full reference span by parsing the
+'  paragraph text as a VBA string (no per-character COM calls),
+'  then de-italicise.  Returns True on success.
 ' ────────────────────────────────────────────────────────────
 Private Function DeItaliciseSpan(doc As Document, _
                                   matchStart As Long, _
                                   matchEnd As Long) As Boolean
     DeItaliciseSpan = False
 
-    Dim spanStart As Long: spanStart = matchStart
-    Dim spanEnd   As Long: spanEnd = matchEnd
-
-    ' Paragraph boundary — do not scan beyond it
+    ' ── Get paragraph boundaries (single COM call) ───────────
     Dim paraRng As Range
-    Set paraRng = doc.Range(matchStart, matchEnd)
-    Dim paraEnd As Long
-    paraEnd = paraRng.Paragraphs(1).Range.End
+    Set paraRng = doc.Range(matchStart, matchEnd).Paragraphs(1).Range
+    Dim paraStart As Long: paraStart = paraRng.Start
+    Dim paraEnd   As Long: paraEnd = paraRng.End
 
-    Dim scanPos   As Long: scanPos = matchEnd
-    Dim ch        As String
-    Dim wordStart As Long
-    Dim wordEnd   As Long
-    Dim wordRng   As Range
-    Dim trimmed   As String
+    ' ── Read the rest of the paragraph after the trigger word
+    '    as a plain VBA string — all word parsing happens here
+    '    with zero COM calls ──────────────────────────────────
+    If matchEnd >= paraEnd Then Exit Function
 
-    Do While scanPos < paraEnd
-        ' Skip spaces / non-breaking spaces
-        Do While scanPos < paraEnd
-            ch = doc.Range(scanPos, scanPos + 1).Text
+    Dim tailRng As Range
+    Set tailRng = doc.Range(matchEnd, paraEnd)
+    Dim tail As String
+    tail = tailRng.Text
+
+    ' Offset within `tail`: 1-based VBA string position
+    Dim pos As Long: pos = 1
+    Dim tailLen As Long: tailLen = Len(tail)
+
+    ' spanEnd tracks the document position of the last included word
+    Dim spanEnd As Long: spanEnd = matchEnd
+    Dim ch As String
+
+    Do While pos <= tailLen
+        ' ── Skip spaces / non-breaking spaces ────────────────
+        Do While pos <= tailLen
+            ch = Mid$(tail, pos, 1)
             If ch <> " " And ch <> Chr$(160) Then Exit Do
-            scanPos = scanPos + 1
+            pos = pos + 1
         Loop
-        If scanPos >= paraEnd Then Exit Do
+        If pos > tailLen Then Exit Do
 
-        ' Gather a word (contiguous non-space run)
-        wordStart = scanPos
-        Do While scanPos < paraEnd
-            ch = doc.Range(scanPos, scanPos + 1).Text
+        ' ── Gather a word (contiguous non-space run) ─────────
+        Dim wordPos As Long: wordPos = pos
+        Do While pos <= tailLen
+            ch = Mid$(tail, pos, 1)
             If ch = " " Or ch = Chr$(160) Or ch = vbCr _
                Or ch = Chr$(13) Or ch = Chr$(7) Then Exit Do
-            scanPos = scanPos + 1
+            pos = pos + 1
         Loop
-        wordEnd = scanPos
 
-        Set wordRng = doc.Range(wordStart, wordEnd)
-        trimmed = Trim$(wordRng.Text)
-        If Len(trimmed) = 0 Then Exit Do
+        Dim word As String
+        word = Mid$(tail, wordPos, pos - wordPos)
+        If Len(word) = 0 Then Exit Do
 
-        ' Stop if the next word is no longer italic
-        If Not IsRangeItalic(wordRng) Then Exit Do
+        ' ── Translate string offset to document position ─────
+        Dim wordDocStart As Long: wordDocStart = matchEnd + wordPos - 1
+        Dim wordDocEnd   As Long: wordDocEnd = matchEnd + pos - 1
 
-        ' Stop before a word with more than 3 alpha characters
-        If AlphaCount(trimmed) > 3 Then Exit Do
+        ' ── Stop if this word is no longer italic (1 COM call
+        '    per word, not per character) ─────────────────────
+        If Not IsRangeItalic(doc, wordDocStart, wordDocEnd) Then Exit Do
+
+        ' ── Stop BEFORE a word with more than 3 alpha chars ──
+        If AlphaCount(word) > 3 Then Exit Do
 
         ' Include this word
-        spanEnd = wordEnd
+        spanEnd = wordDocEnd
     Loop
 
     ' ── Block-quote guard ────────────────────────────────────
-    If IsInItalicBlock(doc, spanStart, spanEnd) Then Exit Function
+    If IsInItalicBlock(doc, matchStart, spanEnd) Then Exit Function
 
-    ' ── De-italicise ─────────────────────────────────────────
+    ' ── De-italicise (single COM call) ───────────────────────
     Dim target As Range
-    Set target = doc.Range(spanStart, spanEnd)
+    Set target = doc.Range(matchStart, spanEnd)
     If target.Font.Italic = True Or target.Font.Italic = wdUndefined Then
         target.Font.Italic = False
         DeItaliciseSpan = True
@@ -200,6 +212,9 @@ End Function
 Public Sub DeItaliciseSectionReferences()
     Dim doc As Document
     Set doc = ActiveDocument
+
+    ' ── Suppress screen redraws for speed ────────────────────
+    Application.ScreenUpdating = False
 
     ' ── Enable tracked changes (restore original state later) ─
     Dim origTrack As Boolean
@@ -222,7 +237,6 @@ Public Sub DeItaliciseSectionReferences()
         searchStart = doc.Content.Start
 
         Do
-            ' ── Plain-text Find (no formatting filter) ───────
             Dim rng As Range
             Set rng = doc.Range(searchStart, doc.Content.End)
 
@@ -240,12 +254,9 @@ Public Sub DeItaliciseSectionReferences()
 
             If Not rng.Find.Execute Then Exit Do
 
-            ' ── Post-find italic check ───────────────────────
-            If IsRangeItalic(rng) Then
-                Dim mStart As Long: mStart = rng.Start
-                Dim mEnd   As Long: mEnd = rng.End
-
-                If DeItaliciseSpan(doc, mStart, mEnd) Then
+            ' Post-find italic check (1 COM call)
+            If IsRangeItalic(doc, rng.Start, rng.End) Then
+                If DeItaliciseSpan(doc, rng.Start, rng.End) Then
                     hitCount = hitCount + 1
                 End If
             End If
@@ -291,10 +302,11 @@ Public Sub DeItaliciseSectionReferences()
 
             If Not rng2.Find.Execute Then Exit Do
 
-            ' Only act if italic and not in a block quote
-            If IsRangeItalic(rng2) Then
+            If IsRangeItalic(doc, rng2.Start, rng2.End) Then
                 If Not IsInItalicBlock(doc, rng2.Start, rng2.End) Then
-                    rng2.Font.Italic = False
+                    Dim target As Range
+                    Set target = doc.Range(rng2.Start, rng2.End)
+                    target.Font.Italic = False
                     hitCount = hitCount + 1
                 End If
             End If
@@ -305,8 +317,9 @@ Public Sub DeItaliciseSectionReferences()
 
     Next p
 
-    ' ── Restore original Track Changes setting ───────────────
+    ' ── Restore state ────────────────────────────────────────
     doc.TrackRevisions = origTrack
+    Application.ScreenUpdating = True
 
     MsgBox "Done. De-italicised " & hitCount & " item(s).", _
            vbInformation, "De-italicise Section References"
