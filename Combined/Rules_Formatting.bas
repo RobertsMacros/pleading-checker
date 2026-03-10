@@ -79,6 +79,45 @@ Private Function GetDominant(counts As Object) As String
 End Function
 
 ' -- Helper: parse font key back to readable description -----
+' ------------------------------------------------------------
+'  PRIVATE: Detect block quote / indented extract paragraphs.
+'  Checks style name and left indentation.
+' ------------------------------------------------------------
+Private Function IsBlockQuotePara(para As Paragraph) As Boolean
+    IsBlockQuotePara = False
+    On Error Resume Next
+
+    ' Check style name for quote/block/extract keywords
+    Dim sn As String
+    sn = LCase(para.Style.NameLocal)
+    If Err.Number <> 0 Then sn = "": Err.Clear
+    If InStr(sn, "quote") > 0 Or InStr(sn, "block") > 0 Or _
+       InStr(sn, "extract") > 0 Then
+        IsBlockQuotePara = True
+        On Error GoTo 0
+        Exit Function
+    End If
+
+    ' Check for significant left indentation (> 36pt = 0.5 inch)
+    ' Block quotes typically have extra indentation on both sides
+    Dim leftInd As Single
+    leftInd = para.Format.LeftIndent
+    If Err.Number <> 0 Then leftInd = 0: Err.Clear
+
+    ' Also check if font size is noticeably smaller than 12pt body
+    ' (block quotes often use smaller font)
+    Dim fontSize As Single
+    fontSize = para.Range.Font.Size
+    If Err.Number <> 0 Then fontSize = 0: Err.Clear
+
+    ' If significantly indented AND smaller font, it's a block quote
+    If leftInd > 36 And fontSize > 0 And fontSize < 11 Then
+        IsBlockQuotePara = True
+    End If
+
+    On Error GoTo 0
+End Function
+
 Private Function FontDescription(ByVal fKey As String) As String
     Dim parts() As String
     parts = Split(fKey, "|")
@@ -279,6 +318,9 @@ Public Function Check_FontConsistency(doc As Document) As Collection
 
         If Not EngineIsInPageRange(para.Range) Then GoTo NextParaFont1
 
+        ' Skip block quotes / indented extracts
+        If IsBlockQuotePara(para) Then GoTo NextParaFont1
+
         Dim lvl As Long
         lvl = para.OutlineLevel
 
@@ -356,6 +398,9 @@ NextFootnote:
         paraIdx = paraIdx + 1
 
         If Not EngineIsInPageRange(para.Range) Then GoTo NextParaFont2
+
+        ' Skip block quotes / indented extracts
+        If IsBlockQuotePara(para) Then GoTo NextParaFont2
 
         lvl = para.OutlineLevel
         isHeading = (lvl >= wdOutlineLevel1 And lvl <= wdOutlineLevel9)
