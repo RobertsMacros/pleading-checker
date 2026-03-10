@@ -38,7 +38,11 @@ Private Function CountTermInDoc(doc As Document, ByVal searchTerm As String) As 
         .MatchWildcards = False
     End With
 
+    Dim lastPos As Long
+    lastPos = -1
     Do While rng.Find.Execute
+        If rng.Start <= lastPos Then Exit Do  ' stall guard
+        lastPos = rng.Start
         cnt = cnt + 1
         rng.Collapse wdCollapseEnd
     Loop
@@ -291,7 +295,11 @@ Public Function Check_DefinedTerms(doc As Document) As Collection
         .MatchWildcards = True
     End With
 
+    Dim lastPos As Long
+    lastPos = -1
     Do While rng.Find.Execute
+        If rng.Start <= lastPos Then Exit Do  ' stall guard
+        lastPos = rng.Start
         If Not EngineIsInPageRange(rng) Then
             rng.Collapse wdCollapseEnd
             GoTo NextCurlyFind
@@ -406,7 +414,10 @@ NextParaMeans:
         .MatchWildcards = True
     End With
 
+    lastPos = -1
     Do While rng.Find.Execute
+        If rng.Start <= lastPos Then Exit Do  ' stall guard
+        lastPos = rng.Start
         If Not EngineIsInPageRange(rng) Then
             rng.Collapse wdCollapseEnd
             GoTo NextParenFind

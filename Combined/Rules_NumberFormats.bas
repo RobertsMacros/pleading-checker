@@ -66,7 +66,11 @@ Private Sub FindWithWildcard(doc As Document, ByVal pattern As String, _
         .MatchCase = False
     End With
 
+    Dim lastPos As Long
+    lastPos = -1
     Do While rng.Find.Execute
+        If rng.Start <= lastPos Then Exit Do  ' stall guard
+        lastPos = rng.Start
         If EngineIsInPageRange(rng) Then
             ReDim info(0 To 3)
             info(0) = formatType

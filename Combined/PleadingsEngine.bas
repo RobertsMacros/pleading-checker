@@ -181,11 +181,21 @@ Public Function RunAllPleadingsRules(doc As Document, _
     Dim allIssues As New Collection
     Set ruleConfig = config
 
+    ' -- Suppress screen redraws and events for performance ----
+    Application.ScreenUpdating = False
+    Application.EnableEvents = False
+    Application.DisplayAlerts = False
+    Dim origStatusBar As Boolean
+    origStatusBar = Application.DisplayStatusBar
+
+    On Error GoTo RunnerCleanup
+
     ' -- Whitelist rule first (populates whitelistDict) --
     If IsRuleEnabled(config, "custom_term_whitelist") Then
         AddIssuesToCollection allIssues, _
             TryRunRule("Rules_Terms.Check_CustomTermWhitelist", doc)
     End If
+    DoEvents
 
     ' -- Spelling (bidirectional UK/US) --
     If IsRuleEnabled(config, "spelling") Then
@@ -193,6 +203,7 @@ Public Function RunAllPleadingsRules(doc As Document, _
             TryRunRule("Rules_Spelling.Check_Spelling", doc)
     End If
 
+    DoEvents
     ' -- Text scanning rules --
     If IsRuleEnabled(config, "repeated_words") Then
         AddIssuesToCollection allIssues, _
@@ -204,6 +215,7 @@ Public Function RunAllPleadingsRules(doc As Document, _
             TryRunRule("Rules_TextScan.Check_SpellOutUnderTen", doc)
     End If
 
+    DoEvents
     ' -- Numbering rules --
     If IsRuleEnabled(config, "sequential_numbering") Then
         AddIssuesToCollection allIssues, _
@@ -215,6 +227,7 @@ Public Function RunAllPleadingsRules(doc As Document, _
             TryRunRule("Rules_Numbering.Check_ClauseNumberFormat", doc)
     End If
 
+    DoEvents
     ' -- Heading rules --
     If IsRuleEnabled(config, "heading_capitalisation") Then
         AddIssuesToCollection allIssues, _
@@ -226,6 +239,7 @@ Public Function RunAllPleadingsRules(doc As Document, _
             TryRunRule("Rules_Headings.Check_TitleFormatting", doc)
     End If
 
+    DoEvents
     ' -- Term rules --
     If IsRuleEnabled(config, "defined_terms") Then
         AddIssuesToCollection allIssues, _
@@ -237,6 +251,7 @@ Public Function RunAllPleadingsRules(doc As Document, _
             TryRunRule("Rules_Terms.Check_PhraseConsistency", doc)
     End If
 
+    DoEvents
     ' -- Formatting rules --
     If IsRuleEnabled(config, "paragraph_break_consistency") Then
         AddIssuesToCollection allIssues, _
@@ -248,6 +263,7 @@ Public Function RunAllPleadingsRules(doc As Document, _
             TryRunRule("Rules_Formatting.Check_FontConsistency", doc)
     End If
 
+    DoEvents
     ' -- Number format rules --
     If IsRuleEnabled(config, "date_time_format") Then
         AddIssuesToCollection allIssues, _
@@ -264,6 +280,7 @@ Public Function RunAllPleadingsRules(doc As Document, _
             TryRunRule("Rules_NumberFormats.Check_CurrencyNumberFormat", doc)
     End If
 
+    DoEvents
     ' -- List rules --
     If IsRuleEnabled(config, "inline_list_format") Then
         AddIssuesToCollection allIssues, _
@@ -275,6 +292,7 @@ Public Function RunAllPleadingsRules(doc As Document, _
             TryRunRule("Rules_Lists.Check_ListPunctuation", doc)
     End If
 
+    DoEvents
     ' -- UK/US variant rules (in Rules_Spelling) --
     If IsRuleEnabled(config, "licence_license") Then
         AddIssuesToCollection allIssues, _
@@ -286,6 +304,7 @@ Public Function RunAllPleadingsRules(doc As Document, _
             TryRunRule("Rules_Spelling.Check_ColourFormatting", doc)
     End If
 
+    DoEvents
     ' -- Punctuation rules --
     If IsRuleEnabled(config, "slash_style") Then
         AddIssuesToCollection allIssues, _
@@ -297,6 +316,7 @@ Public Function RunAllPleadingsRules(doc As Document, _
             TryRunRule("Rules_Punctuation.Check_BracketIntegrity", doc)
     End If
 
+    DoEvents
     ' -- Quote rules --
     If IsRuleEnabled(config, "quotation_mark_consistency") Then
         AddIssuesToCollection allIssues, _
@@ -313,18 +333,21 @@ Public Function RunAllPleadingsRules(doc As Document, _
             TryRunRule("Rules_Quotes.Check_SmartQuoteConsistency", doc)
     End If
 
+    DoEvents
     ' -- Footnote integrity --
     If IsRuleEnabled(config, "footnote_integrity") Then
         AddIssuesToCollection allIssues, _
             TryRunRule("Rules_FootnoteIntegrity.Check_FootnoteIntegrity", doc)
     End If
 
+    DoEvents
     ' -- Brand names --
     If IsRuleEnabled(config, "brand_name_enforcement") Then
         AddIssuesToCollection allIssues, _
             TryRunRule("Rules_Brands.Check_BrandNameEnforcement", doc)
     End If
 
+    DoEvents
     ' -- Hart footnote rules --
     If IsRuleEnabled(config, "footnotes_not_endnotes") Then
         AddIssuesToCollection allIssues, _
@@ -346,6 +369,7 @@ Public Function RunAllPleadingsRules(doc As Document, _
             TryRunRule("Rules_FootnoteHarts.Check_FootnoteAbbreviationDictionary", doc)
     End If
 
+    DoEvents
     ' -- Legal term rules --
     If IsRuleEnabled(config, "mandated_legal_term_forms") Then
         AddIssuesToCollection allIssues, _
@@ -357,6 +381,7 @@ Public Function RunAllPleadingsRules(doc As Document, _
             TryRunRule("Rules_LegalTerms.Check_AlwaysCapitaliseTerms", doc)
     End If
 
+    DoEvents
     ' -- Italic rules --
     If IsRuleEnabled(config, "known_anglicised_terms_not_italic") Then
         AddIssuesToCollection allIssues, _
@@ -367,6 +392,14 @@ Public Function RunAllPleadingsRules(doc As Document, _
         AddIssuesToCollection allIssues, _
             TryRunRule("Rules_Italics.Check_ForeignNamesNotItalic", doc)
     End If
+
+RunnerCleanup:
+    ' -- Restore application state (always runs) ----------------
+    Application.ScreenUpdating = True
+    Application.EnableEvents = True
+    Application.DisplayAlerts = True
+    Application.DisplayStatusBar = origStatusBar
+    Application.StatusBar = ""
 
     Set RunAllPleadingsRules = allIssues
 End Function

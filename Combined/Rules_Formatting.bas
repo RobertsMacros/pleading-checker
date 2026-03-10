@@ -395,77 +395,58 @@ NextFootnote:
         End If
 
         ' -- Check at run level for mid-paragraph changes ---
-        Dim run As Range
-        Dim runIdx As Long
-        runIdx = 0
-        Dim runs As Object
-
-        ' Iterate through character runs in the paragraph
+        ' Walk formatting runs using wdCharacterFormatting (fast)
         Dim runRange As Range
-        Set runRange = para.Range.Duplicate
-
-        ' Use the Words/Characters approach via Runs if available
-        ' VBA doesn't have a native Runs collection on Range,
-        ' so we iterate using the paragraph range and check
-        ' font changes character by character in blocks
-        Dim runStart As Long
-        Dim runEnd As Long
-        Dim currentFontName As String
-        Dim currentFontSize As Single
-        Dim charPos As Long
+        Dim runText As String
+        Dim isField As Boolean
 
         If para.Range.End - para.Range.Start > 1 Then
-            runStart = para.Range.Start
-            Set runRange = doc.Range(runStart, runStart + 1)
-            currentFontName = runRange.Font.Name
-            currentFontSize = runRange.Font.Size
+            Set runRange = para.Range.Duplicate
+            runRange.Collapse wdCollapseStart
 
-            ' Scan through the paragraph in character blocks
-            Dim blockSize As Long
-            blockSize = 1
-            For charPos = para.Range.Start + 1 To para.Range.End - 1
-                Set runRange = doc.Range(charPos, charPos + 1)
-                If runRange.Font.Name <> currentFontName Or _
-                   runRange.Font.Size <> currentFontSize Then
+            On Error Resume Next
+            Do While runRange.Start < para.Range.End
+                runRange.MoveEnd wdCharacterFormatting, 1
+                If runRange.Start >= para.Range.End Then Exit Do
 
-                    ' End of a run -- check the previous run
-                    runEnd = charPos
+                Err.Clear
+                runText = runRange.Text
+                If Err.Number <> 0 Then Err.Clear: GoTo AdvanceFontRun
 
-                    ' Skip whitespace-only runs
-                    Dim runText As String
-                    Set runRange = doc.Range(runStart, runEnd)
-                    runText = runRange.Text
-                    If Len(Trim$(runText)) > 0 Then
-                        ' Skip field codes
-                        Dim isField As Boolean
-                        isField = False
-                        If runRange.Fields.Count > 0 Then isField = True
-
-                        If Not isField Then
-                            fk = FontKey(currentFontName, currentFontSize)
-                            If fk <> expectedFont And Len(currentFontName) > 0 And currentFontSize > 0 Then
-                                Dim findingRun As Object
-                                Dim locR As String
-                                locR = EngineGetLocationString(runRange, doc)
-
-                                Dim cleanRunText As String
-                                cleanRunText = Trim$(Replace(Left$(runText, 40), vbCr, ""))
-
-                                Set findingRun = CreateIssueDict(RULE_NAME_FONT, locR, "Mid-paragraph font change in " & context & ": '" & cleanRunText & "' uses " & FontDescription(fk) & " instead of " & FontDescription(expectedFont), "Change to " & FontDescription(expectedFont), runStart, runEnd, "error")
-                                issues.Add findingRun
-                                ' Only flag once per paragraph for run-level
-                                GoTo NextParaFont2
-                            End If
-                        End If
-                    End If
-
-                    ' Start new run
-                    runStart = charPos
-                    Set runRange = doc.Range(charPos, charPos + 1)
-                    currentFontName = runRange.Font.Name
-                    currentFontSize = runRange.Font.Size
+                ' Skip whitespace-only runs
+                If Len(Trim$(Replace(Replace(runText, vbCr, ""), vbLf, ""))) = 0 Then
+                    GoTo AdvanceFontRun
                 End If
-            Next charPos
+
+                ' Skip field codes
+                isField = False
+                If runRange.Fields.Count > 0 Then isField = True
+                If Err.Number <> 0 Then Err.Clear: isField = False
+
+                If Not isField Then
+                    fk = FontKey(runRange.Font.Name, runRange.Font.Size)
+                    If fk <> expectedFont And Len(runRange.Font.Name) > 0 And runRange.Font.Size > 0 Then
+                        Dim findingRun As Object
+                        Dim locR As String
+                        Dim cleanRunText As String
+                        locR = EngineGetLocationString(runRange, doc)
+                        cleanRunText = Trim$(Replace(Left$(runText, 40), vbCr, ""))
+
+                        Set findingRun = CreateIssueDict(RULE_NAME_FONT, locR, _
+                            "Mid-paragraph font change in " & context & ": '" & cleanRunText & _
+                            "' uses " & FontDescription(fk) & " instead of " & FontDescription(expectedFont), _
+                            "Change to " & FontDescription(expectedFont), _
+                            runRange.Start, runRange.End, "error")
+                        issues.Add findingRun
+                        On Error GoTo 0
+                        GoTo NextParaFont2
+                    End If
+                End If
+
+AdvanceFontRun:
+                runRange.Collapse wdCollapseEnd
+            Loop
+            On Error GoTo 0
         End If
 
 NextParaFont2:
