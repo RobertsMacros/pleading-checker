@@ -29,7 +29,13 @@ Private ruleConfig      As Scripting.Dictionary   ' rule name (String) -> enable
 Private PAGE_RANGE_START As Long                  ' 0 = no restriction
 Private PAGE_RANGE_END   As Long                  ' 0 = no restriction
 Private whitelistDict   As Scripting.Dictionary   ' custom term whitelist
-Private m_useTrackedChanges As Boolean            ' default True (UK magic circle convention)
+
+' Tracked-changes mode: 0 = not configured (default True per UK
+' magic circle convention), 1 = forced off, 2 = forced on.
+' Using Long instead of Boolean so VBA's default (0) means
+' "use default" rather than "False" — standalone macros that
+' never call InitRuleConfig still get tracked changes ON.
+Private m_trackedChangesMode As Long
 
 ' ════════════════════════════════════════════════════════════
 '  ENTRY POINT
@@ -51,7 +57,7 @@ Public Function InitRuleConfig() As Scripting.Dictionary
     Dim cfg As New Scripting.Dictionary
 
     ' Default: tracked changes ON (UK magic circle convention)
-    m_useTrackedChanges = True
+    m_trackedChangesMode = 2
 
     cfg.Add "british_spelling", True
     cfg.Add "repeated_words", True
@@ -405,7 +411,7 @@ End Function
 '  should be reviewable as tracked changes).
 ' ════════════════════════════════════════════════════════════
 Public Sub SetTrackedChanges(useTracked As Boolean)
-    m_useTrackedChanges = useTracked
+    If useTracked Then m_trackedChangesMode = 2 Else m_trackedChangesMode = 1
 End Sub
 
 ' ════════════════════════════════════════════════════════════
@@ -434,17 +440,26 @@ Public Sub ApplyIssuesToDocument(doc As Document, _
     Dim rng As Range
     Dim i As Long
     Dim wasTracking As Boolean
+    Dim wasScreenUpdating As Boolean
     Dim doTrack As Boolean
 
-    ' Use explicit parameter if provided, else module-level default
+    ' ── Resolve tracked-changes mode ───────────────────────────
+    ' Explicit parameter wins; otherwise use module-level setting.
+    ' m_trackedChangesMode: 0 = not configured (default True per
+    ' UK magic circle), 1 = forced off, 2 = forced on.
+    ' VBA Long defaults to 0, so standalone macros that never call
+    ' InitRuleConfig or SetTrackedChanges still get True.
     If IsMissing(useTrackedChanges) Then
-        doTrack = m_useTrackedChanges
+        doTrack = (m_trackedChangesMode <> 1)
     Else
         doTrack = CBool(useTrackedChanges)
     End If
 
-    ' Save and override tracking state
+    ' ── Save state and override ────────────────────────────────
     wasTracking = doc.TrackRevisions
+    wasScreenUpdating = Application.ScreenUpdating
+    Application.ScreenUpdating = False
+
     If doTrack Then
         doc.TrackRevisions = True
     Else
@@ -452,12 +467,18 @@ Public Sub ApplyIssuesToDocument(doc As Document, _
         doc.TrackRevisions = False
     End If
 
+    ' ── Apply each issue ───────────────────────────────────────
+    ' Use Resume Next for the entire loop — individual failures
+    ' must never stop the remaining issues or skip cleanup.
+    On Error Resume Next
     For i = 1 To issues.Count
+        Err.Clear
         Set issue = issues(i)
+        If Err.Number <> 0 Then GoTo NextIssue
 
         ' Skip issues without valid range positions
         If issue.RangeStart >= 0 And issue.RangeEnd > issue.RangeStart Then
-            On Error Resume Next: Err.Clear
+            Err.Clear
             Set rng = doc.Range(issue.RangeStart, issue.RangeEnd)
             If Err.Number = 0 Then
                 If doTrack And issue.AutoFixSafe And Len(issue.Suggestion) > 0 Then
@@ -473,24 +494,23 @@ Public Sub ApplyIssuesToDocument(doc As Document, _
                     End If
                 End If
             End If
-            On Error GoTo 0
         ElseIf addComments Then
             ' Document-level issues with no range: comment at start
-            On Error Resume Next: Err.Clear
-            If doc.Content.Start < doc.Content.End Then
-                Set rng = doc.Range(doc.Content.Start, doc.Content.Start + 1)
-                If Err.Number = 0 Then
-                    doc.Comments.Add Range:=rng, _
-                        Text:="[" & issue.RuleName & "] " & issue.Issue & _
-                              " " & Chr(8212) & " Suggestion: " & issue.Suggestion
-                End If
+            Err.Clear
+            Set rng = doc.Range(doc.Content.Start, doc.Content.Start + 1)
+            If Err.Number = 0 Then
+                doc.Comments.Add Range:=rng, _
+                    Text:="[" & issue.RuleName & "] " & issue.Issue & _
+                          " " & Chr(8212) & " Suggestion: " & issue.Suggestion
             End If
-            On Error GoTo 0
         End If
+NextIssue:
     Next i
+    On Error GoTo 0
 
-    ' Restore original tracking state
+    ' Always restore original state
     doc.TrackRevisions = wasTracking
+    Application.ScreenUpdating = wasScreenUpdating
 End Sub
 
 ' ════════════════════════════════════════════════════════════
