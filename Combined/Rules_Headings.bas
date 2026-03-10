@@ -433,7 +433,7 @@ NextPara:
                         suggestion = "Review capitalisation for consistency with other level " & CLng(lvlKey) & " headings"
                 End Select
 
-                Set finding = CreateIssueDict(RULE_NAME_CAPITALISATION, loc, "Heading capitalisation mismatch:)
+                Set finding = CreateIssueDict(RULE_NAME_CAPITALISATION, loc, "Heading capitalisation mismatch: '" & cleanHText & "' uses " & hPattern & " but dominant pattern is " & dominantPattern, suggestion, CLng(hInfo(3)), CLng(hInfo(4)), "possible_error")
                 issues.Add finding
             End If
         Next h
@@ -486,13 +486,6 @@ Public Function Check_TitleFormatting(doc As Document) As Collection
     Set Check_TitleFormatting = issues
 End Function
 
-' ----------------------------------------------------------------
-'  PRIVATE: Late-bound wrapper for EngineIsInPageRange
-' ----------------------------------------------------------------
-
-' ----------------------------------------------------------------
-'  PRIVATE: Late-bound wrapper for EngineGetLocationString
-' ----------------------------------------------------------------
 
 ' ----------------------------------------------------------------
 '  PRIVATE: Create a dictionary-based finding (no class dependency)
@@ -518,13 +511,6 @@ Private Function CreateIssueDict(ByVal ruleName_ As String, _
     Set CreateIssueDict = d
 End Function
 
-' ----------------------------------------------------------------
-'  Late-bound wrapper: EngineIsInPageRange
-' ----------------------------------------------------------------
-
-' ----------------------------------------------------------------
-'  Late-bound wrapper: EngineGetLocationString
-' ----------------------------------------------------------------
 
 ' ----------------------------------------------------------------
 '  Late-bound wrapper: PleadingsEngine.IsInPageRange

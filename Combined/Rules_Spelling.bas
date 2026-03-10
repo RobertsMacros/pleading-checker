@@ -643,7 +643,7 @@ Private Sub SearchSingleLicenceTerm(ByVal term As String, _
             If Err.Number <> 0 Then locStr = "unknown location": Err.Clear
             On Error GoTo 0
 
-            Set finding = CreateIssueDict(RULE_NAME_LICENCE, locStr, ")
+            Set finding = CreateIssueDict(RULE_NAME_LICENCE, locStr, "'" & rng.Text & "' " & Chr(8212) & " in italic text, review manually", "", rng.Start, rng.End, "possible_error")
             issues.Add finding
             GoTo ContinueLicenceSearch
         End If
@@ -654,7 +654,7 @@ Private Sub SearchSingleLicenceTerm(ByVal term As String, _
             If Err.Number <> 0 Then locStr = "unknown location": Err.Clear
             On Error GoTo 0
 
-            Set finding = CreateIssueDict(RULE_NAME_LICENCE, locStr, ")
+            Set finding = CreateIssueDict(RULE_NAME_LICENCE, locStr, "'" & rng.Text & "' " & Chr(8212) & " in quoted text, review manually", "", rng.Start, rng.End, "possible_error")
             issues.Add finding
             GoTo ContinueLicenceSearch
         End If
@@ -1166,7 +1166,7 @@ Private Sub FlushColourGroup(doc As Document, _
     End If
     On Error GoTo 0
 
-    Set finding = CreateIssueDict(RULE_NAME_COLOUR, locStr, "Non-standard font colour " & hexStr & " detected:)
+    Set finding = CreateIssueDict(RULE_NAME_COLOUR, locStr, "Non-standard font colour " & hexStr & " detected: '" & previewText & "'", "Change font colour to match document default", startPos, endPos, "possible_error")
     issues.Add finding
 End Sub
 
@@ -1210,21 +1210,6 @@ Private Function IsRunInsideHyperlink(rn As Range, doc As Document) As Boolean
     IsRunInsideHyperlink = False
 End Function
 
-' ----------------------------------------------------------------
-'  PRIVATE: Late-bound wrapper for EngineIsInPageRange
-' ----------------------------------------------------------------
-
-' ----------------------------------------------------------------
-'  PRIVATE: Late-bound wrapper for EngineGetLocationString
-' ----------------------------------------------------------------
-
-' ----------------------------------------------------------------
-'  PRIVATE: Late-bound wrapper for PleadingsEngine.IsWhitelistedTerm
-' ----------------------------------------------------------------
-
-' ----------------------------------------------------------------
-'  PRIVATE: Late-bound wrapper for PleadingsEngine.GetSpellingMode
-' ----------------------------------------------------------------
 
 ' ----------------------------------------------------------------
 '  PRIVATE: Create a dictionary-based finding (no class dependency)
@@ -1250,21 +1235,6 @@ Private Function CreateIssueDict(ByVal ruleName_ As String, _
     Set CreateIssueDict = d
 End Function
 
-' ----------------------------------------------------------------
-'  Late-bound wrapper: EngineIsInPageRange
-' ----------------------------------------------------------------
-
-' ----------------------------------------------------------------
-'  Late-bound wrapper: EngineGetLocationString
-' ----------------------------------------------------------------
-
-' ----------------------------------------------------------------
-'  Late-bound wrapper: PleadingsEngine.IsWhitelistedTerm
-' ----------------------------------------------------------------
-
-' ----------------------------------------------------------------
-'  Late-bound wrapper: PleadingsEngine.GetSpellingMode
-' ----------------------------------------------------------------
 
 ' ----------------------------------------------------------------
 '  Late-bound wrapper: PleadingsEngine.IsInPageRange

@@ -196,7 +196,7 @@ Private Sub FlagPhraseOccurrences(doc As Document, _
             If Err.Number <> 0 Then locStr = "unknown location": Err.Clear
             On Error GoTo 0
 
-            Set finding = CreateIssueDict(RULE23_NAME, locStr, "Inconsistent phrase:)
+            Set finding = CreateIssueDict(RULE23_NAME, locStr, "Inconsistent phrase: '" & rng.Text & "' used", "Use '" & dominantPhrase & "' for consistency (dominant style)", rng.Start, rng.End, "error")
             issues.Add finding
         End If
 
@@ -458,7 +458,7 @@ NextParenFind:
                     Dim findingLC As Object
                     Dim locLC As String
                     locLC = EngineGetLocationString(lcRng, doc)
-                    Set findingLC = CreateIssueDict(RULE07_NAME, locLC, "Inconsistent capitalisation:)
+                    Set findingLC = CreateIssueDict(RULE07_NAME, locLC, "Inconsistent capitalisation: '" & lcTerm2 & "' found but '" & term & "' is the defined term", "Use '" & term & "' consistently", lcRng.Start, lcRng.End, "error")
                     issues.Add findingLC
                 End If
             End If
@@ -475,7 +475,7 @@ NextParenFind:
                     Dim findingH As Object
                     Dim locH As String
                     locH = EngineGetLocationString(nhRng, doc)
-                    Set findingH = CreateIssueDict(RULE07_NAME, locH, "Hyphenation variant:)
+                    Set findingH = CreateIssueDict(RULE07_NAME, locH, "Hyphenation variant: '" & noHyphen & "' found but defined term uses hyphen: '" & term & "'", "Use the defined form: '" & term & "'", nhRng.Start, nhRng.End, "error")
                     issues.Add findingH
                 End If
             End If
@@ -495,7 +495,7 @@ NextParenFind:
             Set unusedRng = doc.Range(CLng(tInfo(1)), CLng(tInfo(2)))
             Dim locUnused As String
             locUnused = EngineGetLocationString(unusedRng, doc)
-            Set findingUnused = CreateIssueDict(RULE07_NAME, locUnused, "Defined term never referenced:)
+            Set findingUnused = CreateIssueDict(RULE07_NAME, locUnused, "Defined term never referenced: '" & term & "' is defined but not used elsewhere in the document", "Remove the definition or use the term in the document", CLng(tInfo(1)), CLng(tInfo(2)), "possible_error")
             issues.Add findingUnused
         End If
     Next termKey
@@ -534,13 +534,6 @@ Public Function Check_PhraseConsistency(doc As Document) As Collection
     Set Check_PhraseConsistency = issues
 End Function
 
-' ----------------------------------------------------------------
-'  PRIVATE: Late-bound wrapper for EngineIsInPageRange
-' ----------------------------------------------------------------
-
-' ----------------------------------------------------------------
-'  PRIVATE: Late-bound wrapper for EngineGetLocationString
-' ----------------------------------------------------------------
 
 ' ----------------------------------------------------------------
 '  PRIVATE: Late-bound wrapper for EngineSetWhitelist ' ----------------------------------------------------------------
@@ -569,13 +562,6 @@ Private Function CreateIssueDict(ByVal ruleName_ As String, _
     Set CreateIssueDict = d
 End Function
 
-' ----------------------------------------------------------------
-'  Late-bound wrapper: EngineIsInPageRange
-' ----------------------------------------------------------------
-
-' ----------------------------------------------------------------
-'  Late-bound wrapper: EngineGetLocationString
-' ----------------------------------------------------------------
 
 ' ----------------------------------------------------------------
 '  Late-bound wrapper: EngineSetWhitelist ' ----------------------------------------------------------------

@@ -226,7 +226,7 @@ NextPara:
                 Dim locA As String
                 locA = EngineGetLocationString(rngA, doc)
 
-                Set findingA = CreateIssueDict(RULE_NAME_PARAGRAPH_BREAK, locA, "After-heading spacing inconsistency at)
+                Set findingA = CreateIssueDict(RULE_NAME_PARAGRAPH_BREAK, locA, "After-heading spacing inconsistency at '" & hText & "': uses " & hAft & " but dominant pattern for level " & CLng(lvlKey) & " headings is " & domAfter, "Change spacing after this heading to match: " & domAfter, CLng(hInfo(3)), CLng(hInfo(4)), "possible_error")
                 issues.Add findingA
             End If
 
@@ -238,7 +238,7 @@ NextPara:
                 Dim locB As String
                 locB = EngineGetLocationString(rngB, doc)
 
-                Set findingB = CreateIssueDict(RULE_NAME_PARAGRAPH_BREAK, locB, "Before-heading spacing inconsistency at)
+                Set findingB = CreateIssueDict(RULE_NAME_PARAGRAPH_BREAK, locB, "Before-heading spacing inconsistency at '" & hText & "': uses " & hBef & " but dominant pattern for level " & CLng(lvlKey) & " headings is " & domBefore, "Change spacing before this heading to match: " & domBefore, CLng(hInfo(3)), CLng(hInfo(4)), "possible_error")
                 issues.Add findingB
             End If
         Next h
@@ -389,7 +389,7 @@ NextFootnote:
                 Dim cleanParaText As String
                 cleanParaText = Trim$(Replace(Left$(para.Range.Text, 60), vbCr, ""))
 
-                Set findingPara = CreateIssueDict(RULE_NAME_FONT, locP, "Font inconsistency in " & context & ":)
+                Set findingPara = CreateIssueDict(RULE_NAME_FONT, locP, "Font inconsistency in " & context & ": '" & cleanParaText & "...' uses " & FontDescription(fk) & " but dominant " & context & " font is " & FontDescription(expectedFont), "Change to " & FontDescription(expectedFont), para.Range.Start, para.Range.End, "error")
                 issues.Add findingPara
                 ' Skip run-level check if paragraph-level already flagged
                 GoTo NextParaFont2
@@ -453,7 +453,7 @@ NextFootnote:
                                 Dim cleanRunText As String
                                 cleanRunText = Trim$(Replace(Left$(runText, 40), vbCr, ""))
 
-                                Set findingRun = CreateIssueDict(RULE_NAME_FONT, locR, "Mid-paragraph font change in " & context & ":)
+                                Set findingRun = CreateIssueDict(RULE_NAME_FONT, locR, "Mid-paragraph font change in " & context & ": '" & cleanRunText & "' uses " & FontDescription(fk) & " instead of " & FontDescription(expectedFont), "Change to " & FontDescription(expectedFont), runStart, runEnd, "error")
                                 issues.Add findingRun
                                 ' Only flag once per paragraph for run-level
                                 GoTo NextParaFont2
@@ -493,7 +493,7 @@ NextParaFont2:
                     Dim cleanFNText As String
                     cleanFNText = Trim$(Replace(Left$(fn.Range.Text, 50), vbCr, ""))
 
-                    Set findingFN = CreateIssueDict(RULE_NAME_FONT, locFN, "Footnote font inconsistency:)
+                    Set findingFN = CreateIssueDict(RULE_NAME_FONT, locFN, "Footnote font inconsistency: '" & cleanFNText & "...' uses " & FontDescription(fk) & " but dominant " & "footnote font is " & FontDescription(domFootnote), "Change to " & FontDescription(domFootnote), fn.Range.Start, fn.Range.End, "error")
                     issues.Add findingFN
                 End If
             End If
@@ -505,13 +505,6 @@ NextFN2:
     Set Check_FontConsistency = issues
 End Function
 
-' ----------------------------------------------------------------
-'  PRIVATE: Late-bound wrapper for EngineIsInPageRange
-' ----------------------------------------------------------------
-
-' ----------------------------------------------------------------
-'  PRIVATE: Late-bound wrapper for EngineGetLocationString
-' ----------------------------------------------------------------
 
 ' ----------------------------------------------------------------
 '  PRIVATE: Create a dictionary-based finding (no class dependency)
@@ -537,13 +530,6 @@ Private Function CreateIssueDict(ByVal ruleName_ As String, _
     Set CreateIssueDict = d
 End Function
 
-' ----------------------------------------------------------------
-'  Late-bound wrapper: EngineIsInPageRange
-' ----------------------------------------------------------------
-
-' ----------------------------------------------------------------
-'  Late-bound wrapper: EngineGetLocationString
-' ----------------------------------------------------------------
 
 ' ----------------------------------------------------------------
 '  Late-bound wrapper: PleadingsEngine.IsInPageRange

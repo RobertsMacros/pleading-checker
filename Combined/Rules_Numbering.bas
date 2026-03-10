@@ -724,7 +724,7 @@ NextClausePara:
                     Dim loc As String
                     loc = EngineGetLocationString(rng, doc)
 
-                    Set finding = CreateIssueDict(RULE_NAME_FMT, loc, "Mixed clause number format:)
+                    Set finding = CreateIssueDict(RULE_NAME_FMT, loc, "Mixed clause number format: '" & CStr(clauseData(1)) & "' uses style " & clauseFmt & " but dominant " & levelCat & " style is " & dominantFormats(levelCat), "Reformat to match the dominant clause numbering style", CLng(clauseData(2)), CLng(clauseData(3)), "error")
                     issues.Add finding
                 End If
             End If
@@ -735,13 +735,6 @@ NextClausePara:
     Set Check_ClauseNumberFormat = issues
 End Function
 
-' ----------------------------------------------------------------
-'  PRIVATE: Late-bound wrapper for EngineIsInPageRange
-' ----------------------------------------------------------------
-
-' ----------------------------------------------------------------
-'  PRIVATE: Late-bound wrapper for EngineGetLocationString
-' ----------------------------------------------------------------
 
 ' ----------------------------------------------------------------
 '  PRIVATE: Create a dictionary-based finding (no class dependency)
@@ -767,13 +760,6 @@ Private Function CreateIssueDict(ByVal ruleName_ As String, _
     Set CreateIssueDict = d
 End Function
 
-' ----------------------------------------------------------------
-'  Late-bound wrapper: EngineIsInPageRange
-' ----------------------------------------------------------------
-
-' ----------------------------------------------------------------
-'  Late-bound wrapper: EngineGetLocationString
-' ----------------------------------------------------------------
 
 ' ----------------------------------------------------------------
 '  Late-bound wrapper: PleadingsEngine.IsInPageRange

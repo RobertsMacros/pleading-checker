@@ -165,7 +165,7 @@ Public Function Check_AnglicisedTermsNotItalic(doc As Document) As Collection
                     locStr = EngineGetLocationString(rng, doc)
                     If Err.Number <> 0 Then locStr = "unknown location": Err.Clear
 
-                    Set finding = CreateIssueDict(RULE_NAME_ANGLICISED, locStr, "Anglicised foreign term is italicised.", "Set)
+                    Set finding = CreateIssueDict(RULE_NAME_ANGLICISED, locStr, "Anglicised foreign term is italicised.", "Set '" & term & "' in roman, not italics.", rng.Start, rng.End, "warning", False)
                     issues.Add finding
                 End If
 
@@ -279,7 +279,7 @@ Public Function Check_ForeignNamesNotItalic(doc As Document) As Collection
                     locStr = EngineGetLocationString(rng, doc)
                     If Err.Number <> 0 Then locStr = "unknown location": Err.Clear
 
-                    Set finding = CreateIssueDict(RULE_NAME_FOREIGN, locStr, "Foreign name or institution should not be italicised.", "Set)
+                    Set finding = CreateIssueDict(RULE_NAME_FOREIGN, locStr, "Foreign name or institution should not be italicised.", "Set '" & term & "' in roman, not italics.", rng.Start, rng.End, "warning", False)
                     issues.Add finding
                 End If
 
@@ -296,13 +296,6 @@ NextParaR31:
     Set Check_ForeignNamesNotItalic = issues
 End Function
 
-' ----------------------------------------------------------------
-'  PRIVATE: Late-bound wrapper for EngineIsInPageRange
-' ----------------------------------------------------------------
-
-' ----------------------------------------------------------------
-'  PRIVATE: Late-bound wrapper for EngineGetLocationString
-' ----------------------------------------------------------------
 
 ' ----------------------------------------------------------------
 '  PRIVATE: Create a dictionary-based finding (no class dependency)
@@ -328,13 +321,6 @@ Private Function CreateIssueDict(ByVal ruleName_ As String, _
     Set CreateIssueDict = d
 End Function
 
-' ----------------------------------------------------------------
-'  Late-bound wrapper: EngineIsInPageRange
-' ----------------------------------------------------------------
-
-' ----------------------------------------------------------------
-'  Late-bound wrapper: EngineGetLocationString
-' ----------------------------------------------------------------
 
 ' ----------------------------------------------------------------
 '  Late-bound wrapper: PleadingsEngine.IsInPageRange

@@ -291,7 +291,7 @@ Public Function Check_SpellOutUnderTen(doc As Document) As Collection
                     End If
                 End If
 
-                Set finding = CreateIssueDict(RULE_NAME_SPELL_OUT, locStr, "Number under 10 is given as a figure in running prose.", "Write)
+                Set finding = CreateIssueDict(RULE_NAME_SPELL_OUT, locStr, "Number under 10 is given as a figure in running prose.", "Write '" & numberWords(digitVal) & "' instead of '" & ch & "'.", rangeStart, rangeEnd, "warning", False)
                 issues.Add finding
             End If
 
@@ -660,13 +660,6 @@ Private Function IsLetterChar(ByVal ch As String) As Boolean
                    (code >= 192 And code <= 687) ' Extended Latin
 End Function
 
-' ----------------------------------------------------------------
-'  PRIVATE: Late-bound wrapper for EngineIsInPageRange
-' ----------------------------------------------------------------
-
-' ----------------------------------------------------------------
-'  PRIVATE: Late-bound wrapper for EngineGetLocationString
-' ----------------------------------------------------------------
 
 ' ----------------------------------------------------------------
 '  PRIVATE: Create a dictionary-based finding (no class dependency)
@@ -692,13 +685,6 @@ Private Function CreateIssueDict(ByVal ruleName_ As String, _
     Set CreateIssueDict = d
 End Function
 
-' ----------------------------------------------------------------
-'  Late-bound wrapper: EngineIsInPageRange
-' ----------------------------------------------------------------
-
-' ----------------------------------------------------------------
-'  Late-bound wrapper: EngineGetLocationString
-' ----------------------------------------------------------------
 
 ' ----------------------------------------------------------------
 '  Late-bound wrapper: PleadingsEngine.IsInPageRange

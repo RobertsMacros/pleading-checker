@@ -109,7 +109,7 @@ Private Sub SearchAndFlag(doc As Document, _
             If Err.Number <> 0 Then locStr = "unknown location": Err.Clear
             On Error GoTo 0
 
-            Set finding = CreateIssueDict(RULE28_NAME, locStr, "Mandatory term is not hyphenated in the approved form.", "Use)
+            Set finding = CreateIssueDict(RULE28_NAME, locStr, "Mandatory term is not hyphenated in the approved form.", "Use '" & correctForm & "'.", rng.Start, rng.End, "warning", False)
             issues.Add finding
         End If
 
@@ -261,7 +261,7 @@ Private Sub CheckTermInParagraph(doc As Document, _
         If Err.Number <> 0 Then locStr = "unknown location": Err.Clear
         On Error GoTo 0
 
-        Set finding = CreateIssueDict(RULE29_NAME, locStr, "Term should be capitalised in the approved form.", "Use)
+        Set finding = CreateIssueDict(RULE29_NAME, locStr, "Term should be capitalised in the approved form.", "Use '" & correctForm & "'.", matchStart, matchEnd, "warning", False)
         issues.Add finding
 
 NextMatch:
@@ -366,13 +366,6 @@ Private Function IsInsideQuote(paraText As String, matchPos As Long) As Boolean
     End If
 End Function
 
-' ----------------------------------------------------------------
-'  PRIVATE: Late-bound wrapper for EngineIsInPageRange
-' ----------------------------------------------------------------
-
-' ----------------------------------------------------------------
-'  PRIVATE: Late-bound wrapper for EngineGetLocationString
-' ----------------------------------------------------------------
 
 ' ----------------------------------------------------------------
 '  PRIVATE: Create a dictionary-based finding (no class dependency)
@@ -398,13 +391,6 @@ Private Function CreateIssueDict(ByVal ruleName_ As String, _
     Set CreateIssueDict = d
 End Function
 
-' ----------------------------------------------------------------
-'  Late-bound wrapper: EngineIsInPageRange
-' ----------------------------------------------------------------
-
-' ----------------------------------------------------------------
-'  Late-bound wrapper: EngineGetLocationString
-' ----------------------------------------------------------------
 
 ' ----------------------------------------------------------------
 '  Late-bound wrapper: PleadingsEngine.IsInPageRange

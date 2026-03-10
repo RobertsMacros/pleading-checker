@@ -298,7 +298,7 @@ Private Sub CheckISOCodeFormat(doc As Document, _
             If Err.Number <> 0 Then locStr = "unknown location": Err.Clear
             On Error GoTo 0
 
-            Set finding = CreateIssueDict(RULE_NAME_CURRENCY, locStr, "ISO code format used:)
+            Set finding = CreateIssueDict(RULE_NAME_CURRENCY, locStr, "ISO code format used: '" & rng.Text & "'", "Consider using symbol notation for consistency", rng.Start, rng.End, "possible_error")
             issues.Add finding
         End If
 
@@ -329,7 +329,7 @@ Private Sub FlagMinorityRanges(doc As Document, _
         If Err.Number <> 0 Then locStr = "unknown location": Err.Clear
         On Error GoTo 0
 
-        Set finding = CreateIssueDict(RULE_NAME_CURRENCY, locStr, symLabel & " amount uses)
+        Set finding = CreateIssueDict(RULE_NAME_CURRENCY, locStr, symLabel & " amount uses '" & minorityFmt & "' format: '" & rng.Text & "'", "Use '" & dominantFmt & "' format for consistency (dominant style)", rng.Start, rng.End, "error")
         issues.Add finding
     Next i
 End Sub
@@ -471,7 +471,7 @@ Public Function Check_DateTimeFormat(doc As Document) As Collection
                             suggestion = "Reformat to numeric style (e.g., '01/01/2024')"
                     End Select
 
-                    Set findingD = CreateIssueDict(RULE_NAME_DATE_TIME, locD, "Inconsistent date format:)
+                    Set findingD = CreateIssueDict(RULE_NAME_DATE_TIME, locD, "Inconsistent date format: '" & CStr(dInfo(1)) & "' uses " & dType & " format but dominant is " & dominantDate, suggestion, CLng(dInfo(2)), CLng(dInfo(3)), "error")
                     issues.Add findingD
                 End If
             Next i
@@ -562,7 +562,7 @@ Public Function Check_DateTimeFormat(doc As Document) As Collection
                         timeSugg = "Use 24-hour format (e.g., '14:30') for consistency"
                     End If
 
-                    Set findingT = CreateIssueDict(RULE_NAME_DATE_TIME, locT, "Inconsistent time format:)
+                    Set findingT = CreateIssueDict(RULE_NAME_DATE_TIME, locT, "Inconsistent time format: '" & CStr(tInfo(1)) & "' uses " & tType & " format but dominant is " & dominantTime, timeSugg, CLng(tInfo(2)), CLng(tInfo(3)), "error")
                     issues.Add findingT
                 End If
             Next i
@@ -636,17 +636,6 @@ Public Function Check_CurrencyNumberFormat(doc As Document) As Collection
     Set Check_CurrencyNumberFormat = issues
 End Function
 
-' ----------------------------------------------------------------
-'  PRIVATE: Late-bound wrapper for EngineIsInPageRange
-' ----------------------------------------------------------------
-
-' ----------------------------------------------------------------
-'  PRIVATE: Late-bound wrapper for EngineGetLocationString
-' ----------------------------------------------------------------
-
-' ----------------------------------------------------------------
-'  PRIVATE: Late-bound wrapper for PleadingsEngine.SetPageRange
-' ----------------------------------------------------------------
 
 ' ----------------------------------------------------------------
 '  PRIVATE: Create a dictionary-based finding (no class dependency)
@@ -672,17 +661,6 @@ Private Function CreateIssueDict(ByVal ruleName_ As String, _
     Set CreateIssueDict = d
 End Function
 
-' ----------------------------------------------------------------
-'  Late-bound wrapper: EngineIsInPageRange
-' ----------------------------------------------------------------
-
-' ----------------------------------------------------------------
-'  Late-bound wrapper: EngineGetLocationString
-' ----------------------------------------------------------------
-
-' ----------------------------------------------------------------
-'  Late-bound wrapper: PleadingsEngine.SetPageRange
-' ----------------------------------------------------------------
 
 ' ----------------------------------------------------------------
 '  Late-bound wrapper: PleadingsEngine.IsInPageRange

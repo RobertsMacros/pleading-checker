@@ -351,7 +351,7 @@ NextPara:
                 If UBound(domParts) >= 1 Then suggStr = suggStr & ", '" & domParts(1) & "' conjunction"
                 If UBound(domParts) >= 2 Then suggStr = suggStr & ", " & domParts(2) & " ending"
 
-                Set finding = CreateIssueDict(RULE_NAME_INLINE, loc, "Inline list format inconsistency near:)
+                Set finding = CreateIssueDict(RULE_NAME_INLINE, loc, "Inline list format inconsistency near: '" & CStr(ld(4)) & "...'", suggStr, CLng(ld(2)), CLng(ld(3)), "possible_error")
                 issues.Add finding
             End If
         Next li
@@ -499,7 +499,7 @@ Private Sub ProcessListGroup(doc As Document, _
             End If
             On Error GoTo 0
 
-            Set finding = CreateIssueDict(RULE_NAME_LISTPN, locStr, "List item ending)
+            Set finding = CreateIssueDict(RULE_NAME_LISTPN, locStr, "List item ending '" & endings(i) & "' differs from " & "dominant ending '" & dominantEnding & "'", "Change ending punctuation to match list style (" & dominantEnding & ")", paraStarts(i), paraEnds(i), "possible_error")
             issues.Add finding
         End If
 
@@ -519,7 +519,7 @@ ContinueItem:
                         Err.Clear
                     End If
 
-                    Set finding = CreateIssueDict(RULE_NAME_LISTPN, locStr, "Last list item should end with a full stop, not)
+                    Set finding = CreateIssueDict(RULE_NAME_LISTPN, locStr, "Last list item should end with a full stop, not '" & endings(groupEnd) & "'", "End the final list item with a full stop", paraStarts(groupEnd), paraEnds(groupEnd), "possible_error")
                     issues.Add finding
                 End If
             End If
@@ -561,7 +561,7 @@ ContinueItem:
                             Err.Clear
                         End If
 
-                        Set finding = CreateIssueDict(RULE_NAME_LISTPN, locStr, "Penultimate list item should include)
+                        Set finding = CreateIssueDict(RULE_NAME_LISTPN, locStr, "Penultimate list item should include 'and' or 'or' " & "before terminal punctuation", "Add 'and' or 'or' before the semicolon", paraStarts(penIdx), paraEnds(penIdx), "possible_error")
                         issues.Add finding
                     End If
                 End If
@@ -688,13 +688,6 @@ NextParaCollect:
     Set Check_ListPunctuation = issues
 End Function
 
-' ----------------------------------------------------------------
-'  PRIVATE: Late-bound wrapper for EngineIsInPageRange
-' ----------------------------------------------------------------
-
-' ----------------------------------------------------------------
-'  PRIVATE: Late-bound wrapper for EngineGetLocationString
-' ----------------------------------------------------------------
 
 ' ----------------------------------------------------------------
 '  PRIVATE: Create a dictionary-based finding (no class dependency)
@@ -720,13 +713,6 @@ Private Function CreateIssueDict(ByVal ruleName_ As String, _
     Set CreateIssueDict = d
 End Function
 
-' ----------------------------------------------------------------
-'  Late-bound wrapper: EngineIsInPageRange
-' ----------------------------------------------------------------
-
-' ----------------------------------------------------------------
-'  Late-bound wrapper: EngineGetLocationString
-' ----------------------------------------------------------------
 
 ' ----------------------------------------------------------------
 '  Late-bound wrapper: PleadingsEngine.IsInPageRange

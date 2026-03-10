@@ -172,7 +172,7 @@ Private Sub FlagSpacedSlashes(doc As Document, ByRef issues As Collection)
             Err.Clear
         End If
 
-        Set finding = CreateIssueDict(RULE_NAME_SLASH, locStr, "Spaced slash)
+        Set finding = CreateIssueDict(RULE_NAME_SLASH, locStr, "Spaced slash '" & rng.Text & "' differs from dominant tight style", "Remove spaces around slash for consistency", rng.Start, rng.End, "possible_error")
         issues.Add finding
 
 ContinueSpaced:
@@ -220,7 +220,7 @@ Private Sub FlagTightSlashes(doc As Document, ByRef issues As Collection)
             Err.Clear
         End If
 
-        Set finding = CreateIssueDict(RULE_NAME_SLASH, locStr, "Tight slash)
+        Set finding = CreateIssueDict(RULE_NAME_SLASH, locStr, "Tight slash '" & rng.Text & "' differs from dominant spaced style", "Add spaces around slash for consistency", rng.Start, rng.End, "possible_error")
         issues.Add finding
 
 ContinueTight:
@@ -308,7 +308,7 @@ Private Sub FlagBackslashes(doc As Document, ByRef issues As Collection)
             Err.Clear
         End If
 
-        Set finding = CreateIssueDict(RULE_NAME_SLASH, locStr, "Unexpected backslash -- did you mean forward slash?", "Replace)
+        Set finding = CreateIssueDict(RULE_NAME_SLASH, locStr, "Unexpected backslash — did you mean forward slash?", "Replace '\' with '/'", rng.Start, rng.End, "possible_error")
         issues.Add finding
 
 ContinueBackslash:
@@ -417,144 +417,130 @@ End Function
 Public Function Check_BracketIntegrity(doc As Document) As Collection
     Dim issues As New Collection
     Dim docText As String
-    Dim textLen As Long
-    Dim i As Long
-    Dim ch As String
 
-    ' -- Stack using parallel arrays --------------------------
-    Dim stackChars() As String
-    Dim stackPositions() As Long
-    Dim stackTop As Long
-
-    ReDim stackChars(0 To 1000)
-    ReDim stackPositions(0 To 1000)
-    stackTop = -1 ' empty stack
-
-    ' -- Get full document text -------------------------------
+    ' -- Get full document text ---------------------------------
     On Error Resume Next
     docText = doc.Content.Text
     If Err.Number <> 0 Then
-        Err.Clear
-        On Error GoTo 0
+        Err.Clear: On Error GoTo 0
         Set Check_BracketIntegrity = issues
         Exit Function
     End If
     On Error GoTo 0
 
-    textLen = Len(docText)
-    If textLen = 0 Then
+    If LenB(docText) = 0 Then
         Set Check_BracketIntegrity = issues
         Exit Function
     End If
 
-    ' -- Iterate character by character -----------------------
-    For i = 1 To textLen
-        ch = Mid(docText, i, 1)
+    ' -- Byte-array scan (avoids 600K Mid$ allocs) -------------
+    Dim b() As Byte: b = docText
+    Dim bMax As Long: bMax = UBound(b) - 1
 
-        ' Only process bracket characters
-        If ch = "(" Or ch = "[" Or ch = "{" Or _
-           ch = ")" Or ch = "]" Or ch = "}" Then
+    ' Stack: parallel Long arrays (code-point + doc position)
+    Dim stackCodes() As Long
+    Dim stackPos() As Long
+    Dim sTop As Long: sTop = -1
+    ReDim stackCodes(0 To 1000)
+    ReDim stackPos(0 To 1000)
 
-            ' Skip brackets in code-font runs
-            If IsCodeFont(doc, i - 1) Then GoTo NextChar
+    ' Reusable range for font checks (created once, moved
+    ' via SetRange -- avoids per-bracket doc.Range creation)
+    Dim fontRng As Range
+    Set fontRng = doc.Range(0, 1)
 
-            If ch = "(" Or ch = "[" Or ch = "{" Then
-                ' -- Push opening bracket onto stack ----------
-                stackTop = stackTop + 1
+    Dim i As Long, code As Long, pos As Long
+    Dim isOpen As Boolean, isClose As Boolean
+    Dim fontName As String
+    Dim openCode As Long, openPos As Long
 
-                ' Grow arrays if needed
-                If stackTop > UBound(stackChars) Then
-                    ReDim Preserve stackChars(0 To stackTop + 500)
-                    ReDim Preserve stackPositions(0 To stackTop + 500)
+    For i = 0 To bMax Step 2
+        code = b(i) Or (CLng(b(i + 1)) * 256&)
+
+        ' Fast integer check: ( ) [ ] { }
+        isOpen = (code = 40 Or code = 91 Or code = 123)
+        isClose = (code = 41 Or code = 93 Or code = 125)
+
+        If isOpen Or isClose Then
+            pos = i \ 2  ' document position (0-based)
+
+            ' Code-font gate (reusable range, no alloc)
+            On Error Resume Next
+            Err.Clear
+            fontRng.SetRange pos, pos + 1
+            If Err.Number = 0 Then
+                fontName = fontRng.Font.Name
+                If Err.Number <> 0 Then fontName = "": Err.Clear
+                If IsCodeFontName(fontName) Then
+                    On Error GoTo 0
+                    GoTo NxtBracket
                 End If
-
-                stackChars(stackTop) = ch
-                stackPositions(stackTop) = i - 1 ' 0-based doc position
-
             Else
-                ' -- Closing bracket: pop and check match -----
-                If stackTop < 0 Then
-                    ' Empty stack: unmatched closing bracket
-                    CreateBracketIssue doc, issues, i - 1, ch, _
-                        "Unmatched closing bracket '" & ch & "' with no corresponding opener"
-                Else
-                    Dim openChar As String
-                    Dim openPos As Long
-                    openChar = stackChars(stackTop)
-                    openPos = stackPositions(stackTop)
-                    stackTop = stackTop - 1
+                Err.Clear
+            End If
+            On Error GoTo 0
 
-                    ' Check if bracket types match
-                    If Not BracketsMatch(openChar, ch) Then
-                        ' Mismatched bracket pair
-                        CreateBracketIssue doc, issues, openPos, openChar, _
-                            "Mismatched bracket: opened with '" & openChar & _
-                            "' but closed with '" & ch & "'"
-                        CreateBracketIssue doc, issues, i - 1, ch, _
-                            "Mismatched bracket: closing '" & ch & _
-                            "' does not match opener '" & openChar & "'"
+            If isOpen Then
+                sTop = sTop + 1
+                If sTop > UBound(stackCodes) Then
+                    ReDim Preserve stackCodes(0 To sTop + 500)
+                    ReDim Preserve stackPos(0 To sTop + 500)
+                End If
+                stackCodes(sTop) = code
+                stackPos(sTop) = pos
+            Else
+                ' Closing bracket
+                If sTop < 0 Then
+                    CreateBracketIssue doc, issues, pos, ChrW$(code), _
+                        "Unmatched closing bracket '" & ChrW$(code) & _
+                        "' with no corresponding opener"
+                Else
+                    openCode = stackCodes(sTop)
+                    openPos = stackPos(sTop)
+                    sTop = sTop - 1
+
+                    If Not CodesMatch(openCode, code) Then
+                        CreateBracketIssue doc, issues, openPos, _
+                            ChrW$(openCode), _
+                            "Mismatched bracket: opened with '" & _
+                            ChrW$(openCode) & "' but closed with '" & _
+                            ChrW$(code) & "'"
+                        CreateBracketIssue doc, issues, pos, _
+                            ChrW$(code), _
+                            "Mismatched bracket: closing '" & _
+                            ChrW$(code) & "' does not match opener '" & _
+                            ChrW$(openCode) & "'"
                     End If
                 End If
             End If
         End If
 
-NextChar:
+NxtBracket:
     Next i
 
-    ' -- Any remaining on stack are unmatched openers ---------
+    ' -- Unmatched openers remaining on stack -------------------
     Dim s As Long
-    For s = 0 To stackTop
-        CreateBracketIssue doc, issues, stackPositions(s), stackChars(s), _
-            "Unmatched opening bracket '" & stackChars(s) & "' with no corresponding closer"
+    For s = 0 To sTop
+        CreateBracketIssue doc, issues, stackPos(s), _
+            ChrW$(stackCodes(s)), _
+            "Unmatched opening bracket '" & ChrW$(stackCodes(s)) & _
+            "' with no corresponding closer"
     Next s
 
     Set Check_BracketIntegrity = issues
 End Function
 
-' ============================================================
-'  PRIVATE: Check if brackets match
-' ============================================================
-Private Function BracketsMatch(ByVal openCh As String, _
-                                ByVal closeCh As String) As Boolean
-    Select Case openCh
-        Case "("
-            BracketsMatch = (closeCh = ")")
-        Case "["
-            BracketsMatch = (closeCh = "]")
-        Case "{"
-            BracketsMatch = (closeCh = "}")
-        Case Else
-            BracketsMatch = False
+' ------------------------------------------------------------
+'  Code-point bracket matching (no string comparison)
+' ------------------------------------------------------------
+Private Function CodesMatch(ByVal openCode As Long, _
+        ByVal closeCode As Long) As Boolean
+    Select Case openCode
+        Case 40:  CodesMatch = (closeCode = 41)   ' ( -> )
+        Case 91:  CodesMatch = (closeCode = 93)   ' [ -> ]
+        Case 123: CodesMatch = (closeCode = 125)  ' { -> }
+        Case Else: CodesMatch = False
     End Select
-End Function
-
-' ============================================================
-'  PRIVATE: Check if position is in a code font
-' ============================================================
-Private Function IsCodeFont(doc As Document, ByVal pos As Long) As Boolean
-    Dim rng As Range
-    Dim fontName As String
-
-    On Error Resume Next
-    Set rng = doc.Range(pos, pos + 1)
-    If Err.Number <> 0 Then
-        Err.Clear
-        On Error GoTo 0
-        IsCodeFont = False
-        Exit Function
-    End If
-
-    fontName = ""
-    fontName = rng.Font.Name
-    If Err.Number <> 0 Then
-        Err.Clear
-        On Error GoTo 0
-        IsCodeFont = False
-        Exit Function
-    End If
-    On Error GoTo 0
-
-    IsCodeFont = IsCodeFontName(fontName)
 End Function
 
 ' ============================================================
@@ -619,13 +605,6 @@ Private Function IsCodeFontName(ByVal fontName As String) As Boolean
                      (LCase(fontName) Like "*consolas*")
 End Function
 
-' ----------------------------------------------------------------
-'  PRIVATE: Late-bound wrapper for EngineIsInPageRange
-' ----------------------------------------------------------------
-
-' ----------------------------------------------------------------
-'  PRIVATE: Late-bound wrapper for EngineGetLocationString
-' ----------------------------------------------------------------
 
 ' ----------------------------------------------------------------
 '  PRIVATE: Create a dictionary-based finding (no class dependency)
@@ -651,13 +630,6 @@ Private Function CreateIssueDict(ByVal ruleName_ As String, _
     Set CreateIssueDict = d
 End Function
 
-' ----------------------------------------------------------------
-'  Late-bound wrapper: EngineIsInPageRange
-' ----------------------------------------------------------------
-
-' ----------------------------------------------------------------
-'  Late-bound wrapper: EngineGetLocationString
-' ----------------------------------------------------------------
 
 ' ----------------------------------------------------------------
 '  Late-bound wrapper: PleadingsEngine.IsInPageRange
