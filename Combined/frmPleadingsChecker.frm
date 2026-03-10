@@ -428,13 +428,10 @@ Private Sub btnRun_Click()
         lblStatus.Caption = "No issues found."
         MsgBox "No issues found " & Chr(8212) & " document looks clean.", vbInformation, "Pleadings Checker"
     Else
-        lblStatus.Caption = lastResults.Count & " issue(s) found."
-        ' MsgBox limit is ~1024 chars; truncate if needed
-        If Len(summary) > 900 Then
-            summary = Left$(summary, 900) & vbCrLf & vbCrLf & _
-                      "... (" & lastResults.Count & " issues total " & Chr(8212) & " export report for full list)"
-        End If
-        MsgBox summary, vbInformation, "Pleadings Checker " & Chr(8212) & " Results"
+        lblStatus.Caption = lastResults.Count & " issue(s) found. Click Apply Suggestions or Export Report."
+        MsgBox lastResults.Count & " issue(s) found." & vbCrLf & vbCrLf & _
+               "Click 'Apply Suggestions' to fix, or 'Export Report' for details.", _
+               vbInformation, "Pleadings Checker"
     End If
 End Sub
 
