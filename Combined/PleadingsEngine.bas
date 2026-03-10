@@ -424,9 +424,7 @@ Public Sub ApplyHighlights(doc As Document, _
             If Err.Number = 0 Then
                 rng.HighlightColorIndex = wdYellow
                 If addComments Then
-                    doc.Comments.Add Range:=rng, _
-                        Text:="[" & GetIssueProp(finding, "RuleName") & "] " & GetIssueProp(finding, "Issue") & _
-                              " -- Suggestion: " & GetIssueProp(finding, "Suggestion")
+                    doc.Comments.Add Range:=rng, Text:=BuildCommentText(finding)
                 End If
             End If
             On Error GoTo 0
@@ -459,9 +457,7 @@ Public Sub ApplySuggestionsAsTrackedChanges(doc As Document, _
                 Else
                     rng.HighlightColorIndex = wdYellow
                     If addComments Then
-                        doc.Comments.Add Range:=rng, _
-                            Text:="[" & GetIssueProp(finding, "RuleName") & "] " & GetIssueProp(finding, "Issue") & _
-                                  " -- Suggestion: " & GetIssueProp(finding, "Suggestion")
+                        doc.Comments.Add Range:=rng, Text:=BuildCommentText(finding)
                     End If
                 End If
             End If
@@ -471,15 +467,25 @@ Public Sub ApplySuggestionsAsTrackedChanges(doc As Document, _
             If doc.Content.Start < doc.Content.End Then
                 Set rng = doc.Range(doc.Content.Start, doc.Content.Start + 1)
                 If Err.Number = 0 Then
-                    doc.Comments.Add Range:=rng, _
-                        Text:="[" & GetIssueProp(finding, "RuleName") & "] " & GetIssueProp(finding, "Issue") & _
-                              " -- Suggestion: " & GetIssueProp(finding, "Suggestion")
+                    doc.Comments.Add Range:=rng, Text:=BuildCommentText(finding)
                 End If
             End If
             On Error GoTo 0
         End If
     Next i
 End Sub
+
+' ============================================================
+'  PRIVATE: Build comment text from an issue dictionary
+' ============================================================
+Private Function BuildCommentText(finding As Object) As String
+    Dim txt As String
+    txt = GetIssueProp(finding, "Issue")
+    If Len(GetIssueProp(finding, "Suggestion")) > 0 Then
+        txt = txt & " -- Suggestion: " & GetIssueProp(finding, "Suggestion")
+    End If
+    BuildCommentText = txt
+End Function
 
 ' ============================================================
 '  GENERATE JSON REPORT

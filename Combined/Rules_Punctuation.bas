@@ -420,33 +420,17 @@ Public Function Check_BracketIntegrity(doc As Document) As Collection
     Dim paraText As String
     Dim paraStart As Long
 
-    ' Stack arrays (reused per paragraph)
-    Dim stackCodes() As Long
-    Dim stackPos() As Long
-    Dim stackTop As Long
-    ReDim stackCodes(0 To 100)
-    ReDim stackPos(0 To 100)
+    ' Counters per bracket type (reset per paragraph)
+    Dim parenOpen As Long, parenClose As Long
+    Dim sqOpen As Long, sqClose As Long
+    Dim curlyOpen As Long, curlyClose As Long
 
-    ' Reusable range for font checks
-    Dim fontRng As Range
-    On Error Resume Next
-    Set fontRng = doc.Range(0, 1)
-    If Err.Number <> 0 Then
-        Err.Clear: On Error GoTo 0
-        Set Check_BracketIntegrity = issues
-        Exit Function
-    End If
-    On Error GoTo 0
+    ' Position of first unmatched bracket (for issue location)
+    Dim firstParenPos As Long, firstSqPos As Long, firstCurlyPos As Long
 
     Dim b() As Byte, bMax As Long
     Dim i As Long, code As Long, pos As Long
-    Dim isOpen As Boolean, isClose As Boolean
-    Dim fontName As String
-    Dim openCode As Long, openPos As Long
 
-    ' -- Process each paragraph independently -------------------
-    ' This prevents one stray bracket from cascading errors
-    ' across the entire document.
     For Each para In doc.Paragraphs
         On Error Resume Next
         paraText = para.Range.Text
@@ -459,108 +443,57 @@ Public Function Check_BracketIntegrity(doc As Document) As Collection
 
         If LenB(paraText) = 0 Then GoTo NxtPara
 
-        ' Reset stack for this paragraph
-        stackTop = -1
+        ' Reset counters
+        parenOpen = 0: parenClose = 0
+        sqOpen = 0: sqClose = 0
+        curlyOpen = 0: curlyClose = 0
+        firstParenPos = -1: firstSqPos = -1: firstCurlyPos = -1
 
         b = paraText
         bMax = UBound(b) - 1
 
         For i = 0 To bMax Step 2
             code = b(i) Or (CLng(b(i + 1)) * 256&)
+            pos = paraStart + (i \ 2)
 
-            isOpen = (code = 40 Or code = 91 Or code = 123)
-            isClose = (code = 41 Or code = 93 Or code = 125)
-
-            If isOpen Or isClose Then
-                pos = paraStart + (i \ 2)
-
-                ' Code-font gate
-                On Error Resume Next
-                Err.Clear
-                fontRng.SetRange pos, pos + 1
-                If Err.Number = 0 Then
-                    fontName = fontRng.Font.Name
-                    If Err.Number <> 0 Then fontName = "": Err.Clear
-                    If IsCodeFontName(fontName) Then
-                        On Error GoTo 0
-                        GoTo NxtChar
-                    End If
-                Else
-                    Err.Clear
-                End If
-                On Error GoTo 0
-
-                If isOpen Then
-                    stackTop = stackTop + 1
-                    If stackTop > UBound(stackCodes) Then
-                        ReDim Preserve stackCodes(0 To stackTop + 100)
-                        ReDim Preserve stackPos(0 To stackTop + 100)
-                    End If
-                    stackCodes(stackTop) = code
-                    stackPos(stackTop) = pos
-                Else
-                    ' Closing bracket -- find matching opener
-                    If stackTop < 0 Then
-                        ' No opener at all in this paragraph
-                        CreateBracketIssue doc, issues, pos, ChrW$(code), _
-                            "Closing '" & ChrW$(code) & _
-                            "' with no matching opener in this paragraph"
-                    Else
-                        ' Check if top of stack matches
-                        openCode = stackCodes(stackTop)
-                        openPos = stackPos(stackTop)
-
-                        If CodesMatch(openCode, code) Then
-                            ' Perfect match -- pop and continue
-                            stackTop = stackTop - 1
-                        Else
-                            ' Mismatch -- scan stack for a valid opener
-                            Dim found As Boolean
-                            Dim s As Long
-                            found = False
-                            For s = stackTop - 1 To 0 Step -1
-                                If CodesMatch(stackCodes(s), code) Then
-                                    ' Found a match deeper in stack.
-                                    ' The items between s+1..stackTop are
-                                    ' the unclosed openers.
-                                    Dim u As Long
-                                    For u = s + 1 To stackTop
-                                        CreateBracketIssue doc, issues, _
-                                            stackPos(u), ChrW$(stackCodes(u)), _
-                                            "'" & ChrW$(stackCodes(u)) & _
-                                            "' opened but not closed before '" & _
-                                            ChrW$(code) & "' at same level"
-                                    Next u
-                                    stackTop = s - 1
-                                    found = True
-                                    Exit For
-                                End If
-                            Next s
-                            If Not found Then
-                                ' No matching opener anywhere -- report
-                                ' single issue on the closer
-                                CreateBracketIssue doc, issues, pos, _
-                                    ChrW$(code), _
-                                    "Closing '" & ChrW$(code) & _
-                                    "' does not match opener '" & _
-                                    ChrW$(openCode) & "'"
-                                ' Pop the unmatched opener too
-                                stackTop = stackTop - 1
-                            End If
-                        End If
-                    End If
-                End If
-            End If
-NxtChar:
+            Select Case code
+                Case 40   ' (
+                    parenOpen = parenOpen + 1
+                    If firstParenPos < 0 Then firstParenPos = pos
+                Case 41   ' )
+                    parenClose = parenClose + 1
+                    If firstParenPos < 0 Then firstParenPos = pos
+                Case 91   ' [
+                    sqOpen = sqOpen + 1
+                    If firstSqPos < 0 Then firstSqPos = pos
+                Case 93   ' ]
+                    sqClose = sqClose + 1
+                    If firstSqPos < 0 Then firstSqPos = pos
+                Case 123  ' {
+                    curlyOpen = curlyOpen + 1
+                    If firstCurlyPos < 0 Then firstCurlyPos = pos
+                Case 125  ' }
+                    curlyClose = curlyClose + 1
+                    If firstCurlyPos < 0 Then firstCurlyPos = pos
+            End Select
         Next i
 
-        ' Unclosed openers remaining in this paragraph
-        For s = 0 To stackTop
-            CreateBracketIssue doc, issues, stackPos(s), _
-                ChrW$(stackCodes(s)), _
-                "'" & ChrW$(stackCodes(s)) & _
-                "' opened but never closed in this paragraph"
-        Next s
+        ' Report once per bracket type if counts don't match
+        If parenOpen <> parenClose Then
+            CreateBracketIssue doc, issues, firstParenPos, "()", _
+                "Unbalanced parentheses: " & parenOpen & " opened, " & _
+                parenClose & " closed"
+        End If
+        If sqOpen <> sqClose Then
+            CreateBracketIssue doc, issues, firstSqPos, "[]", _
+                "Unbalanced square brackets: " & sqOpen & " opened, " & _
+                sqClose & " closed"
+        End If
+        If curlyOpen <> curlyClose Then
+            CreateBracketIssue doc, issues, firstCurlyPos, "{}", _
+                "Unbalanced curly braces: " & curlyOpen & " opened, " & _
+                curlyClose & " closed"
+        End If
 
 NxtPara:
     Next para

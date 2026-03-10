@@ -363,7 +363,9 @@ Private Sub BuildSpellingArrays(ByRef usWords() As String, _
     usWords(idx) = "gray":        ukWords(idx) = "grey":        idx = idx + 1
     usWords(idx) = "plow":        ukWords(idx) = "plough":      idx = idx + 1
     usWords(idx) = "tire":        ukWords(idx) = "tyre":        idx = idx + 1
-    usWords(idx) = "check":       ukWords(idx) = "cheque":      idx = idx + 1
+    ' "check/cheque" omitted: "check" as a verb (to verify) is valid UK English;
+    ' only the financial-instrument noun means "cheque", which is too context-
+    ' dependent to flag reliably.
     usWords(idx) = "skeptic":     ukWords(idx) = "sceptic":     idx = idx + 1
     usWords(idx) = "aluminum":    ukWords(idx) = "aluminium":   idx = idx + 1
     usWords(idx) = "maneuver":    ukWords(idx) = "manoeuvre":    idx = idx + 1
