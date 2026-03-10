@@ -52,13 +52,12 @@ Public Sub PleadingsChecker()
         MsgBox "Please open a document first.", vbExclamation, "Pleadings Checker"
         Exit Sub
     End If
-    ' Delegate to the launcher module (MsgBox/InputBox based, no form)
+    ' Show the UserForm; fall back to quick run if form not imported
     On Error Resume Next
-    Application.Run "PleadingsLauncher.LaunchChecker"
+    frmPleadingsChecker.Show
     If Err.Number <> 0 Then
         Err.Clear
         On Error GoTo 0
-        ' Fallback: run all rules directly if launcher not imported
         RunQuick
     End If
     On Error GoTo 0
