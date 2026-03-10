@@ -452,7 +452,8 @@ RunnerCleanup:
 End Function
 
 ' ============================================================
-'  FILTER: Remove issues inside block quotes and cover pages
+'  FILTER: Remove issues inside block quotes, cover pages,
+'  and contents/table-of-contents pages
 '
 '  Block quotes detected by:
 '    1. Style name containing "quote", "block", or "extract"
@@ -463,6 +464,11 @@ End Function
 '    - Content before the first section break, OR
 '    - All page-1 content when the document has > 1 page and
 '      page 1 contains no numbered paragraphs
+'
+'  Contents pages detected by:
+'    - Word's built-in TOC field ranges
+'    - Paragraphs styled with "TOC" styles
+'    - Paragraphs containing dot/tab leaders followed by numbers
 ' ============================================================
 Private Function FilterBlockQuoteIssues(doc As Document, _
                                          issues As Collection) As Collection
@@ -520,6 +526,89 @@ Private Function FilterBlockQuoteIssues(doc As Document, _
             If hasNumberedPara Then coverPageEnd = -1
         End If
     End If
+    On Error GoTo 0
+
+    ' -- Determine TOC / contents page ranges -----------------------
+    Dim tocStarts() As Long, tocEnds() As Long
+    Dim tocCount As Long, tocCap As Long
+    tocCap = 16
+    ReDim tocStarts(0 To tocCap - 1)
+    ReDim tocEnds(0 To tocCap - 1)
+    tocCount = 0
+
+    On Error Resume Next
+
+    ' Method 1: Word's built-in TOC fields
+    Dim toc As TableOfContents
+    For Each toc In doc.TablesOfContents
+        Err.Clear
+        Dim tocRng As Range
+        Set tocRng = toc.Range
+        If Err.Number = 0 Then
+            If tocCount >= tocCap Then
+                tocCap = tocCap * 2
+                ReDim Preserve tocStarts(0 To tocCap - 1)
+                ReDim Preserve tocEnds(0 To tocCap - 1)
+            End If
+            tocStarts(tocCount) = tocRng.Start
+            tocEnds(tocCount) = tocRng.End
+            tocCount = tocCount + 1
+        Else
+            Err.Clear
+        End If
+    Next toc
+
+    ' Method 2: Scan for TOC-styled paragraphs (catches manual TOCs)
+    Dim tocPara As Paragraph
+    For Each tocPara In doc.Paragraphs
+        Err.Clear
+        Dim tocSn As String
+        tocSn = ""
+        tocSn = LCase(tocPara.Style.NameLocal)
+        If Err.Number <> 0 Then tocSn = "": Err.Clear
+
+        Dim isTocPara As Boolean
+        isTocPara = False
+
+        ' Check style name for TOC indicators
+        If InStr(tocSn, "toc") > 0 Or InStr(tocSn, "table of contents") > 0 Or _
+           InStr(tocSn, "contents") > 0 Then
+            isTocPara = True
+        End If
+
+        ' Check for dot/tab leader pattern: text followed by dots/tabs then page number
+        If Not isTocPara Then
+            Dim tocParaText As String
+            tocParaText = ""
+            tocParaText = tocPara.Range.Text
+            If Err.Number <> 0 Then tocParaText = "": Err.Clear
+            If Len(tocParaText) > 3 Then
+                ' Pattern: dots or tabs followed by digits at end of line
+                If tocParaText Like "*[." & vbTab & "][." & vbTab & "]*#" & vbCr Or _
+                   tocParaText Like "*[." & vbTab & "][." & vbTab & "]*#" Then
+                    isTocPara = True
+                End If
+            End If
+        End If
+
+        If isTocPara Then
+            Dim tpStart As Long, tpEnd As Long
+            tpStart = tocPara.Range.Start
+            tpEnd = tocPara.Range.End
+            If Err.Number = 0 Then
+                If tocCount >= tocCap Then
+                    tocCap = tocCap * 2
+                    ReDim Preserve tocStarts(0 To tocCap - 1)
+                    ReDim Preserve tocEnds(0 To tocCap - 1)
+                End If
+                tocStarts(tocCount) = tpStart
+                tocEnds(tocCount) = tpEnd
+                tocCount = tocCount + 1
+            Else
+                Err.Clear
+            End If
+        End If
+    Next tocPara
     On Error GoTo 0
 
     ' -- Build list of block-quote paragraph ranges ----------------
@@ -602,7 +691,7 @@ NxtBQ:
     On Error GoTo 0
 
     ' -- Filter issues ---------------------------------------------
-    If bqCount = 0 And coverPageEnd < 0 Then
+    If bqCount = 0 And coverPageEnd < 0 And tocCount = 0 Then
         Set FilterBlockQuoteIssues = issues
         Exit Function
     End If
@@ -615,6 +704,18 @@ NxtBQ:
 
         ' Skip issues on cover page
         If coverPageEnd > 0 And rs < coverPageEnd Then GoTo SkipIssue
+
+        ' Skip issues in table of contents / contents pages
+        Dim inTOC As Boolean
+        inTOC = False
+        Dim t As Long
+        For t = 0 To tocCount - 1
+            If rs >= tocStarts(t) And rs < tocEnds(t) Then
+                inTOC = True
+                Exit For
+            End If
+        Next t
+        If inTOC Then GoTo SkipIssue
 
         ' Skip content-based issues in block quotes
         ' (formatting rules like font_consistency still apply)
