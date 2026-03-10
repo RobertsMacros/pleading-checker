@@ -416,11 +416,21 @@ End Function
 ' ============================================================
 Public Function Check_BracketIntegrity(doc As Document) As Collection
     Dim issues As New Collection
-    Dim docText As String
+    Dim para As Paragraph
+    Dim paraText As String
+    Dim paraStart As Long
 
-    ' -- Get full document text ---------------------------------
+    ' Stack arrays (reused per paragraph)
+    Dim stackCodes() As Long
+    Dim stackPos() As Long
+    Dim stackTop As Long
+    ReDim stackCodes(0 To 100)
+    ReDim stackPos(0 To 100)
+
+    ' Reusable range for font checks
+    Dim fontRng As Range
     On Error Resume Next
-    docText = doc.Content.Text
+    Set fontRng = doc.Range(0, 1)
     If Err.Number <> 0 Then
         Err.Clear: On Error GoTo 0
         Set Check_BracketIntegrity = issues
@@ -428,107 +438,132 @@ Public Function Check_BracketIntegrity(doc As Document) As Collection
     End If
     On Error GoTo 0
 
-    If LenB(docText) = 0 Then
-        Set Check_BracketIntegrity = issues
-        Exit Function
-    End If
-
-    ' -- Byte-array scan (avoids 600K Mid$ allocs) -------------
-    Dim b() As Byte
-    b = docText
-    Dim bMax As Long
-    bMax = UBound(b) - 1
-
-    ' Stack: parallel Long arrays (code-point + doc position)
-    Dim stackCodes() As Long
-    Dim stackPos() As Long
-    Dim stackTop As Long
-    stackTop = -1
-    ReDim stackCodes(0 To 1000)
-    ReDim stackPos(0 To 1000)
-
-    ' Reusable range for font checks (created once, moved
-    ' via SetRange -- avoids per-bracket doc.Range creation)
-    Dim fontRng As Range
-    Set fontRng = doc.Range(0, 1)
-
+    Dim b() As Byte, bMax As Long
     Dim i As Long, code As Long, pos As Long
     Dim isOpen As Boolean, isClose As Boolean
     Dim fontName As String
     Dim openCode As Long, openPos As Long
 
-    For i = 0 To bMax Step 2
-        code = b(i) Or (CLng(b(i + 1)) * 256&)
+    ' -- Process each paragraph independently -------------------
+    ' This prevents one stray bracket from cascading errors
+    ' across the entire document.
+    For Each para In doc.Paragraphs
+        On Error Resume Next
+        paraText = para.Range.Text
+        paraStart = para.Range.Start
+        If Err.Number <> 0 Then
+            Err.Clear: On Error GoTo 0
+            GoTo NxtPara
+        End If
+        On Error GoTo 0
 
-        ' Fast integer check: ( ) [ ] { }
-        isOpen = (code = 40 Or code = 91 Or code = 123)
-        isClose = (code = 41 Or code = 93 Or code = 125)
+        If LenB(paraText) = 0 Then GoTo NxtPara
 
-        If isOpen Or isClose Then
-            pos = i \ 2  ' document position (0-based)
+        ' Reset stack for this paragraph
+        stackTop = -1
 
-            ' Code-font gate (reusable range, no alloc)
-            On Error Resume Next
-            Err.Clear
-            fontRng.SetRange pos, pos + 1
-            If Err.Number = 0 Then
-                fontName = fontRng.Font.Name
-                If Err.Number <> 0 Then fontName = "": Err.Clear
-                If IsCodeFontName(fontName) Then
-                    On Error GoTo 0
-                    GoTo NxtBracket
-                End If
-            Else
+        b = paraText
+        bMax = UBound(b) - 1
+
+        For i = 0 To bMax Step 2
+            code = b(i) Or (CLng(b(i + 1)) * 256&)
+
+            isOpen = (code = 40 Or code = 91 Or code = 123)
+            isClose = (code = 41 Or code = 93 Or code = 125)
+
+            If isOpen Or isClose Then
+                pos = paraStart + (i \ 2)
+
+                ' Code-font gate
+                On Error Resume Next
                 Err.Clear
-            End If
-            On Error GoTo 0
-
-            If isOpen Then
-                stackTop = stackTop + 1
-                If stackTop > UBound(stackCodes) Then
-                    ReDim Preserve stackCodes(0 To stackTop + 500)
-                    ReDim Preserve stackPos(0 To stackTop + 500)
-                End If
-                stackCodes(stackTop) = code
-                stackPos(stackTop) = pos
-            Else
-                ' Closing bracket
-                If stackTop < 0 Then
-                    CreateBracketIssue doc, issues, pos, ChrW$(code), _
-                        "Unmatched closing bracket '" & ChrW$(code) & _
-                        "' with no corresponding opener"
+                fontRng.SetRange pos, pos + 1
+                If Err.Number = 0 Then
+                    fontName = fontRng.Font.Name
+                    If Err.Number <> 0 Then fontName = "": Err.Clear
+                    If IsCodeFontName(fontName) Then
+                        On Error GoTo 0
+                        GoTo NxtChar
+                    End If
                 Else
-                    openCode = stackCodes(stackTop)
-                    openPos = stackPos(stackTop)
-                    stackTop = stackTop - 1
+                    Err.Clear
+                End If
+                On Error GoTo 0
 
-                    If Not CodesMatch(openCode, code) Then
-                        CreateBracketIssue doc, issues, openPos, _
-                            ChrW$(openCode), _
-                            "Mismatched bracket: opened with '" & _
-                            ChrW$(openCode) & "' but closed with '" & _
-                            ChrW$(code) & "'"
-                        CreateBracketIssue doc, issues, pos, _
-                            ChrW$(code), _
-                            "Mismatched bracket: closing '" & _
-                            ChrW$(code) & "' does not match opener '" & _
-                            ChrW$(openCode) & "'"
+                If isOpen Then
+                    stackTop = stackTop + 1
+                    If stackTop > UBound(stackCodes) Then
+                        ReDim Preserve stackCodes(0 To stackTop + 100)
+                        ReDim Preserve stackPos(0 To stackTop + 100)
+                    End If
+                    stackCodes(stackTop) = code
+                    stackPos(stackTop) = pos
+                Else
+                    ' Closing bracket -- find matching opener
+                    If stackTop < 0 Then
+                        ' No opener at all in this paragraph
+                        CreateBracketIssue doc, issues, pos, ChrW$(code), _
+                            "Closing '" & ChrW$(code) & _
+                            "' with no matching opener in this paragraph"
+                    Else
+                        ' Check if top of stack matches
+                        openCode = stackCodes(stackTop)
+                        openPos = stackPos(stackTop)
+
+                        If CodesMatch(openCode, code) Then
+                            ' Perfect match -- pop and continue
+                            stackTop = stackTop - 1
+                        Else
+                            ' Mismatch -- scan stack for a valid opener
+                            Dim found As Boolean
+                            Dim s As Long
+                            found = False
+                            For s = stackTop - 1 To 0 Step -1
+                                If CodesMatch(stackCodes(s), code) Then
+                                    ' Found a match deeper in stack.
+                                    ' The items between s+1..stackTop are
+                                    ' the unclosed openers.
+                                    Dim u As Long
+                                    For u = s + 1 To stackTop
+                                        CreateBracketIssue doc, issues, _
+                                            stackPos(u), ChrW$(stackCodes(u)), _
+                                            "'" & ChrW$(stackCodes(u)) & _
+                                            "' opened but not closed before '" & _
+                                            ChrW$(code) & "' at same level"
+                                    Next u
+                                    stackTop = s - 1
+                                    found = True
+                                    Exit For
+                                End If
+                            Next s
+                            If Not found Then
+                                ' No matching opener anywhere -- report
+                                ' single issue on the closer
+                                CreateBracketIssue doc, issues, pos, _
+                                    ChrW$(code), _
+                                    "Closing '" & ChrW$(code) & _
+                                    "' does not match opener '" & _
+                                    ChrW$(openCode) & "'"
+                                ' Pop the unmatched opener too
+                                stackTop = stackTop - 1
+                            End If
+                        End If
                     End If
                 End If
             End If
-        End If
+NxtChar:
+        Next i
 
-NxtBracket:
-    Next i
+        ' Unclosed openers remaining in this paragraph
+        For s = 0 To stackTop
+            CreateBracketIssue doc, issues, stackPos(s), _
+                ChrW$(stackCodes(s)), _
+                "'" & ChrW$(stackCodes(s)) & _
+                "' opened but never closed in this paragraph"
+        Next s
 
-    ' -- Unmatched openers remaining on stack -------------------
-    Dim s As Long
-    For s = 0 To stackTop
-        CreateBracketIssue doc, issues, stackPos(s), _
-            ChrW$(stackCodes(s)), _
-            "Unmatched opening bracket '" & ChrW$(stackCodes(s)) & _
-            "' with no corresponding closer"
-    Next s
+NxtPara:
+    Next para
 
     Set Check_BracketIntegrity = issues
 End Function
