@@ -442,8 +442,8 @@ Public Function Check_BracketIntegrity(doc As Document) As Collection
     ' Stack: parallel Long arrays (code-point + doc position)
     Dim stackCodes() As Long
     Dim stackPos() As Long
-    Dim sTop As Long
-    sTop = -1
+    Dim stackTop As Long
+    stackTop = -1
     ReDim stackCodes(0 To 1000)
     ReDim stackPos(0 To 1000)
 
@@ -484,23 +484,23 @@ Public Function Check_BracketIntegrity(doc As Document) As Collection
             On Error GoTo 0
 
             If isOpen Then
-                sTop = sTop + 1
-                If sTop > UBound(stackCodes) Then
-                    ReDim Preserve stackCodes(0 To sTop + 500)
-                    ReDim Preserve stackPos(0 To sTop + 500)
+                stackTop = stackTop + 1
+                If stackTop > UBound(stackCodes) Then
+                    ReDim Preserve stackCodes(0 To stackTop + 500)
+                    ReDim Preserve stackPos(0 To stackTop + 500)
                 End If
-                stackCodes(sTop) = code
-                stackPos(sTop) = pos
+                stackCodes(stackTop) = code
+                stackPos(stackTop) = pos
             Else
                 ' Closing bracket
-                If sTop < 0 Then
+                If stackTop < 0 Then
                     CreateBracketIssue doc, issues, pos, ChrW$(code), _
                         "Unmatched closing bracket '" & ChrW$(code) & _
                         "' with no corresponding opener"
                 Else
-                    openCode = stackCodes(sTop)
-                    openPos = stackPos(sTop)
-                    sTop = sTop - 1
+                    openCode = stackCodes(stackTop)
+                    openPos = stackPos(stackTop)
+                    stackTop = stackTop - 1
 
                     If Not CodesMatch(openCode, code) Then
                         CreateBracketIssue doc, issues, openPos, _
@@ -523,7 +523,7 @@ NxtBracket:
 
     ' -- Unmatched openers remaining on stack -------------------
     Dim s As Long
-    For s = 0 To sTop
+    For s = 0 To stackTop
         CreateBracketIssue doc, issues, stackPos(s), _
             ChrW$(stackCodes(s)), _
             "Unmatched opening bracket '" & ChrW$(stackCodes(s)) & _

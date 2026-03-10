@@ -6,7 +6,7 @@ Attribute VB_Name = "Rules_Brands"
 ' Proofreading rule: enforces correct brand/entity name
 ' spellings and capitalisations. Maintains a configurable
 ' dictionary of correct forms and their known incorrect
-' variants, and flags any incorrect usage found in the
+' brandVariants, and flags any incorrect usage found in the
 ' document.
 '
 ' Provides persistence via SaveBrandRules / LoadBrandRules
@@ -20,7 +20,7 @@ Option Explicit
 Private Const RULE_NAME As String = "brand_name_enforcement"
 
 ' -- Module-level brand rules dictionary ---------------------
-' Key = correct form (String), Value = comma-separated incorrect variants (String)
+' Key = correct form (String), Value = comma-separated incorrect brandVariants (String)
 Private brandRules As Object
 
 ' ============================================================
@@ -37,21 +37,21 @@ Public Function Check_BrandNameEnforcement(doc As Document) As Collection
     Dim keys As Variant
     Dim k As Long
     Dim correctForm As String
-    Dim variants As Variant
+    Dim brandVariants As Variant
     Dim v As Long
-    Dim variant As String
+    Dim brandVariant As String
 
     keys = brandRules.keys
 
     For k = 0 To brandRules.Count - 1
         correctForm = CStr(keys(k))
-        variants = Split(CStr(brandRules(correctForm)), ",")
+        brandVariants = Split(CStr(brandRules(correctForm)), ",")
 
-        For v = LBound(variants) To UBound(variants)
-            variant = Trim(CStr(variants(v)))
-            If Len(variant) = 0 Then GoTo NextVariant
+        For v = LBound(brandVariants) To UBound(brandVariants)
+            brandVariant = Trim(CStr(brandVariants(v)))
+            If Len(brandVariant) = 0 Then GoTo NextVariant
 
-            SearchAndFlag doc, variant, correctForm, issues
+            SearchAndFlag doc, brandVariant, correctForm, issues
 
 NextVariant:
         Next v
@@ -61,10 +61,10 @@ NextVariant:
 End Function
 
 ' ============================================================
-'  PRIVATE: Search for an incorrect variant and flag matches
+'  PRIVATE: Search for an incorrect brandVariant and flag matches
 ' ============================================================
 Private Sub SearchAndFlag(doc As Document, _
-                           variant As String, _
+                           brandVariant As String, _
                            correctForm As String, _
                            ByRef issues As Collection)
     Dim rng As Range
@@ -75,7 +75,7 @@ Private Sub SearchAndFlag(doc As Document, _
     Set rng = doc.Content.Duplicate
     With rng.Find
         .ClearFormatting
-        .Text = variant
+        .Text = brandVariant
         .MatchWholeWord = True
         .MatchCase = True
         .MatchWildcards = False
@@ -161,7 +161,7 @@ End Function
 
 ' ============================================================
 '  PUBLIC: Save brand rules to a text file
-'  Format: one line per rule -- "CorrectForm=variant1,variant2"
+'  Format: one line per rule -- "CorrectForm=brandVariant1,brandVariant2"
 ' ============================================================
 Public Sub SaveBrandRules(filePath As String)
     If brandRules Is Nothing Then Exit Sub
@@ -191,14 +191,14 @@ End Sub
 ' ============================================================
 '  PUBLIC: Load brand rules from a text file
 '  Replaces existing rules with contents of the file.
-'  Format: one line per rule -- "CorrectForm=variant1,variant2"
+'  Format: one line per rule -- "CorrectForm=brandVariant1,brandVariant2"
 ' ============================================================
 Public Sub LoadBrandRules(filePath As String)
     Dim fileNum As Integer
     Dim lineText As String
     Dim eqPos As Long
     Dim correct As String
-    Dim variants As String
+    Dim brandVariants As String
 
     Set brandRules = CreateObject("Scripting.Dictionary")
 
@@ -217,11 +217,11 @@ Public Sub LoadBrandRules(filePath As String)
         eqPos = InStr(lineText, "=")
         If eqPos > 1 Then
             correct = Trim(Left(lineText, eqPos - 1))
-            variants = Trim(Mid(lineText, eqPos + 1))
+            brandVariants = Trim(Mid(lineText, eqPos + 1))
 
-            If Len(correct) > 0 And Len(variants) > 0 Then
+            If Len(correct) > 0 And Len(brandVariants) > 0 Then
                 If Not brandRules.Exists(correct) Then
-                    brandRules.Add correct, variants
+                    brandRules.Add correct, brandVariants
                 End If
             End If
         End If

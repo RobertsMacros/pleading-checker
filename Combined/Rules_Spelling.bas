@@ -956,27 +956,24 @@ Public Function Check_ColourFormatting(doc As Document) As Collection
             GoTo NextParaPass1
         End If
 
-        ' Iterate runs within the paragraph
-        Dim r As Long
-        For r = 1 To paraRange.Runs.Count
+        ' Iterate formatting runs within the paragraph
+        Set rn = paraRange.Duplicate
+        rn.Collapse wdCollapseStart
+        Do While rn.Start < paraRange.End
+            rn.MoveEnd wdCharacterFormatting, 1
+            If rn.Start >= paraRange.End Then Exit Do
+
             Err.Clear
-            Set rn = paraRange.Runs(r)
-            If Err.Number <> 0 Then
-                Err.Clear
-                GoTo NextRunPass1
-            End If
+            runText = rn.Text
+            If Err.Number <> 0 Then Err.Clear: GoTo AdvanceRun1
 
             ' Skip whitespace-only runs
-            runText = rn.Text
             If Len(Trim(Replace(Replace(runText, vbCr, ""), vbLf, ""))) = 0 Then
-                GoTo NextRunPass1
+                GoTo AdvanceRun1
             End If
 
             runColor = rn.Font.Color
-            If Err.Number <> 0 Then
-                Err.Clear
-                GoTo NextRunPass1
-            End If
+            If Err.Number <> 0 Then Err.Clear: GoTo AdvanceRun1
 
             If colourCounts.Exists(runColor) Then
                 colourCounts(runColor) = colourCounts(runColor) + 1
@@ -984,8 +981,9 @@ Public Function Check_ColourFormatting(doc As Document) As Collection
                 colourCounts.Add runColor, 1
             End If
 
-NextRunPass1:
-        Next r
+AdvanceRun1:
+            rn.Collapse wdCollapseEnd
+        Loop
 
 NextParaPass1:
     Next para
@@ -1055,35 +1053,32 @@ NextParaPass1:
             GoTo NextParaPass2
         End If
 
-        ' Iterate runs
-        For r = 1 To paraRange.Runs.Count
+        ' Iterate formatting runs
+        Set rn = paraRange.Duplicate
+        rn.Collapse wdCollapseStart
+        Do While rn.Start < paraRange.End
+            rn.MoveEnd wdCharacterFormatting, 1
+            If rn.Start >= paraRange.End Then Exit Do
+
             Err.Clear
-            Set rn = paraRange.Runs(r)
-            If Err.Number <> 0 Then
-                Err.Clear
-                GoTo NextRunPass2
-            End If
+            runText = rn.Text
+            If Err.Number <> 0 Then Err.Clear: GoTo AdvanceRun2
 
             ' Skip whitespace-only runs
-            runText = rn.Text
             If Len(Trim(Replace(Replace(runText, vbCr, ""), vbLf, ""))) = 0 Then
-                GoTo NextRunPass2
+                GoTo AdvanceRun2
             End If
 
             runColor = rn.Font.Color
-            If Err.Number <> 0 Then
-                Err.Clear
-                GoTo NextRunPass2
-            End If
+            If Err.Number <> 0 Then Err.Clear: GoTo AdvanceRun2
 
             ' Skip if colour matches dominant or is automatic
             If runColor = dominantColour Or runColor = WD_COLOR_AUTOMATIC Then
-                ' Flush any active group
                 If groupActive Then
                     FlushColourGroup doc, issues, groupStartPos, groupEndPos, groupColour
                     groupActive = False
                 End If
-                GoTo NextRunPass2
+                GoTo AdvanceRun2
             End If
 
             ' Skip hyperlinks
@@ -1092,28 +1087,26 @@ NextParaPass1:
                     FlushColourGroup doc, issues, groupStartPos, groupEndPos, groupColour
                     groupActive = False
                 End If
-                GoTo NextRunPass2
+                GoTo AdvanceRun2
             End If
 
             ' -- This run has a non-standard colour -----------
             If groupActive And runColor = groupColour And _
                rn.Start = groupEndPos Then
-                ' Extend existing group
                 groupEndPos = rn.End
             Else
-                ' Flush previous group if any
                 If groupActive Then
                     FlushColourGroup doc, issues, groupStartPos, groupEndPos, groupColour
                 End If
-                ' Start new group
                 groupStartPos = rn.Start
                 groupEndPos = rn.End
                 groupColour = runColor
                 groupActive = True
             End If
 
-NextRunPass2:
-        Next r
+AdvanceRun2:
+            rn.Collapse wdCollapseEnd
+        Loop
 
 NextParaPass2:
     Next para
