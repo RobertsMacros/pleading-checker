@@ -261,13 +261,10 @@ Public Function Check_FontConsistency(doc As Document) As Collection
     '  PASS 1: Build font profiles per context
     ' ==========================================================
     Dim headingFonts As Object  ' FontKey -> count
-    Dim headingFonts As Object
     Set headingFonts = CreateObject("Scripting.Dictionary")
     Dim bodyFonts As Object     ' FontKey -> count
-    Dim bodyFonts As Object
     Set bodyFonts = CreateObject("Scripting.Dictionary")
     Dim footnoteFonts As Object ' FontKey -> count
-    Dim footnoteFonts As Object
     Set footnoteFonts = CreateObject("Scripting.Dictionary")
 
     Dim para As Paragraph
@@ -400,7 +397,7 @@ NextFootnote:
         Dim run As Range
         Dim runIdx As Long
         runIdx = 0
-        Dim runs As Ranges
+        Dim runs As Object
 
         ' Iterate through character runs in the paragraph
         Dim runRange As Range

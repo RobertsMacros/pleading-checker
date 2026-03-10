@@ -754,12 +754,3 @@ Private Function IssueToJSON(finding As Object) As String
     s = s & "    }"
     IssueToJSON = s
 End Function
-
-Private Function EscJSON(ByVal txt As String) As String
-    txt = Replace(txt, "\", "\\")
-    txt = Replace(txt, """", "\""")
-    txt = Replace(txt, vbCr, "\r")
-    txt = Replace(txt, vbLf, "\n")
-    txt = Replace(txt, vbTab, "\t")
-    EscJSON = txt
-End Function

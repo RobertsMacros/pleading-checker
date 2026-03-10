@@ -434,13 +434,16 @@ Public Function Check_BracketIntegrity(doc As Document) As Collection
     End If
 
     ' -- Byte-array scan (avoids 600K Mid$ allocs) -------------
-    Dim b() As Byte: b = docText
-    Dim bMax As Long: bMax = UBound(b) - 1
+    Dim b() As Byte
+    b = docText
+    Dim bMax As Long
+    bMax = UBound(b) - 1
 
     ' Stack: parallel Long arrays (code-point + doc position)
     Dim stackCodes() As Long
     Dim stackPos() As Long
-    Dim sTop As Long: sTop = -1
+    Dim sTop As Long
+    sTop = -1
     ReDim stackCodes(0 To 1000)
     ReDim stackPos(0 To 1000)
 

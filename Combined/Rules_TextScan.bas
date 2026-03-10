@@ -357,8 +357,9 @@ End Function
 '  PRIVATE: Check if a character is punctuation
 ' ------------------------------------------------------------
 Private Function IsPunctuation(ByVal ch As String) As Boolean
-    Const PUNCT_CHARS As String = ".,;:!?""'()[]{}/-" & Chr(8220) & Chr(8221) & _
-                                   Chr(8216) & Chr(8217) & Chr(8212) & Chr(8211)
+    Dim PUNCT_CHARS As String
+    PUNCT_CHARS = ".,;:!?""'()[]{}/-" & Chr(8220) & Chr(8221) & _
+                  Chr(8216) & Chr(8217) & Chr(8212) & Chr(8211)
     IsPunctuation = (InStr(1, PUNCT_CHARS, ch) > 0)
 End Function
 

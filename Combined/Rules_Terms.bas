@@ -611,7 +611,8 @@ Private Function MergeArrays2(a1 As Variant, a2 As Variant) As Variant
           + UBound(a2) - LBound(a2) + 1
     Dim out() As Variant
     ReDim out(0 To total - 1)
-    Dim idx As Long: idx = 0
+    Dim idx As Long
+    idx = 0
     Dim v As Variant
     For Each v In a1: out(idx) = v: idx = idx + 1: Next v
     For Each v In a2: out(idx) = v: idx = idx + 1: Next v

@@ -63,8 +63,10 @@ Public Function Check_QuotationMarkConsistency( _
     '    VBA strings are UTF-16LE: two bytes per character.
     '    Byte(i) is low byte, Byte(i+1) is high byte.
     '    Character's document position = i \ 2.
-    Dim b() As Byte:  b = docText
-    Dim bMax As Long: bMax = UBound(b) - 1   ' last even index
+    Dim b() As Byte
+    b = docText
+    Dim bMax As Long
+    bMax = UBound(b) - 1   ' last even index
 
     ' -- Counters -----------------------------------------------
     Dim cSD As Long   ' straight double
@@ -73,14 +75,22 @@ Public Function Check_QuotationMarkConsistency( _
     Dim cCS As Long   ' curly single   (excluding apostrophes)
 
     ' -- Position collectors (grow-on-demand) --------------------
-    Dim pSD() As Long: ReDim pSD(0 To 127)
-    Dim pCD() As Long: ReDim pCD(0 To 127)
-    Dim pSS() As Long: ReDim pSS(0 To 127)
-    Dim pCS() As Long: ReDim pCS(0 To 127)
-    Dim capSD As Long: capSD = 128
-    Dim capCD As Long: capCD = 128
-    Dim capSS As Long: capSS = 128
-    Dim capCS As Long: capCS = 128
+    Dim pSD() As Long
+    ReDim pSD(0 To 127)
+    Dim pCD() As Long
+    ReDim pCD(0 To 127)
+    Dim pSS() As Long
+    ReDim pSS(0 To 127)
+    Dim pCS() As Long
+    ReDim pCS(0 To 127)
+    Dim capSD As Long
+    capSD = 128
+    Dim capCD As Long
+    capCD = 128
+    Dim capSS As Long
+    capSS = 128
+    Dim capCS As Long
+    capCS = 128
 
     ' -- Single pass: count + collect positions ------------------
     Dim i As Long, code As Long
@@ -131,8 +141,10 @@ Public Function Check_QuotationMarkConsistency( _
     Next i
 
     ' -- Determine dominant styles (tie -> straight) ------------
-    Dim dblStraight As Boolean: dblStraight = (cSD >= cCD)
-    Dim sglStraight As Boolean: sglStraight = (cSS >= cCS)
+    Dim dblStraight As Boolean
+    dblStraight = (cSD >= cCD)
+    Dim sglStraight As Boolean
+    sglStraight = (cSS >= cCS)
 
     ' -- Flag minority doubles ----------------------------------
     If dblStraight And cCD > 0 Then
@@ -282,7 +294,8 @@ Public Function Check_SmartQuoteConsistency( _
     ' Collect straight-quote document positions for flagging
     Dim sPos() As Long
     Dim sCnt As Long
-    Dim sCap As Long: sCap = 256
+    Dim sCap As Long
+    sCap = 256
     ReDim sPos(0 To sCap - 1)
 
     ' -- Single pass: count + collect positions ------------------
@@ -421,7 +434,8 @@ End Function
 ' ------------------------------------------------------------
 Private Function IsExcludedStyle(ByVal sn As String) As Boolean
     If Len(sn) = 0 Then Exit Function  ' False
-    Dim ls As String: ls = LCase$(sn)
+    Dim ls As String
+    ls = LCase$(sn)
     IsExcludedStyle = (InStr(1, ls, "block", vbBinaryCompare) > 0) _
                    Or (InStr(1, ls, "quote", vbBinaryCompare) > 0) _
                    Or (InStr(1, ls, "code", vbBinaryCompare) > 0)

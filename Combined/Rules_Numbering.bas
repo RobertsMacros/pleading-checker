@@ -39,7 +39,6 @@ End Function
 Private Sub CheckNativeListNumbering(doc As Document, _
                                       ByRef issues As Collection)
     Dim listContexts As Object  ' listKey -> Dictionary(level -> expectedNext)
-    Dim listContexts As Object
     Set listContexts = CreateObject("Scripting.Dictionary")
     Dim para As Paragraph
     Dim paraRange As Range
@@ -57,7 +56,6 @@ Private Sub CheckNativeListNumbering(doc As Document, _
 
     ' Track the previous level per list to detect level changes
     Dim prevLevelDict As Object  ' listKey -> prevLevel
-    Dim prevLevelDict As Object
     Set prevLevelDict = CreateObject("Scripting.Dictionary")
 
     On Error Resume Next
@@ -644,7 +642,6 @@ NextClausePara:
     ' -- Group by level category and detect mixed formats ----
     ' Level categories: L1, L2, L3, L4
     Dim levelGroups As Object  ' "L1" -> Dictionary(format -> count)
-    Dim levelGroups As Object
     Set levelGroups = CreateObject("Scripting.Dictionary")
     Dim fk As Variant
     For Each fk In formatCounts.keys
@@ -671,7 +668,6 @@ NextClausePara:
 
     ' -- Find dominant format per level and flag deviations --
     Dim dominantFormats As Object  ' levelCat -> dominant format string
-    Dim dominantFormats As Object
     Set dominantFormats = CreateObject("Scripting.Dictionary")
     Dim lgKey As Variant
     For Each lgKey In levelGroups.keys
