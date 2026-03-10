@@ -1,10 +1,10 @@
 VERSION 5.00
 Begin {C62A69F0-16DC-11CE-9E98-00AA00574A4F} frmPleadingsChecker
    Caption         =   "Pleadings Checker"
-   ClientHeight    =   16200
+   ClientHeight    =   8000
    ClientLeft      =   120
    ClientTop       =   465
-   ClientWidth     =   10800
+   ClientWidth     =   17000
    StartUpPosition =   1  'CenterOwner
 End
 Attribute VB_Name = "frmPleadingsChecker"
@@ -64,59 +64,16 @@ Private Sub UserForm_Initialize()
 
     ' -- Overall form padding ----------------------------------
     Const PAD As Single = 12
-    Const FULL_W As Single = 516     ' usable width (form ~540 - 2*PAD)
+    Const FULL_W As Single = 826     ' usable width (form 850 - 2*PAD)
     Const BTN_W As Single = 108
-    Const BTN_H As Single = 28
-    Const TXT_H As Single = 24
-    Const CHK_H As Single = 20
+    Const BTN_H As Single = 26
+    Const TXT_H As Single = 22
+    Const CHK_H As Single = 18
     Const LBL_H As Single = 16
-    Const SEC_GAP As Single = 14     ' gap between sections
+    Const SEC_GAP As Single = 10     ' gap between sections
     Const ITEM_GAP As Single = 4     ' gap within sections
 
-    yPos = PAD
-
-    ' ==========================================================
-    '  SECTION 1: Rule Selection
-    ' ==========================================================
-    Set lbl = Me.Controls.Add("Forms.Label.1", "lblRulesHeader")
-    With lbl
-        .Caption = "Rules"
-        .Left = PAD: .Top = yPos: .Width = 200: .Height = LBL_H
-        .Font.Size = 10: .Font.Bold = True
-    End With
-    yPos = yPos + LBL_H + ITEM_GAP
-
-    ' Scrollable rules frame (tall enough for ~18 visible rows)
-    Set fraRules = Me.Controls.Add("Forms.Frame.1", "fraRules")
-    With fraRules
-        .Caption = ""
-        .Left = PAD: .Top = yPos
-        .Width = FULL_W - BTN_W - SEC_GAP
-        .Height = 360
-        .ScrollBars = fmScrollBarsVertical
-        .KeepScrollBarsVisible = fmScrollBarsVertical
-    End With
-
-    ' Select All / Deselect All buttons (right of frame)
-    Dim btnX As Single
-    btnX = PAD + fraRules.Width + ITEM_GAP
-
-    Set btnSelectAll = Me.Controls.Add("Forms.CommandButton.1", "btnSelectAll")
-    With btnSelectAll
-        .Caption = "Select All"
-        .Left = btnX: .Top = yPos: .Width = BTN_W: .Height = BTN_H
-    End With
-
-    Set btnDeselectAll = Me.Controls.Add("Forms.CommandButton.1", "btnDeselectAll")
-    With btnDeselectAll
-        .Caption = "Deselect All"
-        .Left = btnX: .Top = yPos + BTN_H + ITEM_GAP
-        .Width = BTN_W: .Height = BTN_H
-    End With
-
-    yPos = yPos + fraRules.Height + SEC_GAP
-
-    ' -- Build dynamic rule checkboxes -------------------------
+    ' -- Build rule data first (need count for layout) ---------
     Set ruleConfig = PleadingsEngine.InitRuleConfig()
     Set ruleDisplayMap = PleadingsEngine.GetRuleDisplayNames()
 
@@ -130,47 +87,121 @@ Private Sub UserForm_Initialize()
         ruleKeys(k) = CStr(keys(k))
     Next k
 
-    BuildRuleCheckboxList nRules
+    yPos = PAD
 
     ' ==========================================================
-    '  SECTION 2: Page Range
+    '  ROW 1: Rules header + Select All / Deselect All inline
     ' ==========================================================
+    Set lbl = Me.Controls.Add("Forms.Label.1", "lblRulesHeader")
+    With lbl
+        .Caption = "Rules"
+        .Left = PAD: .Top = yPos: .Width = 60: .Height = LBL_H
+        .Font.Size = 10: .Font.Bold = True
+    End With
+
+    Set btnSelectAll = Me.Controls.Add("Forms.CommandButton.1", "btnSelectAll")
+    With btnSelectAll
+        .Caption = "Select All"
+        .Left = PAD + 66: .Top = yPos - 2: .Width = 78: .Height = 22
+        .Font.Size = 8
+    End With
+
+    Set btnDeselectAll = Me.Controls.Add("Forms.CommandButton.1", "btnDeselectAll")
+    With btnDeselectAll
+        .Caption = "Deselect All"
+        .Left = PAD + 66 + 82: .Top = yPos - 2: .Width = 78: .Height = 22
+        .Font.Size = 8
+    End With
+
+    yPos = yPos + 22 + ITEM_GAP
+
+    ' ==========================================================
+    '  ROW 2: Rule checkboxes in multi-column scrollable frame
+    ' ==========================================================
+    Set fraRules = Me.Controls.Add("Forms.Frame.1", "fraRules")
+    With fraRules
+        .Caption = ""
+        .Left = PAD: .Top = yPos
+        .Width = FULL_W
+        .Height = 120
+        .ScrollBars = fmScrollBarsVertical
+        .KeepScrollBarsVisible = fmScrollBarsVertical
+    End With
+
+    BuildRuleCheckboxList nRules
+
+    yPos = yPos + fraRules.Height + SEC_GAP
+
+    ' ==========================================================
+    '  ROW 3: Page Range + Options side by side
+    ' ==========================================================
+    Dim colLeft As Single
+    Dim colRight As Single
+    colLeft = PAD
+    colRight = PAD + FULL_W / 2 + SEC_GAP
+
+    ' -- Left: Page Range --
     Set lbl = Me.Controls.Add("Forms.Label.1", "lblPageHeader")
     With lbl
         .Caption = "Page Range (optional)"
-        .Left = PAD: .Top = yPos: .Width = 200: .Height = LBL_H
+        .Left = colLeft: .Top = yPos: .Width = 200: .Height = LBL_H
+        .Font.Size = 10: .Font.Bold = True
+    End With
+
+    ' -- Right: Options --
+    Set lbl = Me.Controls.Add("Forms.Label.1", "lblOptionsHeader")
+    With lbl
+        .Caption = "Options"
+        .Left = colRight: .Top = yPos: .Width = 200: .Height = LBL_H
         .Font.Size = 10: .Font.Bold = True
     End With
     yPos = yPos + LBL_H + ITEM_GAP
 
+    ' Page range fields
     Set lbl = Me.Controls.Add("Forms.Label.1", "lblStartPage")
     With lbl
         .Caption = "Start Page:"
-        .Left = PAD: .Top = yPos + 4: .Width = 72: .Height = LBL_H
+        .Left = colLeft: .Top = yPos + 3: .Width = 66: .Height = LBL_H
     End With
 
     Set txtStartPage = Me.Controls.Add("Forms.TextBox.1", "txtStartPage")
     With txtStartPage
-        .Left = PAD + 78: .Top = yPos: .Width = 60: .Height = TXT_H
+        .Left = colLeft + 66: .Top = yPos: .Width = 50: .Height = TXT_H
         .Text = ""
     End With
 
     Set lbl = Me.Controls.Add("Forms.Label.1", "lblEndPage")
     With lbl
         .Caption = "End Page:"
-        .Left = PAD + 156: .Top = yPos + 4: .Width = 66: .Height = LBL_H
+        .Left = colLeft + 126: .Top = yPos + 3: .Width = 60: .Height = LBL_H
     End With
 
     Set txtEndPage = Me.Controls.Add("Forms.TextBox.1", "txtEndPage")
     With txtEndPage
-        .Left = PAD + 228: .Top = yPos: .Width = 60: .Height = TXT_H
+        .Left = colLeft + 186: .Top = yPos: .Width = 50: .Height = TXT_H
         .Text = ""
     End With
 
-    yPos = yPos + TXT_H + SEC_GAP
+    ' Options checkboxes (right column, same rows)
+    Set chkAddComments = Me.Controls.Add("Forms.CheckBox.1", "chkAddComments")
+    With chkAddComments
+        .Caption = "Add comments to document"
+        .Left = colRight: .Top = yPos: .Width = 240: .Height = CHK_H
+        .Value = True
+    End With
+    yPos = yPos + TXT_H + ITEM_GAP
+
+    Set chkTrackedChanges = Me.Controls.Add("Forms.CheckBox.1", "chkTrackedChanges")
+    With chkTrackedChanges
+        .Caption = "Apply suggestions as tracked changes"
+        .Left = colRight: .Top = yPos: .Width = 280: .Height = CHK_H
+        .Value = True
+    End With
+
+    yPos = yPos + CHK_H + SEC_GAP
 
     ' ==========================================================
-    '  SECTION 3: Brand Rules
+    '  ROW 4: Brand Rules
     ' ==========================================================
     Set lbl = Me.Controls.Add("Forms.Label.1", "lblBrandHeader")
     With lbl
@@ -183,10 +214,11 @@ Private Sub UserForm_Initialize()
     Set lstBrands = Me.Controls.Add("Forms.ListBox.1", "lstBrands")
     With lstBrands
         .Left = PAD: .Top = yPos: .Width = FULL_W - BTN_W - SEC_GAP
-        .Height = 108
+        .Height = 72
     End With
 
     ' Brand action buttons (right of list)
+    Dim btnX As Single
     btnX = PAD + lstBrands.Width + ITEM_GAP
     Dim brandBtnY As Single
     brandBtnY = yPos
@@ -196,26 +228,31 @@ Private Sub UserForm_Initialize()
         .Caption = "Add"
         .Left = btnX: .Top = brandBtnY: .Width = BTN_W: .Height = BTN_H
     End With
-    brandBtnY = brandBtnY + BTN_H + ITEM_GAP
+    brandBtnY = brandBtnY + BTN_H + 2
 
     Set btnRemoveBrand = Me.Controls.Add("Forms.CommandButton.1", "btnRemoveBrand")
     With btnRemoveBrand
         .Caption = "Remove"
         .Left = btnX: .Top = brandBtnY: .Width = BTN_W: .Height = BTN_H
     End With
-    brandBtnY = brandBtnY + BTN_H + ITEM_GAP
+
+    ' Save/Load beside Add/Remove
+    Dim btnX2 As Single
+    btnX2 = btnX
+    brandBtnY = brandBtnY + BTN_H + 2
 
     Set btnSaveBrands = Me.Controls.Add("Forms.CommandButton.1", "btnSaveBrands")
     With btnSaveBrands
         .Caption = "Save Rules"
-        .Left = btnX: .Top = brandBtnY: .Width = BTN_W: .Height = BTN_H
+        .Left = btnX2: .Top = brandBtnY: .Width = BTN_W / 2 - 1: .Height = BTN_H
+        .Font.Size = 8
     End With
-    brandBtnY = brandBtnY + BTN_H + ITEM_GAP
 
     Set btnLoadBrands = Me.Controls.Add("Forms.CommandButton.1", "btnLoadBrands")
     With btnLoadBrands
         .Caption = "Load Rules"
-        .Left = btnX: .Top = brandBtnY: .Width = BTN_W: .Height = BTN_H
+        .Left = btnX2 + BTN_W / 2 + 1: .Top = brandBtnY: .Width = BTN_W / 2 - 1: .Height = BTN_H
+        .Font.Size = 8
     End With
 
     yPos = yPos + lstBrands.Height + ITEM_GAP
@@ -224,60 +261,33 @@ Private Sub UserForm_Initialize()
     Set lbl = Me.Controls.Add("Forms.Label.1", "lblCorrectForm")
     With lbl
         .Caption = "Correct Form:"
-        .Left = PAD: .Top = yPos + 4: .Width = 84: .Height = LBL_H
+        .Left = PAD: .Top = yPos + 3: .Width = 78: .Height = LBL_H
     End With
 
     Set txtBrandCorrect = Me.Controls.Add("Forms.TextBox.1", "txtBrandCorrect")
     With txtBrandCorrect
-        .Left = PAD + 90: .Top = yPos: .Width = 150: .Height = TXT_H
+        .Left = PAD + 78: .Top = yPos: .Width = 150: .Height = TXT_H
     End With
 
     Set lbl = Me.Controls.Add("Forms.Label.1", "lblIncorrectVars")
     With lbl
         .Caption = "Incorrect Variants:"
-        .Left = PAD + 252: .Top = yPos + 4: .Width = 108: .Height = LBL_H
+        .Left = PAD + 240: .Top = yPos + 3: .Width = 108: .Height = LBL_H
     End With
 
     Set txtBrandIncorrect = Me.Controls.Add("Forms.TextBox.1", "txtBrandIncorrect")
     With txtBrandIncorrect
-        .Left = PAD + 366: .Top = yPos: .Width = 150: .Height = TXT_H
+        .Left = PAD + 348: .Top = yPos: .Width = 180: .Height = TXT_H
     End With
 
     yPos = yPos + TXT_H + SEC_GAP
 
     ' ==========================================================
-    '  SECTION 4: Options
+    '  ROW 5: Action Buttons
     ' ==========================================================
-    Set lbl = Me.Controls.Add("Forms.Label.1", "lblOptionsHeader")
-    With lbl
-        .Caption = "Options"
-        .Left = PAD: .Top = yPos: .Width = 200: .Height = LBL_H
-        .Font.Size = 10: .Font.Bold = True
-    End With
-    yPos = yPos + LBL_H + ITEM_GAP
-
-    Set chkAddComments = Me.Controls.Add("Forms.CheckBox.1", "chkAddComments")
-    With chkAddComments
-        .Caption = "Add comments to document"
-        .Left = PAD: .Top = yPos: .Width = 240: .Height = CHK_H
-        .Value = True
-    End With
-    yPos = yPos + CHK_H + ITEM_GAP
-
-    Set chkTrackedChanges = Me.Controls.Add("Forms.CheckBox.1", "chkTrackedChanges")
-    With chkTrackedChanges
-        .Caption = "Apply suggestions as tracked changes"
-        .Left = PAD: .Top = yPos: .Width = 280: .Height = CHK_H
-        .Value = True
-    End With
-    yPos = yPos + CHK_H + SEC_GAP
-
-    ' ==========================================================
-    '  SECTION 5: Action Buttons
-    ' ==========================================================
-    Const ACT_BTN_H As Single = 36
-    Const ACT_BTN_W As Single = 114
-    Const ACT_GAP As Single = 12
+    Const ACT_BTN_H As Single = 32
+    Const ACT_BTN_W As Single = 120
+    Const ACT_GAP As Single = 10
 
     Set btnRun = Me.Controls.Add("Forms.CommandButton.1", "btnRun")
     With btnRun
@@ -307,10 +317,10 @@ Private Sub UserForm_Initialize()
         .Width = 84: .Height = ACT_BTN_H
     End With
 
-    yPos = yPos + ACT_BTN_H + SEC_GAP
+    yPos = yPos + ACT_BTN_H + ITEM_GAP
 
     ' ==========================================================
-    '  SECTION 6: Status Bar
+    '  ROW 6: Status Bar
     ' ==========================================================
     Set lblStatus = Me.Controls.Add("Forms.Label.1", "lblStatus")
     With lblStatus
@@ -329,12 +339,20 @@ End Sub
 Private Sub BuildRuleCheckboxList(nRules As Long)
     Set ruleCheckboxes = New Collection
 
-    Dim topPos As Single
     Dim chk As MSForms.CheckBox
     Dim displayLabel As String
     Dim i As Long
 
-    topPos = 6  ' initial top padding inside frame
+    ' Multi-column layout: 4 columns across the wide frame
+    Const COLS As Long = 4
+    Const ROW_H As Single = 18
+    Const COL_PAD As Single = 6
+
+    Dim colW As Single
+    colW = (fraRules.InsideWidth - COL_PAD * 2) / COLS
+
+    Dim col As Long
+    Dim row As Long
 
     For i = 0 To nRules - 1
         If ruleDisplayMap.Exists(ruleKeys(i)) Then
@@ -343,22 +361,26 @@ Private Sub BuildRuleCheckboxList(nRules As Long)
             displayLabel = CStr(i + 1) & ". " & ruleKeys(i)
         End If
 
+        col = i Mod COLS
+        row = i \ COLS
+
         Set chk = fraRules.Controls.Add("Forms.CheckBox.1", "chkRule_" & i)
         With chk
             .Caption = displayLabel
-            .Left = 6
-            .Top = topPos
-            .Width = fraRules.InsideWidth - 18
-            .Height = 18
+            .Left = COL_PAD + col * colW
+            .Top = COL_PAD + row * ROW_H
+            .Width = colW - 4
+            .Height = ROW_H
             .Value = True
-            .Font.Size = 9
+            .Font.Size = 8
         End With
 
         ruleCheckboxes.Add chk
-        topPos = topPos + 20
     Next i
 
-    fraRules.ScrollHeight = topPos + 6
+    Dim totalRows As Long
+    totalRows = (nRules + COLS - 1) \ COLS
+    fraRules.ScrollHeight = COL_PAD * 2 + totalRows * ROW_H
 End Sub
 
 ' ============================================================
