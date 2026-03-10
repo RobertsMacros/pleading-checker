@@ -468,9 +468,9 @@ Public Function GenerateReport(issues As Collection, _
     For i = 1 To issues.Count
         Set finding = issues(i)
         If i < issues.Count Then
-            Print #fileNum, IssueToJSON(finding)() & ","
+            Print #fileNum, IssueToJSON(finding) & ","
         Else
-            Print #fileNum, IssueToJSON(finding)()
+            Print #fileNum, IssueToJSON(finding)
         End If
     Next i
     Print #fileNum, "  ],"
