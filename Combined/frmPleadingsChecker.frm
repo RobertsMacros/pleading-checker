@@ -53,6 +53,12 @@ Private chkAddComments  As MSForms.CheckBox
 Private chkTrackedChanges As MSForms.CheckBox
 Private optSpellingUK   As MSForms.OptionButton
 Private optSpellingUS   As MSForms.OptionButton
+Private optQuoteSingle  As MSForms.OptionButton
+Private optQuoteDouble  As MSForms.OptionButton
+Private optSmartCurly   As MSForms.OptionButton
+Private optSmartStraight As MSForms.OptionButton
+Private optDateUK       As MSForms.OptionButton
+Private optDateUS       As MSForms.OptionButton
 Private lblStatus       As MSForms.Label
 
 Private lastResults     As Collection
@@ -222,6 +228,79 @@ Private Sub UserForm_Initialize()
         .Left = colRight + 134: .Top = yPos: .Width = 50: .Height = CHK_H
         .Value = False
         .GroupName = "SpellingMode"
+    End With
+
+    yPos = yPos + CHK_H + ITEM_GAP
+
+    ' -- Quote nesting toggle (Single outer = UK / Double outer = US) --
+    Set lbl = Me.Controls.Add("Forms.Label.1", "lblQuoteNesting")
+    With lbl
+        .Caption = "Outer quotes:"
+        .Left = colRight: .Top = yPos + 2: .Width = 80: .Height = LBL_H
+    End With
+
+    Set optQuoteSingle = Me.Controls.Add("Forms.OptionButton.1", "optQuoteSingle")
+    With optQuoteSingle
+        .Caption = "Single"
+        .Left = colRight + 82: .Top = yPos: .Width = 60: .Height = CHK_H
+        .Value = True
+        .GroupName = "QuoteNesting"
+    End With
+
+    Set optQuoteDouble = Me.Controls.Add("Forms.OptionButton.1", "optQuoteDouble")
+    With optQuoteDouble
+        .Caption = "Double"
+        .Left = colRight + 144: .Top = yPos: .Width = 60: .Height = CHK_H
+        .Value = False
+        .GroupName = "QuoteNesting"
+    End With
+    yPos = yPos + CHK_H + ITEM_GAP
+
+    ' -- Smart quotes toggle (Curly / Straight) --
+    Set lbl = Me.Controls.Add("Forms.Label.1", "lblSmartQuotes")
+    With lbl
+        .Caption = "Quote style:"
+        .Left = colRight: .Top = yPos + 2: .Width = 80: .Height = LBL_H
+    End With
+
+    Set optSmartCurly = Me.Controls.Add("Forms.OptionButton.1", "optSmartCurly")
+    With optSmartCurly
+        .Caption = "Curly"
+        .Left = colRight + 82: .Top = yPos: .Width = 60: .Height = CHK_H
+        .Value = True
+        .GroupName = "SmartQuotes"
+    End With
+
+    Set optSmartStraight = Me.Controls.Add("Forms.OptionButton.1", "optSmartStraight")
+    With optSmartStraight
+        .Caption = "Straight"
+        .Left = colRight + 144: .Top = yPos: .Width = 70: .Height = CHK_H
+        .Value = False
+        .GroupName = "SmartQuotes"
+    End With
+    yPos = yPos + CHK_H + ITEM_GAP
+
+    ' -- Date format toggle (UK / US) --
+    Set lbl = Me.Controls.Add("Forms.Label.1", "lblDateFormat")
+    With lbl
+        .Caption = "Date format:"
+        .Left = colRight: .Top = yPos + 2: .Width = 80: .Height = LBL_H
+    End With
+
+    Set optDateUK = Me.Controls.Add("Forms.OptionButton.1", "optDateUK")
+    With optDateUK
+        .Caption = "UK"
+        .Left = colRight + 82: .Top = yPos: .Width = 50: .Height = CHK_H
+        .Value = True
+        .GroupName = "DateFormat"
+    End With
+
+    Set optDateUS = Me.Controls.Add("Forms.OptionButton.1", "optDateUS")
+    With optDateUS
+        .Caption = "US"
+        .Left = colRight + 134: .Top = yPos: .Width = 50: .Height = CHK_H
+        .Value = False
+        .GroupName = "DateFormat"
     End With
 
     yPos = yPos + CHK_H + SEC_GAP
@@ -439,11 +518,29 @@ Private Sub btnRun_Click()
     End If
     PleadingsEngine.SetPageRange startPg, endPg
 
-    ' Set spelling mode from toggle
+    ' Set mode toggles
     If optSpellingUS.Value Then
         PleadingsEngine.SetSpellingMode "US"
     Else
         PleadingsEngine.SetSpellingMode "UK"
+    End If
+
+    If optQuoteDouble.Value Then
+        PleadingsEngine.SetQuoteNesting "DOUBLE"
+    Else
+        PleadingsEngine.SetQuoteNesting "SINGLE"
+    End If
+
+    If optSmartStraight.Value Then
+        PleadingsEngine.SetSmartQuotePref "STRAIGHT"
+    Else
+        PleadingsEngine.SetSmartQuotePref "CURLY"
+    End If
+
+    If optDateUS.Value Then
+        PleadingsEngine.SetDateFormatPref "US"
+    Else
+        PleadingsEngine.SetDateFormatPref "UK"
     End If
 
     ' Run checks

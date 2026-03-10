@@ -433,15 +433,27 @@ Public Function Check_DateTimeFormat(doc As Document) As Collection
     ' -- Determine dominant date format ------------------------
     Dim dominantDate As String
     Dim maxDateCount As Long
-    dominantDate = ""
-    maxDateCount = 0
     Dim dk As Variant
-    For Each dk In dateCounts.keys
-        If dateCounts(dk) > maxDateCount Then
-            maxDateCount = dateCounts(dk)
-            dominantDate = CStr(dk)
-        End If
-    Next dk
+
+    ' Check user preference first
+    Dim datePref As String
+    datePref = EngineGetDateFormatPref()
+
+    If datePref = "UK" Or datePref = "US" Then
+        ' User has set a preference -- use it as dominant
+        dominantDate = datePref
+        maxDateCount = dateCounts(datePref)
+    Else
+        ' AUTO mode: pick the most frequent format
+        dominantDate = ""
+        maxDateCount = 0
+        For Each dk In dateCounts.keys
+            If dateCounts(dk) > maxDateCount Then
+                maxDateCount = dateCounts(dk)
+                dominantDate = CStr(dk)
+            End If
+        Next dk
+    End If
 
     ' -- Flag non-dominant date formats ------------------------
     If maxDateCount > 0 Then
@@ -451,8 +463,8 @@ Public Function Check_DateTimeFormat(doc As Document) As Collection
             If dateCounts(dk) > 0 Then totalDateFormats = totalDateFormats + 1
         Next dk
 
-        ' Only flag if there are mixed formats
-        If totalDateFormats > 1 Then
+        ' Flag if there are mixed formats, or if a preference is set
+        If totalDateFormats > 1 Or (datePref = "UK" Or datePref = "US") Then
             For i = 1 To dateFinds.Count
                 Dim dInfo As Variant
                 dInfo = dateFinds(i)
@@ -702,3 +714,16 @@ Private Sub EngineSetPageRange(ByVal startPg As Long, ByVal endPg As Long)
     If Err.Number <> 0 Then Err.Clear
     On Error GoTo 0
 End Sub
+
+' ----------------------------------------------------------------
+'  Late-bound wrapper: PleadingsEngine.GetDateFormatPref
+' ----------------------------------------------------------------
+Private Function EngineGetDateFormatPref() As String
+    On Error Resume Next
+    EngineGetDateFormatPref = Application.Run("PleadingsEngine.GetDateFormatPref")
+    If Err.Number <> 0 Then
+        EngineGetDateFormatPref = "UK"
+        Err.Clear
+    End If
+    On Error GoTo 0
+End Function

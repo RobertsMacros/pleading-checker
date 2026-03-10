@@ -43,6 +43,9 @@ Private PAGE_RANGE_START As Long
 Private PAGE_RANGE_END   As Long
 Private whitelistDict   As Object
 Private spellingMode    As String   ' "UK" or "US"
+Private quoteNesting   As String   ' "SINGLE" or "DOUBLE" (outer marks)
+Private smartQuotePref As String   ' "CURLY" or "STRAIGHT"
+Private dateFormatPref As String   ' "UK" or "US" or "AUTO"
 Private ruleErrorCount  As Long
 Private ruleErrorLog    As String
 
@@ -100,6 +103,45 @@ End Sub
 Public Function GetSpellingMode() As String
     If Len(spellingMode) = 0 Then spellingMode = "UK"
     GetSpellingMode = spellingMode
+End Function
+
+' ============================================================
+'  QUOTE NESTING (single outer = UK, double outer = US)
+' ============================================================
+Public Sub SetQuoteNesting(ByVal mode As String)
+    quoteNesting = UCase(Trim(mode))
+    If quoteNesting <> "DOUBLE" Then quoteNesting = "SINGLE"
+End Sub
+
+Public Function GetQuoteNesting() As String
+    If Len(quoteNesting) = 0 Then quoteNesting = "SINGLE"
+    GetQuoteNesting = quoteNesting
+End Function
+
+' ============================================================
+'  SMART QUOTE PREFERENCE (curly or straight)
+' ============================================================
+Public Sub SetSmartQuotePref(ByVal mode As String)
+    smartQuotePref = UCase(Trim(mode))
+    If smartQuotePref <> "STRAIGHT" Then smartQuotePref = "CURLY"
+End Sub
+
+Public Function GetSmartQuotePref() As String
+    If Len(smartQuotePref) = 0 Then smartQuotePref = "CURLY"
+    GetSmartQuotePref = smartQuotePref
+End Function
+
+' ============================================================
+'  DATE FORMAT PREFERENCE (UK = "1 January 2024", US = "January 1, 2024")
+' ============================================================
+Public Sub SetDateFormatPref(ByVal mode As String)
+    dateFormatPref = UCase(Trim(mode))
+    If dateFormatPref <> "US" And dateFormatPref <> "AUTO" Then dateFormatPref = "UK"
+End Sub
+
+Public Function GetDateFormatPref() As String
+    If Len(dateFormatPref) = 0 Then dateFormatPref = "UK"
+    GetDateFormatPref = dateFormatPref
 End Function
 
 ' ============================================================

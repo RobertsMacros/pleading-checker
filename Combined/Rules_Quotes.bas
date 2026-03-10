@@ -182,11 +182,11 @@ Public Function Check_QuotationMarkConsistency( _
 End Function
 
 ' ================================================================
-'  RULE 32 -- SINGLE QUOTES DEFAULT
+'  RULE 32 -- SINGLE / DOUBLE QUOTES DEFAULT
 '
-'  UK legal convention: single quotes are the default outer marks.
+'  Configurable: Single outer (UK convention) or Double outer (US).
 '  One pass over paragraphs.  Per paragraph: one page-range check,
-'  one style check, then a byte-array scan for double quotes.
+'  one style check, then a byte-array scan for the wrong quote type.
 '  Uses a single reusable Range for location lookups.
 ' ================================================================
 Public Function Check_SingleQuotesDefault( _
@@ -202,6 +202,20 @@ Public Function Check_SingleQuotesDefault( _
     Dim bMax As Long
     Dim i As Long, code As Long, pos As Long
     Dim locStr As String
+
+    ' Determine which quote type to flag based on user preference
+    Dim nestMode As String
+    nestMode = EngineGetQuoteNesting()  ' "SINGLE" or "DOUBLE"
+
+    Dim issueMsg As String
+    Dim suggMsg As String
+    If nestMode = "DOUBLE" Then
+        issueMsg = "Outer quotation marks should use double quotation marks."
+        suggMsg = "Use double quotation marks instead of single quotation marks."
+    Else
+        issueMsg = "Outer quotation marks should use single quotation marks."
+        suggMsg = "Use single quotation marks instead of double quotation marks."
+    End If
 
     ' Reusable range -- created once, repositioned via SetRange
     Dim locRng As Range
@@ -232,11 +246,28 @@ Public Function Check_SingleQuotesDefault( _
         b = pText
         bMax = UBound(b) - 1
 
-        ' Byte-array scan: flag every double quotation mark
+        ' Byte-array scan: flag the wrong quote type
         For i = 0 To bMax Step 2
             code = b(i) Or (CLng(b(i + 1)) * 256&)
 
-            If code = QD Or code = QDO Or code = QDC Then
+            Dim isWrongQuote As Boolean
+            isWrongQuote = False
+
+            If nestMode = "DOUBLE" Then
+                ' Flag single quotes (but skip apostrophes)
+                If code = QS Or code = QSO Or code = QSC Then
+                    If Not ByteIsApostrophe(b, i, bMax) Then
+                        isWrongQuote = True
+                    End If
+                End If
+            Else
+                ' Flag double quotes
+                If code = QD Or code = QDO Or code = QDC Then
+                    isWrongQuote = True
+                End If
+            End If
+
+            If isWrongQuote Then
                 pos = pStart + (i \ 2)
                 Err.Clear
                 locRng.SetRange pos, pos + 1
@@ -251,11 +282,7 @@ Public Function Check_SingleQuotesDefault( _
                 End If
 
                 issues.Add CreateIssueDict(RULE32, locStr, _
-                    "Outer quotation marks should use single " & _
-                    "quotation marks.", _
-                    "Use single quotation marks instead of " & _
-                    "double quotation marks.", _
-                    pos, pos + 1, "warning")
+                    issueMsg, suggMsg, pos, pos + 1, "warning")
             End If
         Next i
 
@@ -270,10 +297,9 @@ End Function
 '  RULE 33 -- SMART QUOTE CONSISTENCY
 '
 '  Single pass over paragraphs: counts straight vs curly quotes
-'  AND collects straight-quote document positions simultaneously.
-'  If both styles exist (prefers curly as dominant per spec), emits
-'  a document-level summary plus per-occurrence findings.
-'  No second paragraph pass required.
+'  AND collects minority-style positions simultaneously.
+'  Preference (curly or straight) is read from the engine toggle.
+'  If both styles exist, flags the non-preferred style.
 ' ================================================================
 Public Function Check_SmartQuoteConsistency( _
         doc As Document) As Collection
@@ -287,16 +313,19 @@ Public Function Check_SmartQuoteConsistency( _
     Dim bMax As Long
     Dim i As Long, code As Long
 
-    ' Counters (straight vs curly, both doubles and singles)
-    Dim cStraight As Long
-    Dim cCurly As Long
+    Dim prefStyle As String
+    prefStyle = EngineGetSmartQuotePref()  ' "CURLY" or "STRAIGHT"
+    Dim preferCurly As Boolean
+    preferCurly = (prefStyle <> "STRAIGHT")
 
-    ' Collect straight-quote document positions for flagging
-    Dim sPos() As Long
-    Dim sCnt As Long
-    Dim sCap As Long
-    sCap = 256
-    ReDim sPos(0 To sCap - 1)
+    ' Counters
+    Dim cStraight As Long, cCurly As Long
+
+    ' Collect positions of the non-preferred style
+    Dim fPos() As Long
+    Dim fCnt As Long, fCap As Long
+    fCap = 256
+    ReDim fPos(0 To fCap - 1)
 
     ' -- Single pass: count + collect positions ------------------
     On Error Resume Next
@@ -305,7 +334,6 @@ Public Function Check_SmartQuoteConsistency( _
         Set pRng = para.Range
         If Err.Number <> 0 Then Err.Clear: GoTo NxtP33
 
-        ' Page-range gate (once per paragraph)
         If Not EngineIsInPageRange(pRng) Then GoTo NxtP33
 
         Err.Clear
@@ -323,33 +351,44 @@ Public Function Check_SmartQuoteConsistency( _
             Select Case code
             Case QD
                 cStraight = cStraight + 1
-                If sCnt >= sCap Then
-                    sCap = sCap * 2
-                    ReDim Preserve sPos(0 To sCap - 1)
-                End If
-                sPos(sCnt) = pStart + (i \ 2): sCnt = sCnt + 1
+                If Not preferCurly Then GoTo NxtCode33
+                ' Prefer curly -> collect straight positions
+                If fCnt >= fCap Then fCap = fCap * 2: ReDim Preserve fPos(0 To fCap - 1)
+                fPos(fCnt) = pStart + (i \ 2): fCnt = fCnt + 1
 
             Case QDO, QDC
                 cCurly = cCurly + 1
+                If preferCurly Then GoTo NxtCode33
+                ' Prefer straight -> collect curly positions
+                If fCnt >= fCap Then fCap = fCap * 2: ReDim Preserve fPos(0 To fCap - 1)
+                fPos(fCnt) = pStart + (i \ 2): fCnt = fCnt + 1
 
             Case QS
                 If Not ByteIsApostrophe(b, i, bMax) Then
                     cStraight = cStraight + 1
-                    If sCnt >= sCap Then
-                        sCap = sCap * 2
-                        ReDim Preserve sPos(0 To sCap - 1)
+                    If preferCurly Then
+                        If fCnt >= fCap Then fCap = fCap * 2: ReDim Preserve fPos(0 To fCap - 1)
+                        fPos(fCnt) = pStart + (i \ 2): fCnt = fCnt + 1
                     End If
-                    sPos(sCnt) = pStart + (i \ 2): sCnt = sCnt + 1
                 End If
 
             Case QSO
                 cCurly = cCurly + 1
+                If Not preferCurly Then
+                    If fCnt >= fCap Then fCap = fCap * 2: ReDim Preserve fPos(0 To fCap - 1)
+                    fPos(fCnt) = pStart + (i \ 2): fCnt = fCnt + 1
+                End If
 
             Case QSC
                 If Not ByteIsApostrophe(b, i, bMax) Then
                     cCurly = cCurly + 1
+                    If Not preferCurly Then
+                        If fCnt >= fCap Then fCap = fCap * 2: ReDim Preserve fPos(0 To fCap - 1)
+                        fPos(fCnt) = pStart + (i \ 2): fCnt = fCnt + 1
+                    End If
                 End If
             End Select
+NxtCode33:
         Next i
 
 NxtP33:
@@ -363,21 +402,25 @@ NxtP33:
     End If
 
     ' -- Summary finding ----------------------------------------
+    Dim prefName As String, wrongName As String
+    If preferCurly Then prefName = "curly": wrongName = "straight" _
+    Else prefName = "straight": wrongName = "curly"
+
     issues.Add CreateIssueDict(RULE33, "Document", _
         "Quotation mark style is inconsistent. Found " & _
         cStraight & " straight and " & cCurly & _
         " curly quotation marks.", _
-        "Use curly quotation marks consistently " & _
+        "Use " & prefName & " quotation marks consistently " & _
         "throughout the document.", 0, 0, "warning")
 
-    ' -- Flag each straight quote (positions already collected) -
+    ' -- Flag each non-preferred quote ---------------------------
     Dim locRng As Range
     Set locRng = doc.Range(0, 1)
 
     Dim j As Long, pos As Long, locStr As String
     On Error Resume Next
-    For j = 0 To sCnt - 1
-        pos = sPos(j)
+    For j = 0 To fCnt - 1
+        pos = fPos(j)
         Err.Clear
         locRng.SetRange pos, pos + 1
         If Err.Number <> 0 Then Err.Clear: GoTo SkipP33
@@ -387,9 +430,9 @@ NxtP33:
         If Err.Number <> 0 Then locStr = "unknown location": Err.Clear
 
         issues.Add CreateIssueDict(RULE33, locStr, _
-            "Straight quotation mark found in otherwise " & _
-            "curly-quoted document.", _
-            "Replace with curly quotation mark.", _
+            UCase(Left(wrongName, 1)) & Mid(wrongName, 2) & _
+            " quotation mark found in document.", _
+            "Replace with " & prefName & " quotation mark.", _
             pos, pos + 1, "warning")
 SkipP33:
     Next j
@@ -529,6 +572,34 @@ Private Function EngineGetLocationString(rng As Object, _
         "PleadingsEngine.GetLocationString", rng, doc)
     If Err.Number <> 0 Then
         EngineGetLocationString = "unknown location"
+        Err.Clear
+    End If
+    On Error GoTo 0
+End Function
+
+' ------------------------------------------------------------
+'  Late-bound wrapper: PleadingsEngine.GetQuoteNesting
+' ------------------------------------------------------------
+Private Function EngineGetQuoteNesting() As String
+    On Error Resume Next
+    EngineGetQuoteNesting = Application.Run( _
+        "PleadingsEngine.GetQuoteNesting")
+    If Err.Number <> 0 Then
+        EngineGetQuoteNesting = "SINGLE"
+        Err.Clear
+    End If
+    On Error GoTo 0
+End Function
+
+' ------------------------------------------------------------
+'  Late-bound wrapper: PleadingsEngine.GetSmartQuotePref
+' ------------------------------------------------------------
+Private Function EngineGetSmartQuotePref() As String
+    On Error Resume Next
+    EngineGetSmartQuotePref = Application.Run( _
+        "PleadingsEngine.GetSmartQuotePref")
+    If Err.Number <> 0 Then
+        EngineGetSmartQuotePref = "CURLY"
         Err.Clear
     End If
     On Error GoTo 0
