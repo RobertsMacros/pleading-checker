@@ -931,74 +931,64 @@ End Function
 ' ============================================================
 Public Function Check_ColourFormatting(doc As Document) As Collection
     Dim issues As New Collection
-    Dim colourCounts As Object ' Scripting.Dictionary
     Dim para As Paragraph
-    Dim rn As Range
-    Dim runColor As Long
+    Dim paraRange As Range
+    Dim paraColor As Long
+    Dim colourCounts As Object
     Dim dominantColour As Long
     Dim maxCount As Long
-    Dim runText As String
 
-    ' -- First pass: count colour usage per run ---------------
+    Const WD_COLOR_AUTOMATIC As Long = -16777216
+
+    ' -- Build hyperlink position set once (avoid O(n^2)) ------
+    Dim hlStarts As Object, hlEnds As Object
+    Set hlStarts = CreateObject("Scripting.Dictionary")
+    Set hlEnds = CreateObject("Scripting.Dictionary")
+    On Error Resume Next
+    Dim hl As Hyperlink
+    Dim hlIdx As Long: hlIdx = 0
+    For Each hl In doc.Hyperlinks
+        Err.Clear
+        hlStarts.Add hlIdx, hl.Range.Start
+        hlEnds.Add hlIdx, hl.Range.End
+        If Err.Number <> 0 Then Err.Clear
+        hlIdx = hlIdx + 1
+    Next hl
+    On Error GoTo 0
+
+    ' -- Pass 1: count paragraph-level colours -----------------
     Set colourCounts = CreateObject("Scripting.Dictionary")
 
     On Error Resume Next
     For Each para In doc.Paragraphs
         Err.Clear
-
-        Dim paraRange As Range
         Set paraRange = para.Range
-        If Err.Number <> 0 Then
-            Err.Clear
-            GoTo NextParaPass1
+        If Err.Number <> 0 Then Err.Clear: GoTo NextPC1
+
+        If Not EngineIsInPageRange(paraRange) Then GoTo NextPC1
+
+        paraColor = paraRange.Font.Color
+        If Err.Number <> 0 Then Err.Clear: GoTo NextPC1
+
+        ' Skip indeterminate (mixed-colour paragraphs counted in pass 2)
+        If paraColor = 9999999 Then GoTo NextPC1
+
+        If colourCounts.Exists(paraColor) Then
+            colourCounts(paraColor) = colourCounts(paraColor) + 1
+        Else
+            colourCounts.Add paraColor, 1
         End If
-
-        ' Skip paragraphs outside page range
-        If Not EngineIsInPageRange(paraRange) Then
-            GoTo NextParaPass1
-        End If
-
-        ' Iterate formatting runs within the paragraph
-        Set rn = paraRange.Duplicate
-        rn.Collapse wdCollapseStart
-        Do While rn.Start < paraRange.End
-            rn.MoveEnd wdCharacterFormatting, 1
-            If rn.Start >= paraRange.End Then Exit Do
-
-            Err.Clear
-            runText = rn.Text
-            If Err.Number <> 0 Then Err.Clear: GoTo AdvanceRun1
-
-            ' Skip whitespace-only runs
-            If Len(Trim(Replace(Replace(runText, vbCr, ""), vbLf, ""))) = 0 Then
-                GoTo AdvanceRun1
-            End If
-
-            runColor = rn.Font.Color
-            If Err.Number <> 0 Then Err.Clear: GoTo AdvanceRun1
-
-            If colourCounts.Exists(runColor) Then
-                colourCounts(runColor) = colourCounts(runColor) + 1
-            Else
-                colourCounts.Add runColor, 1
-            End If
-
-AdvanceRun1:
-            rn.Collapse wdCollapseEnd
-        Loop
-
-NextParaPass1:
+NextPC1:
     Next para
     On Error GoTo 0
 
-    ' -- Determine dominant colour ----------------------------
+    ' -- Determine dominant colour -----------------------------
     If colourCounts.Count = 0 Then
         Set Check_ColourFormatting = issues
         Exit Function
     End If
 
-    dominantColour = 0
-    maxCount = 0
+    dominantColour = 0: maxCount = 0
     Dim colourKey As Variant
     For Each colourKey In colourCounts.keys
         If colourCounts(colourKey) > maxCount Then
@@ -1007,116 +997,38 @@ NextParaPass1:
         End If
     Next colourKey
 
-    ' -- Second pass: flag non-dominant, non-automatic colours -
-    Const WD_COLOR_AUTOMATIC As Long = -16777216
-
-    ' Tracking for grouping consecutive same-colour runs
-    Dim groupStartPos As Long
-    Dim groupEndPos As Long
-    Dim groupColour As Long
-    Dim groupActive As Boolean
-    Dim groupParaRange As Range
-
-    groupActive = False
-
+    ' -- Pass 2: flag paragraphs with non-standard colours -----
     On Error Resume Next
     For Each para In doc.Paragraphs
         Err.Clear
-
         Set paraRange = para.Range
-        If Err.Number <> 0 Then
-            Err.Clear
-            GoTo NextParaPass2
-        End If
+        If Err.Number <> 0 Then Err.Clear: GoTo NextPC2
 
-        ' Skip paragraphs outside page range
-        If Not EngineIsInPageRange(paraRange) Then
-            ' Flush any active group before skipping
-            If groupActive Then
-                FlushColourGroup doc, issues, groupStartPos, groupEndPos, groupColour
-                groupActive = False
-            End If
-            GoTo NextParaPass2
-        End If
+        If Not EngineIsInPageRange(paraRange) Then GoTo NextPC2
 
-        ' Skip heading-styled paragraphs (may have intentional colour)
+        ' Skip heading-styled paragraphs
         Dim styleName As String
         styleName = ""
         styleName = para.Style.NameLocal
-        If Err.Number <> 0 Then
-            Err.Clear
-            styleName = ""
-        End If
-        If LCase(Left(styleName, 7)) = "heading" Then
-            If groupActive Then
-                FlushColourGroup doc, issues, groupStartPos, groupEndPos, groupColour
-                groupActive = False
-            End If
-            GoTo NextParaPass2
-        End If
+        If Err.Number <> 0 Then Err.Clear: styleName = ""
+        If LCase(Left(styleName, 7)) = "heading" Then GoTo NextPC2
 
-        ' Iterate formatting runs
-        Set rn = paraRange.Duplicate
-        rn.Collapse wdCollapseStart
-        Do While rn.Start < paraRange.End
-            rn.MoveEnd wdCharacterFormatting, 1
-            If rn.Start >= paraRange.End Then Exit Do
+        paraColor = paraRange.Font.Color
+        If Err.Number <> 0 Then Err.Clear: GoTo NextPC2
 
-            Err.Clear
-            runText = rn.Text
-            If Err.Number <> 0 Then Err.Clear: GoTo AdvanceRun2
+        ' Skip dominant, automatic, or indeterminate
+        If paraColor = dominantColour Or _
+           paraColor = WD_COLOR_AUTOMATIC Or _
+           paraColor = 9999999 Then GoTo NextPC2
 
-            ' Skip whitespace-only runs
-            If Len(Trim(Replace(Replace(runText, vbCr, ""), vbLf, ""))) = 0 Then
-                GoTo AdvanceRun2
-            End If
+        ' Skip if inside a hyperlink
+        If IsRangeInsideHyperlink(paraRange, hlStarts, hlEnds) Then GoTo NextPC2
 
-            runColor = rn.Font.Color
-            If Err.Number <> 0 Then Err.Clear: GoTo AdvanceRun2
+        ' Flag this paragraph
+        FlushColourGroup doc, issues, paraRange.Start, paraRange.End, paraColor
 
-            ' Skip if colour matches dominant or is automatic
-            If runColor = dominantColour Or runColor = WD_COLOR_AUTOMATIC Then
-                If groupActive Then
-                    FlushColourGroup doc, issues, groupStartPos, groupEndPos, groupColour
-                    groupActive = False
-                End If
-                GoTo AdvanceRun2
-            End If
-
-            ' Skip hyperlinks
-            If IsRunInsideHyperlink(rn, doc) Then
-                If groupActive Then
-                    FlushColourGroup doc, issues, groupStartPos, groupEndPos, groupColour
-                    groupActive = False
-                End If
-                GoTo AdvanceRun2
-            End If
-
-            ' -- This run has a non-standard colour -----------
-            If groupActive And runColor = groupColour And _
-               rn.Start = groupEndPos Then
-                groupEndPos = rn.End
-            Else
-                If groupActive Then
-                    FlushColourGroup doc, issues, groupStartPos, groupEndPos, groupColour
-                End If
-                groupStartPos = rn.Start
-                groupEndPos = rn.End
-                groupColour = runColor
-                groupActive = True
-            End If
-
-AdvanceRun2:
-            rn.Collapse wdCollapseEnd
-        Loop
-
-NextParaPass2:
+NextPC2:
     Next para
-
-    ' Flush final group
-    If groupActive Then
-        FlushColourGroup doc, issues, groupStartPos, groupEndPos, groupColour
-    End If
     On Error GoTo 0
 
     Set Check_ColourFormatting = issues
@@ -1186,23 +1098,17 @@ End Function
 ' ============================================================
 '  PRIVATE: Check if a run is inside a hyperlink
 ' ============================================================
-Private Function IsRunInsideHyperlink(rn As Range, doc As Document) As Boolean
-    Dim hl As Hyperlink
-
-    On Error Resume Next
-    For Each hl In doc.Hyperlinks
-        Err.Clear
-        If hl.Range.Start <= rn.Start And hl.Range.End >= rn.End Then
-            IsRunInsideHyperlink = True
+Private Function IsRangeInsideHyperlink(rng As Range, _
+                                        hlStarts As Object, _
+                                        hlEnds As Object) As Boolean
+    Dim i As Long
+    For i = 0 To hlStarts.Count - 1
+        If hlStarts(i) <= rng.Start And hlEnds(i) >= rng.End Then
+            IsRangeInsideHyperlink = True
             Exit Function
         End If
-        If Err.Number <> 0 Then
-            Err.Clear
-        End If
-    Next hl
-    On Error GoTo 0
-
-    IsRunInsideHyperlink = False
+    Next i
+    IsRangeInsideHyperlink = False
 End Function
 
 
