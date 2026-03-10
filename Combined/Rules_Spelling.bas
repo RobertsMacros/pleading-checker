@@ -205,11 +205,11 @@ Private Sub SearchRangeForSpellingIssues(searchRange As Range, _
             If IsRangeItalic(rng) Then
                 severity = "possible_error"
                 suggestion = ""
-                issueText = issueText & " (in italic text " & Chr(8212) & " review manually)"
+                issueText = issueText & " (in italic text -- review manually)"
             ElseIf IsInsideQuotes(rng, doc) Then
                 severity = "possible_error"
                 suggestion = ""
-                issueText = issueText & " (in quoted text " & Chr(8212) & " review manually)"
+                issueText = issueText & " (in quoted text -- review manually)"
             End If
 
             Set finding = CreateIssueDict(RULE_NAME, locStr, issueText, suggestion, rng.Start, rng.End, severity)
@@ -643,7 +643,7 @@ Private Sub SearchSingleLicenceTerm(ByVal term As String, _
             If Err.Number <> 0 Then locStr = "unknown location": Err.Clear
             On Error GoTo 0
 
-            Set finding = CreateIssueDict(RULE_NAME_LICENCE, locStr, "'" & rng.Text & "' " & Chr(8212) & " in italic text, review manually", "", rng.Start, rng.End, "possible_error")
+            Set finding = CreateIssueDict(RULE_NAME_LICENCE, locStr, "'" & rng.Text & "' -- in italic text, review manually", "", rng.Start, rng.End, "possible_error")
             issues.Add finding
             GoTo ContinueLicenceSearch
         End If
@@ -654,7 +654,7 @@ Private Sub SearchSingleLicenceTerm(ByVal term As String, _
             If Err.Number <> 0 Then locStr = "unknown location": Err.Clear
             On Error GoTo 0
 
-            Set finding = CreateIssueDict(RULE_NAME_LICENCE, locStr, "'" & rng.Text & "' " & Chr(8212) & " in quoted text, review manually", "", rng.Start, rng.End, "possible_error")
+            Set finding = CreateIssueDict(RULE_NAME_LICENCE, locStr, "'" & rng.Text & "' -- in quoted text, review manually", "", rng.Start, rng.End, "possible_error")
             issues.Add finding
             GoTo ContinueLicenceSearch
         End If
@@ -690,17 +690,17 @@ Private Sub SearchSingleLicenceTerm(ByVal term As String, _
         ElseIf (usesS And Not baseIsVerb And Not baseIsNoun) Or _
                (Not usesS And Not baseIsVerb And Not baseIsNoun) Then
             ' Context ambiguous
-            issueText = "'" & rng.Text & "' " & Chr(8212) & " unable to determine noun/verb context; " & _
+            issueText = "'" & rng.Text & "' -- unable to determine noun/verb context; " & _
                         "review context to ensure correct UK spelling"
             suggestion = "Review context: 'licence' = noun, 'license' = verb"
         ElseIf usesS And baseIsVerb And baseIsNoun Then
             ' Both indicators present -- ambiguous
-            issueText = "'" & rng.Text & "' " & Chr(8212) & " conflicting noun/verb indicators; " & _
+            issueText = "'" & rng.Text & "' -- conflicting noun/verb indicators; " & _
                         "review context"
             suggestion = "Review context: 'licence' = noun, 'license' = verb"
         ElseIf Not usesS And baseIsVerb And baseIsNoun Then
             ' Both indicators present -- ambiguous
-            issueText = "'" & rng.Text & "' " & Chr(8212) & " conflicting noun/verb indicators; " & _
+            issueText = "'" & rng.Text & "' -- conflicting noun/verb indicators; " & _
                         "review context"
             suggestion = "Review context: 'licence' = noun, 'license' = verb"
         End If

@@ -75,23 +75,29 @@ Private Sub RunChecks()
     Application.StatusBar = ""
 
     ' -- Show results --
+    Dim errCount As Long
+    errCount = Application.Run("PleadingsEngine.GetRuleErrorCount")
+
     If issues.Count = 0 Then
-        MsgBox "No issues found " & Chr(8212) & " document looks clean.", _
-               vbInformation, "Pleadings Checker"
+        If errCount > 0 Then
+            MsgBox "No issues found, but " & errCount & " rule(s) failed to run." & vbCrLf & vbCrLf & _
+                   "Check Immediate window (Ctrl+G) for details.", _
+                   vbExclamation, "Pleadings Checker"
+        Else
+            MsgBox "No issues found -- document looks clean.", _
+                   vbInformation, "Pleadings Checker"
+        End If
         Exit Sub
     End If
 
-    Dim summary As String
-    summary = Application.Run("PleadingsEngine.GetIssueSummary", issues)
-
     Dim applyChoice As Long
-    applyChoice = MsgBox(summary & vbCrLf & vbCrLf & _
+    applyChoice = MsgBox(issues.Count & " issue(s) found." & vbCrLf & vbCrLf & _
                          "Apply to document?" & vbCrLf & _
                          "Yes = Apply as tracked changes" & vbCrLf & _
                          "No = Highlight + comments only" & vbCrLf & _
                          "Cancel = View results only", _
                          vbYesNoCancel + vbInformation, _
-                         "Pleadings Checker " & Chr(8212) & " " & _
+                         "Pleadings Checker -- " & _
                          issues.Count & " Issue(s)")
 
     Select Case applyChoice

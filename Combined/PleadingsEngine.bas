@@ -43,6 +43,8 @@ Private PAGE_RANGE_START As Long
 Private PAGE_RANGE_END   As Long
 Private whitelistDict   As Object
 Private spellingMode    As String   ' "UK" or "US"
+Private ruleErrorCount  As Long
+Private ruleErrorLog    As String
 
 ' ============================================================
 '  ENTRY POINT
@@ -159,6 +161,9 @@ Private Function TryRunRule(ByVal funcName As String, _
     On Error Resume Next
     Set result = Application.Run(funcName, doc)
     If Err.Number <> 0 Then
+        ruleErrorCount = ruleErrorCount + 1
+        ruleErrorLog = ruleErrorLog & funcName & " (Err " & Err.Number & ": " & Err.Description & ")" & vbCrLf
+        Debug.Print "RULE ERROR: " & funcName & " -- Err " & Err.Number & ": " & Err.Description
         Err.Clear
         On Error GoTo 0
         Set TryRunRule = New Collection
@@ -167,8 +172,10 @@ Private Function TryRunRule(ByVal funcName As String, _
     On Error GoTo 0
 
     If result Is Nothing Then
+        Debug.Print "RULE OK (no results): " & funcName
         Set TryRunRule = New Collection
     Else
+        Debug.Print "RULE OK: " & funcName & " -- " & result.Count & " issue(s)"
         Set TryRunRule = result
     End If
 End Function
@@ -180,6 +187,8 @@ Public Function RunAllPleadingsRules(doc As Document, _
                                      config As Object) As Collection
     Dim allIssues As New Collection
     Set ruleConfig = config
+    ruleErrorCount = 0
+    ruleErrorLog = ""
 
     ' -- Suppress screen redraws and events for performance ----
     Application.ScreenUpdating = False
@@ -424,7 +433,7 @@ Public Sub ApplyHighlights(doc As Document, _
                 If addComments Then
                     doc.Comments.Add Range:=rng, _
                         Text:="[" & GetIssueProp(finding, "RuleName") & "] " & GetIssueProp(finding, "Issue") & _
-                              " " & Chr(8212) & " Suggestion: " & GetIssueProp(finding, "Suggestion")
+                              " -- Suggestion: " & GetIssueProp(finding, "Suggestion")
                 End If
             End If
             On Error GoTo 0
@@ -459,7 +468,7 @@ Public Sub ApplySuggestionsAsTrackedChanges(doc As Document, _
                     If addComments Then
                         doc.Comments.Add Range:=rng, _
                             Text:="[" & GetIssueProp(finding, "RuleName") & "] " & GetIssueProp(finding, "Issue") & _
-                                  " " & Chr(8212) & " Suggestion: " & GetIssueProp(finding, "Suggestion")
+                                  " -- Suggestion: " & GetIssueProp(finding, "Suggestion")
                     End If
                 End If
             End If
@@ -471,7 +480,7 @@ Public Sub ApplySuggestionsAsTrackedChanges(doc As Document, _
                 If Err.Number = 0 Then
                     doc.Comments.Add Range:=rng, _
                         Text:="[" & GetIssueProp(finding, "RuleName") & "] " & GetIssueProp(finding, "Issue") & _
-                              " " & Chr(8212) & " Suggestion: " & GetIssueProp(finding, "Suggestion")
+                              " -- Suggestion: " & GetIssueProp(finding, "Suggestion")
                 End If
             End If
             On Error GoTo 0
@@ -645,6 +654,14 @@ Public Sub SetPageRange(startPage As Long, endPage As Long)
     PAGE_RANGE_START = startPage
     PAGE_RANGE_END = endPage
 End Sub
+
+Public Function GetRuleErrorCount() As Long
+    GetRuleErrorCount = ruleErrorCount
+End Function
+
+Public Function GetRuleErrorLog() As String
+    GetRuleErrorLog = ruleErrorLog
+End Function
 
 ' ============================================================
 '  HELPERS: WHITELIST

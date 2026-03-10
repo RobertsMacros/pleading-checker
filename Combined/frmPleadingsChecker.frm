@@ -424,12 +424,27 @@ Private Sub btnRun_Click()
     Dim summary As String
     summary = PleadingsEngine.GetIssueSummary(lastResults)
 
+    Dim errCount As Long
+    errCount = PleadingsEngine.GetRuleErrorCount()
+
     If lastResults.Count = 0 Then
-        lblStatus.Caption = "No issues found."
-        MsgBox "No issues found " & Chr(8212) & " document looks clean.", vbInformation, "Pleadings Checker"
+        If errCount > 0 Then
+            lblStatus.Caption = "No issues found, but " & errCount & " rule(s) failed to run."
+            MsgBox "No issues found, but " & errCount & " rule(s) failed to run." & vbCrLf & vbCrLf & _
+                   "Failed rules:" & vbCrLf & PleadingsEngine.GetRuleErrorLog() & vbCrLf & _
+                   "Check Immediate window (Ctrl+G) for details.", _
+                   vbExclamation, "Pleadings Checker"
+        Else
+            lblStatus.Caption = "No issues found."
+            MsgBox "No issues found -- document looks clean.", vbInformation, "Pleadings Checker"
+        End If
     Else
+        Dim errMsg As String
+        If errCount > 0 Then
+            errMsg = vbCrLf & "(Note: " & errCount & " rule(s) failed to run -- check Ctrl+G for details.)"
+        End If
         lblStatus.Caption = lastResults.Count & " issue(s) found. Click Apply Suggestions or Export Report."
-        MsgBox lastResults.Count & " issue(s) found." & vbCrLf & vbCrLf & _
+        MsgBox lastResults.Count & " issue(s) found." & errMsg & vbCrLf & vbCrLf & _
                "Click 'Apply Suggestions' to fix, or 'Export Report' for details.", _
                vbInformation, "Pleadings Checker"
     End If
@@ -496,7 +511,7 @@ Private Sub btnExport_Click()
 
     lblStatus.Caption = "Report saved."
     MsgBox "Report saved to:" & vbCrLf & reportPath & vbCrLf & vbCrLf & summary, _
-           vbInformation, "Pleadings Checker " & Chr(8212) & " Report"
+           vbInformation, "Pleadings Checker -- Report"
 End Sub
 
 ' ============================================================
