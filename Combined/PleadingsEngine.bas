@@ -443,7 +443,142 @@ RunnerCleanup:
     Application.ScreenUpdating = True
     Application.StatusBar = ""
 
+    ' -- Filter out issues inside block quotes / quoted text -----
+    ' Quoted text may contain errors but they belong to the source,
+    ' not the author, so no rules should flag them.
+    Set allIssues = FilterBlockQuoteIssues(doc, allIssues)
+
     Set RunAllPleadingsRules = allIssues
+End Function
+
+' ============================================================
+'  FILTER: Remove issues inside block quotes / quoted text
+'
+'  Detects block quote paragraphs by:
+'    1. Style name containing "quote", "block", or "extract"
+'    2. Significant left indentation (> 36pt) with smaller font
+'    3. Paragraph text starting with open quotation mark and
+'       ending with close quotation mark (direct quotations)
+' ============================================================
+Private Function FilterBlockQuoteIssues(doc As Document, _
+                                         issues As Collection) As Collection
+    Dim filtered As New Collection
+    Dim i As Long
+
+    ' -- Build list of block-quote paragraph ranges ----------------
+    Dim bqStarts() As Long, bqEnds() As Long
+    Dim bqCount As Long, bqCap As Long
+    bqCap = 64
+    ReDim bqStarts(0 To bqCap - 1)
+    ReDim bqEnds(0 To bqCap - 1)
+    bqCount = 0
+
+    On Error Resume Next
+    Dim para As Paragraph
+    For Each para In doc.Paragraphs
+        Err.Clear
+        Dim pStart As Long, pEnd As Long
+        pStart = para.Range.Start
+        pEnd = para.Range.End
+        If Err.Number <> 0 Then Err.Clear: GoTo NxtBQ
+
+        Dim isBQ As Boolean
+        isBQ = False
+
+        ' Check 1: Style name
+        Dim sn As String
+        sn = ""
+        sn = LCase(para.Style.NameLocal)
+        If Err.Number <> 0 Then sn = "": Err.Clear
+        If InStr(sn, "quote") > 0 Or InStr(sn, "block") > 0 Or _
+           InStr(sn, "extract") > 0 Then
+            isBQ = True
+        End If
+
+        ' Check 2: Indentation + smaller font
+        If Not isBQ Then
+            Dim leftInd As Single
+            leftInd = para.Format.LeftIndent
+            If Err.Number <> 0 Then leftInd = 0: Err.Clear
+            Dim fontSize As Single
+            fontSize = para.Range.Font.Size
+            If Err.Number <> 0 Then fontSize = 0: Err.Clear
+            If leftInd > 36 And fontSize > 0 And fontSize < 11 Then
+                isBQ = True
+            End If
+        End If
+
+        ' Check 3: Paragraph wrapped in quotation marks
+        If Not isBQ Then
+            Dim pText As String
+            pText = ""
+            pText = para.Range.Text
+            If Err.Number <> 0 Then pText = "": Err.Clear
+            If Len(pText) > 2 Then
+                Dim firstCh As Long, lastCh As Long
+                firstCh = AscW(Left(pText, 1))
+                ' Trim trailing paragraph mark
+                Dim trimmed As String
+                trimmed = pText
+                If Right(trimmed, 1) = vbCr Or Right(trimmed, 1) = vbLf Then
+                    trimmed = Left(trimmed, Len(trimmed) - 1)
+                End If
+                If Len(trimmed) > 1 Then
+                    lastCh = AscW(Right(trimmed, 1))
+                    ' Opening + closing curly double quotes
+                    If (firstCh = 8220 And lastCh = 8221) Then
+                        isBQ = True
+                    End If
+                    ' Opening + closing straight double quotes
+                    If (firstCh = 34 And lastCh = 34) Then
+                        isBQ = True
+                    End If
+                End If
+            End If
+        End If
+
+        If isBQ Then
+            If bqCount >= bqCap Then
+                bqCap = bqCap * 2
+                ReDim Preserve bqStarts(0 To bqCap - 1)
+                ReDim Preserve bqEnds(0 To bqCap - 1)
+            End If
+            bqStarts(bqCount) = pStart
+            bqEnds(bqCount) = pEnd
+            bqCount = bqCount + 1
+        End If
+NxtBQ:
+    Next para
+    On Error GoTo 0
+
+    ' -- Filter issues ---------------------------------------------
+    If bqCount = 0 Then
+        Set FilterBlockQuoteIssues = issues
+        Exit Function
+    End If
+
+    For i = 1 To issues.Count
+        Dim finding As Object
+        Set finding = issues(i)
+        Dim rs As Long
+        rs = GetIssueProp(finding, "RangeStart")
+
+        Dim inBQ As Boolean
+        inBQ = False
+        Dim j As Long
+        For j = 0 To bqCount - 1
+            If rs >= bqStarts(j) And rs < bqEnds(j) Then
+                inBQ = True
+                Exit For
+            End If
+        Next j
+
+        If Not inBQ Then
+            filtered.Add finding
+        End If
+    Next i
+
+    Set FilterBlockQuoteIssues = filtered
 End Function
 
 ' ============================================================
