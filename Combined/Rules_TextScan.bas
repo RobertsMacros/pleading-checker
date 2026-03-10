@@ -256,6 +256,11 @@ Public Function Check_SpellOutUnderTen(doc As Document) As Collection
                     GoTo NextChar
                 End If
 
+                ' -- Check: inside parentheses (clause sub-numbers) --
+                If IsInsideParentheses(paraText, i) Then
+                    GoTo NextChar
+                End If
+
                 ' -- Check: part of a range pattern --
                 If IsPartOfRange(paraText, i, textLen) Then
                     GoTo NextChar
@@ -513,6 +518,34 @@ Private Function GetPrecedingWord(ByRef txt As String, _
     If wordStart > wordEnd Then Exit Function
 
     GetPrecedingWord = Mid(txt, wordStart, wordEnd - wordStart + 1)
+End Function
+
+' ------------------------------------------------------------
+'  PRIVATE: Check if digit is inside parentheses -- catches
+'  clause sub-numbers like "34(3)(e)", "(iv)", "s.2(1)" etc.
+' ------------------------------------------------------------
+Private Function IsInsideParentheses(ByRef txt As String, _
+                                      ByVal pos As Long) As Boolean
+    IsInsideParentheses = False
+
+    ' Check for opening paren before (skipping digits and letters)
+    Dim k As Long
+    k = pos - 1
+    If k >= 1 Then
+        If Mid(txt, k, 1) = "(" Then
+            IsInsideParentheses = True
+            Exit Function
+        End If
+    End If
+
+    ' Check for closing paren after (skipping ahead past the digit)
+    k = pos + 1
+    If k <= Len(txt) Then
+        If Mid(txt, k, 1) = ")" Then
+            IsInsideParentheses = True
+            Exit Function
+        End If
+    End If
 End Function
 
 ' ------------------------------------------------------------

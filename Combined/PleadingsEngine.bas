@@ -173,7 +173,8 @@ Public Function InitRuleConfig() As Object
     cfg.Add "footnote_integrity", True
     cfg.Add "title_formatting", True
     cfg.Add "brand_name_enforcement", True
-    cfg.Add "phrase_consistency", True
+    ' "phrase_consistency" removed: too many false positives on words
+    ' with different meanings (e.g. "where" vs "if")
     cfg.Add "footnotes_not_endnotes", True
     cfg.Add "footnote_terminal_full_stop", True
     cfg.Add "footnote_initial_capital", True
@@ -293,10 +294,7 @@ Public Function RunAllPleadingsRules(doc As Document, _
             TryRunRule("Rules_Terms.Check_DefinedTerms", doc)
     End If
 
-    If IsRuleEnabled(config, "phrase_consistency") Then
-        AddIssuesToCollection allIssues, _
-            TryRunRule("Rules_Terms.Check_PhraseConsistency", doc)
-    End If
+    ' phrase_consistency removed (false positives on words with different meanings)
 
     DoEvents
     ' -- Formatting rules --
@@ -662,7 +660,7 @@ Public Function GetRuleDisplayNames() As Object
     d.Add "footnote_integrity", "Footnote Integrity"
     d.Add "title_formatting", "Title Formatting Consistency"
     d.Add "brand_name_enforcement", "Brand Name Enforcement"
-    d.Add "phrase_consistency", "Phrase Consistency"
+    ' "phrase_consistency" removed
     d.Add "footnotes_not_endnotes", "Footnotes Not Endnotes"
     d.Add "footnote_terminal_full_stop", "Footnote Terminal Full Stop"
     d.Add "footnote_initial_capital", "Footnote Initial Capital"
