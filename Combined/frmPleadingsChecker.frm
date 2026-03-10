@@ -1,10 +1,10 @@
 VERSION 5.00
 Begin {C62A69F0-16DC-11CE-9E98-00AA00574A4F} frmPleadingsChecker
    Caption         =   "Pleadings Checker"
-   ClientHeight    =   8000
+   ClientHeight    =   15000
    ClientLeft      =   120
    ClientTop       =   465
-   ClientWidth     =   17000
+   ClientWidth     =   15000
    StartUpPosition =   1  'CenterOwner
 End
 Attribute VB_Name = "frmPleadingsChecker"
@@ -72,7 +72,7 @@ Private Sub UserForm_Initialize()
 
     ' -- Overall form padding ----------------------------------
     Const PAD As Single = 12
-    Const FULL_W As Single = 826     ' usable width (form 850 - 2*PAD)
+    Const FULL_W As Single = 976     ' usable width (form 1000 - 2*PAD)
     Const BTN_W As Single = 108
     Const BTN_H As Single = 26
     Const TXT_H As Single = 22
