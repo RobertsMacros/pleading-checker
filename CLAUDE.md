@@ -35,7 +35,7 @@ VBA has many reserved words that are not always caught at compile time but cause
 - `input` — shadows `VBA.Input`. Renamed to `pageInput`
 - `issue` — not reserved but conflicts with common patterns; renamed to `finding` for clarity
 
-**Rule of thumb:** If a variable name matches any VBA keyword, built-in function, or type name, rename it.
+**Rule of thumb:** If a variable name matches any VBA keyword, built-in function, or type name, rename it. VBA is case-insensitive, so `sTop` matches `Stop`.
 
 ### 3. `Const` cannot use function calls
 
@@ -54,24 +54,26 @@ The VBA editor uses the system's ANSI code page. Non-ASCII characters (em-dashes
 
 ### 5. `Range.Runs` does not exist in Word VBA
 
-Word's `Range` object has no `.Runs` collection (unlike PowerPoint). To walk character formatting runs, use `Range.Characters` or the `wdCharacterFormatting` find approach:
+Word's `Range` object has no `.Runs` collection (unlike PowerPoint). There is also no `Ranges` type. To walk character formatting runs, use `wdCharacterFormatting`:
 
 ```vba
-Dim rng As Range
-Set rng = doc.Content.Duplicate
-rng.Collapse wdCollapseStart
-Do While rng.Start < doc.Content.End
-    rng.MoveEndUntil Cset:="", Count:=wdForward  ' etc.
+Dim rn As Range
+Set rn = doc.Content.Duplicate
+rn.Collapse wdCollapseStart
+Do While rn.Start < doc.Content.End
+    rn.MoveEnd wdCharacterFormatting, 1
+    ' ... inspect rn.Font properties ...
+    rn.Collapse wdCollapseEnd
 Loop
 ```
 
 ### 6. `Application.EnableEvents` is Excel-only
 
-`Application.EnableEvents` does not exist in Word VBA. Using it causes a compile error that **silently prevents the entire module from loading** — the macro appears to do nothing (0 issues found) with no visible error.
+`Application.EnableEvents` does not exist in Word VBA. Using it causes a compile error that **silently prevents the entire module from loading** — the macro appears to do nothing (0 issues found) with no visible error. Similarly, `Application.DisplayAlerts` save/restore is unnecessary in Word rule-running context.
 
-### 7. Duplicate `Dim` statements
+### 7. Duplicate `Dim` statements and duplicate functions
 
-VBA does not allow two `Dim` statements for the same variable name in the same procedure scope, even inside different `If` blocks. This is a compile error.
+VBA does not allow two `Dim` statements for the same variable name in the same procedure scope, even inside different `If` blocks. Similarly, two functions with the same name in one module is a compile error. Both are easy to introduce during automated refactoring.
 
 ### 8. Max 25 line continuations per statement
 
@@ -91,27 +93,19 @@ arr = MergeArrays(a1, a2)
 
 ### 9. `Dim x As Type: x = value` on one line
 
-Some VBA versions reject single-line `Dim` + assignment. Always split:
-
-```vba
-' Safer
-Dim x As Long
-x = 0
-```
+Some VBA versions reject single-line `Dim` + assignment. Always split into separate lines for reliability.
 
 ### 10. Fixed-size array `Dim` inside loops
 
-Declaring a fixed-size array (`Dim arr(0 To 63) As Long`) inside a loop causes a compile error on re-entry. Declare at procedure top; use `ReDim` to reset inside the loop.
+Declaring a fixed-size array (`Dim arr(0 To 63) As Long`) inside a loop causes a compile error on re-entry. Declare at procedure top with no bounds; use `ReDim` to reset inside the loop.
 
-### 11. Function call syntax — no trailing parentheses for Subs
+### 11. Function call syntax — no trailing parentheses
 
 ```vba
-' WRONG — extra () causes type mismatch or compile error
-Call SomeSub(arg1, arg2)()
+' WRONG — extra () causes type mismatch or runtime error 5
 result = SomeFunc(arg1)()
 
 ' RIGHT
-Call SomeSub(arg1, arg2)
 result = SomeFunc(arg1)
 ```
 
@@ -149,7 +143,7 @@ Loop
 
 ### 16. Screen updating and responsiveness
 
-Always wrap long-running operations:
+Always wrap long-running operations. Every `Find.Execute` redraws the screen without this:
 
 ```vba
 Application.ScreenUpdating = False
@@ -158,9 +152,56 @@ DoEvents  ' between major steps to prevent "Not Responding"
 Application.ScreenUpdating = True
 ```
 
+Use `On Error GoTo cleanup` to guarantee `ScreenUpdating = True` is restored even on error.
+
 ### 17. `On Error Resume Next` leaks across statements
 
 After using `On Error Resume Next`, always reset with `On Error GoTo 0` before returning to normal flow. Forgetting this masks all subsequent errors silently.
+
+### 18. Self-referencing Select Case causes infinite recursion
+
+```vba
+' WRONG — calls itself forever, stack overflow
+Function GetProp(obj, propName)
+    Select Case propName
+        Case "Name": GetProp = GetProp(obj, "Name")  ' oops
+    End Select
+End Function
+
+' RIGHT — use CallByName or direct access
+Case "Name": GetProp = CallByName(obj, propName, VbGet)
+```
+
+### 19. Truncated arguments in automated refactoring
+
+When using find-and-replace or scripts to refactor function calls (e.g. changing from class constructors to helper functions), arguments can be silently lost if the replacement pattern doesn't capture all parameters. Always verify argument counts match after automated changes.
+
+### 20. Silent rule failures with no diagnostics
+
+`On Error Resume Next` around `Application.Run` for rule dispatch means failures are completely invisible — rules fail and report "0 issues found" with no indication anything went wrong. Always add error logging:
+
+```vba
+On Error Resume Next
+Set result = Application.Run(funcName, doc)
+If Err.Number <> 0 Then
+    Debug.Print "RULE ERROR: " & funcName & " -- " & Err.Description
+    errorLog = errorLog & funcName & vbCrLf
+    Err.Clear
+End If
+On Error GoTo 0
+```
+
+### 21. Character-by-character Range allocation is catastrophically slow
+
+Creating a new `doc.Range(pos, pos+1)` for each character in a document to inspect font properties causes Word to freeze on any real document. Use `wdCharacterFormatting` walk or byte-array scans instead. Orders of magnitude faster.
+
+### 22. Class dependencies prevent standalone compilation
+
+If rule modules type variables `As SomeClass`, they won't compile unless that `.cls` file is also imported. Use Dictionary-based objects with a factory helper function instead, so every module compiles independently.
+
+### 23. `wdCharacterFormatting` MoveEnd can infinite-loop
+
+`Range.MoveEnd wdCharacterFormatting, 1` can return 0 (no movement) on certain paragraph structures without raising an error. Always check the return value or add a position guard to prevent infinite loops.
 
 ---
 
