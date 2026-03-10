@@ -190,12 +190,8 @@ Public Function RunAllPleadingsRules(doc As Document, _
     ruleErrorCount = 0
     ruleErrorLog = ""
 
-    ' -- Suppress screen redraws and events for performance ----
+    ' -- Suppress screen redraws for performance ----
     Application.ScreenUpdating = False
-    Application.EnableEvents = False
-    Application.DisplayAlerts = False
-    Dim origStatusBar As Boolean
-    origStatusBar = Application.DisplayStatusBar
 
     On Error GoTo RunnerCleanup
 
@@ -405,9 +401,6 @@ Public Function RunAllPleadingsRules(doc As Document, _
 RunnerCleanup:
     ' -- Restore application state (always runs) ----------------
     Application.ScreenUpdating = True
-    Application.EnableEvents = True
-    Application.DisplayAlerts = True
-    Application.DisplayStatusBar = origStatusBar
     Application.StatusBar = ""
 
     Set RunAllPleadingsRules = allIssues
