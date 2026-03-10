@@ -10,7 +10,7 @@ Option Explicit
 
 Private Const RULE_NAME As String = "date_time_format"
 
-' ── Helper: validate a month name ───────────────────────────
+' -- Helper: validate a month name ---------------------------
 Private Function IsValidMonth(ByVal monthName As String) As Boolean
     Dim months As Variant
     months = Array("January", "February", "March", "April", "May", "June", _
@@ -25,7 +25,7 @@ Private Function IsValidMonth(ByVal monthName As String) As Boolean
     IsValidMonth = False
 End Function
 
-' ── Helper: search and collect date/time occurrences ────────
+' -- Helper: search and collect date/time occurrences --------
 Private Sub FindWithWildcard(doc As Document, ByVal pattern As String, _
                               results As Collection, ByVal formatType As String)
     Dim rng As Range
@@ -41,7 +41,7 @@ Private Sub FindWithWildcard(doc As Document, ByVal pattern As String, _
     End With
 
     Do While rng.Find.Execute
-        If PleadingsEngine.IsInPageRange(rng) Then
+        If EngineIsInPageRange(rng) Then
             Dim info(0 To 3) As Variant
             info(0) = formatType
             info(1) = rng.Text
@@ -53,24 +53,25 @@ Private Sub FindWithWildcard(doc As Document, ByVal pattern As String, _
     Loop
 End Sub
 
-' ════════════════════════════════════════════════════════════
+' ============================================================
 '  MAIN RULE FUNCTION
-' ════════════════════════════════════════════════════════════
+' ============================================================
 Public Function Check_DateTimeFormat(doc As Document) As Collection
     Dim issues As New Collection
 
     On Error Resume Next
 
-    ' ══════════════════════════════════════════════════════════
+    ' ==========================================================
     '  PASS 1: Find all date occurrences
-    ' ══════════════════════════════════════════════════════════
+    ' ==========================================================
     Dim dateFinds As New Collection
-    Dim dateCounts As New Scripting.Dictionary
+    Dim dateCounts As Object
+    Set dateCounts = CreateObject("Scripting.Dictionary")
     dateCounts.Add "UK", 0
     dateCounts.Add "US", 0
     dateCounts.Add "numeric", 0
 
-    ' ── UK format: "1 January 2024" or "12 March 2025" ──────
+    ' -- UK format: "1 January 2024" or "12 March 2025" ------
     ' VBA wildcard: one or two digits, space, word, space, four digits
     Dim ukResults As New Collection
     FindWithWildcard doc, "[0-9]{1,2} [A-Z][a-z]{2,} [0-9]{4}", ukResults, "UK"
@@ -95,7 +96,7 @@ Public Function Check_DateTimeFormat(doc As Document) As Collection
         End If
     Next i
 
-    ' ── US format: "January 1, 2024" or "March 12, 2025" ───
+    ' -- US format: "January 1, 2024" or "March 12, 2025" ---
     Dim usResults As New Collection
     FindWithWildcard doc, "[A-Z][a-z]{2,} [0-9]{1,2}, [0-9]{4}", usResults, "US"
 
@@ -114,7 +115,7 @@ Public Function Check_DateTimeFormat(doc As Document) As Collection
         End If
     Next i
 
-    ' ── Numeric format: "01/02/2024" or "1/2/24" ───────────
+    ' -- Numeric format: "01/02/2024" or "1/2/24" -----------
     Dim numResults As New Collection
     FindWithWildcard doc, "[0-9]{1,2}/[0-9]{1,2}/[0-9]{2,4}", numResults, "numeric"
 
@@ -123,7 +124,7 @@ Public Function Check_DateTimeFormat(doc As Document) As Collection
         dateCounts("numeric") = dateCounts("numeric") + 1
     Next i
 
-    ' ── Determine dominant date format ──────────────────────
+    ' -- Determine dominant date format ----------------------
     Dim dominantDate As String
     Dim maxDateCount As Long
     dominantDate = ""
@@ -136,7 +137,7 @@ Public Function Check_DateTimeFormat(doc As Document) As Collection
         End If
     Next dk
 
-    ' ── Flag non-dominant date formats ──────────────────────
+    ' -- Flag non-dominant date formats ----------------------
     If maxDateCount > 0 Then
         Dim totalDateFormats As Long
         totalDateFormats = 0
@@ -153,11 +154,11 @@ Public Function Check_DateTimeFormat(doc As Document) As Collection
                 dType = CStr(dInfo(0))
 
                 If dType <> dominantDate Then
-                    Dim issueD As New PleadingsIssue
+                    Dim issueD As Object
                     Dim rngD As Range
                     Set rngD = doc.Range(CLng(dInfo(2)), CLng(dInfo(3)))
                     Dim locD As String
-                    locD = PleadingsEngine.GetLocationString(rngD, doc)
+                    locD = EngineGetLocationString(rngD, doc)
 
                     Dim suggestion As String
                     Select Case dominantDate
@@ -169,25 +170,23 @@ Public Function Check_DateTimeFormat(doc As Document) As Collection
                             suggestion = "Reformat to numeric style (e.g., '01/01/2024')"
                     End Select
 
-                    issueD.Init RULE_NAME, locD, _
-                        "Inconsistent date format: '" & CStr(dInfo(1)) & _
-                        "' uses " & dType & " format but dominant is " & dominantDate, _
-                        suggestion, CLng(dInfo(2)), CLng(dInfo(3)), "error"
+                    Set issueD = CreateIssueDict(RULE_NAME, locD, "Inconsistent date format: '" & CStr(dInfo(1)) & "' uses " & dType & " format but dominant is " & dominantDate, suggestion, CLng(dInfo(2)), CLng(dInfo(3)), "error")
                     issues.Add issueD
                 End If
             Next i
         End If
     End If
 
-    ' ══════════════════════════════════════════════════════════
+    ' ==========================================================
     '  PASS 2: Find time format inconsistencies
-    ' ══════════════════════════════════════════════════════════
+    ' ==========================================================
     Dim timeFinds As New Collection
-    Dim timeCounts As New Scripting.Dictionary
+    Dim timeCounts As Object
+    Set timeCounts = CreateObject("Scripting.Dictionary")
     timeCounts.Add "12hr", 0
     timeCounts.Add "24hr", 0
 
-    ' ── 12-hour format: "2:30 PM", "11:00 am" ──────────────
+    ' -- 12-hour format: "2:30 PM", "11:00 am" --------------
     Dim time12Results As New Collection
     FindWithWildcard doc, "[0-9]{1,2}:[0-9]{2} [AaPp][Mm]", time12Results, "12hr"
 
@@ -196,7 +195,7 @@ Public Function Check_DateTimeFormat(doc As Document) As Collection
         timeCounts("12hr") = timeCounts("12hr") + 1
     Next i
 
-    ' ── 24-hour format: "14:30", "23:00" (hour >= 13) ──────
+    ' -- 24-hour format: "14:30", "23:00" (hour >= 13) ------
     Dim time24Results As New Collection
     FindWithWildcard doc, "[0-9]{2}:[0-9]{2}", time24Results, "24hr"
 
@@ -222,7 +221,7 @@ Public Function Check_DateTimeFormat(doc As Document) As Collection
         End If
     Next i
 
-    ' ── Determine dominant time format and flag deviations ──
+    ' -- Determine dominant time format and flag deviations --
     Dim dominantTime As String
     Dim maxTimeCount As Long
     dominantTime = ""
@@ -249,11 +248,11 @@ Public Function Check_DateTimeFormat(doc As Document) As Collection
                 tType = CStr(tInfo(0))
 
                 If tType <> dominantTime Then
-                    Dim issueT As New PleadingsIssue
+                    Dim issueT As Object
                     Dim rngT As Range
                     Set rngT = doc.Range(CLng(tInfo(2)), CLng(tInfo(3)))
                     Dim locT As String
-                    locT = PleadingsEngine.GetLocationString(rngT, doc)
+                    locT = EngineGetLocationString(rngT, doc)
 
                     Dim timeSugg As String
                     If dominantTime = "12hr" Then
@@ -262,10 +261,7 @@ Public Function Check_DateTimeFormat(doc As Document) As Collection
                         timeSugg = "Use 24-hour format (e.g., '14:30') for consistency"
                     End If
 
-                    issueT.Init RULE_NAME, locT, _
-                        "Inconsistent time format: '" & CStr(tInfo(1)) & _
-                        "' uses " & tType & " format but dominant is " & dominantTime, _
-                        timeSugg, CLng(tInfo(2)), CLng(tInfo(3)), "error"
+                    Set issueT = CreateIssueDict(RULE_NAME, locT, "Inconsistent time format: '" & CStr(tInfo(1)) & "' uses " & tType & " format but dominant is " & dominantTime, timeSugg, CLng(tInfo(2)), CLng(tInfo(3)), "error")
                     issues.Add issueT
                 End If
             Next i
@@ -274,4 +270,62 @@ Public Function Check_DateTimeFormat(doc As Document) As Collection
 
     On Error GoTo 0
     Set Check_DateTimeFormat = issues
+End Function
+
+' ----------------------------------------------------------------
+'  PRIVATE: Create a dictionary-based issue (no class dependency)
+' ----------------------------------------------------------------
+Private Function CreateIssueDict(ByVal ruleName_ As String, _
+                                 ByVal location_ As String, _
+                                 ByVal issue_ As String, _
+                                 ByVal suggestion_ As String, _
+                                 ByVal rangeStart_ As Long, _
+                                 ByVal rangeEnd_ As Long, _
+                                 Optional ByVal severity_ As String = "error", _
+                                 Optional ByVal autoFixSafe_ As Boolean = False) As Object
+    Dim d As Object
+    Set d = CreateObject("Scripting.Dictionary")
+    d("RuleName") = ruleName_
+    d("Location") = location_
+    d("Issue") = issue_
+    d("Suggestion") = suggestion_
+    d("RangeStart") = rangeStart_
+    d("RangeEnd") = rangeEnd_
+    d("Severity") = severity_
+    d("AutoFixSafe") = autoFixSafe_
+    Set CreateIssueDict = d
+End Function
+
+' ----------------------------------------------------------------
+'  Late-bound wrapper: EngineIsInPageRange
+' ----------------------------------------------------------------
+
+' ----------------------------------------------------------------
+'  Late-bound wrapper: EngineGetLocationString
+' ----------------------------------------------------------------
+
+' ----------------------------------------------------------------
+'  Late-bound wrapper: PleadingsEngine.IsInPageRange
+' ----------------------------------------------------------------
+Private Function EngineIsInPageRange(rng As Object) As Boolean
+    On Error Resume Next
+    EngineIsInPageRange = Application.Run("PleadingsEngine.IsInPageRange", rng)
+    If Err.Number <> 0 Then
+        EngineIsInPageRange = True
+        Err.Clear
+    End If
+    On Error GoTo 0
+End Function
+
+' ----------------------------------------------------------------
+'  Late-bound wrapper: PleadingsEngine.GetLocationString
+' ----------------------------------------------------------------
+Private Function EngineGetLocationString(rng As Object, doc As Document) As String
+    On Error Resume Next
+    EngineGetLocationString = Application.Run("PleadingsEngine.GetLocationString", rng, doc)
+    If Err.Number <> 0 Then
+        EngineGetLocationString = "unknown location"
+        Err.Clear
+    End If
+    On Error GoTo 0
 End Function

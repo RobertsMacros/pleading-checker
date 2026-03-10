@@ -9,7 +9,6 @@ Attribute VB_Name = "Rule01_british_spelling"
 '   -se/-ce, -og/-ogue, -ment variants, and miscellaneous.
 '
 ' Dependencies:
-'   - PleadingsIssue.cls
 '   - PleadingsEngine.bas (IsInPageRange, IsWhitelistedTerm,
 '                          GetLocationString)
 ' ============================================================
@@ -17,9 +16,9 @@ Option Explicit
 
 Private Const RULE_NAME As String = "british_spelling"
 
-' ════════════════════════════════════════════════════════════
+' ============================================================
 '  MAIN ENTRY POINT
-' ════════════════════════════════════════════════════════════
+' ============================================================
 Public Function Check_BritishSpelling(doc As Document) As Collection
     Dim issues As New Collection
     Dim usWords() As String
@@ -27,18 +26,18 @@ Public Function Check_BritishSpelling(doc As Document) As Collection
     Dim exceptions() As String
     Dim i As Long
 
-    ' ── Build the US → UK mapping arrays ──────────────────
+    ' -- Build the US -> UK mapping arrays ------------------
     BuildSpellingArrays usWords, ukWords
 
-    ' ── Exceptions: US terms to skip even if found ────────
+    ' -- Exceptions: US terms to skip even if found --------
     ' "judgment" is standard in UK legal writing (not "judgement")
     ' "practice" is the correct UK noun form (verb: "practise")
     exceptions = Split("program,judgment,practice", ",")
 
-    ' ── Search main document body ─────────────────────────
+    ' -- Search main document body -------------------------
     SearchRangeForUSSpellings doc.Content, doc, usWords, ukWords, exceptions, issues
 
-    ' ── Search footnotes ──────────────────────────────────
+    ' -- Search footnotes ----------------------------------
     On Error Resume Next
     Dim fn As Footnote
     For Each fn In doc.Footnotes
@@ -48,7 +47,7 @@ Public Function Check_BritishSpelling(doc As Document) As Collection
     Next fn
     On Error GoTo 0
 
-    ' ── Search endnotes ───────────────────────────────────
+    ' -- Search endnotes -----------------------------------
     On Error Resume Next
     Dim en As Endnote
     For Each en In doc.Endnotes
@@ -61,12 +60,12 @@ Public Function Check_BritishSpelling(doc As Document) As Collection
     Set Check_BritishSpelling = issues
 End Function
 
-' ════════════════════════════════════════════════════════════
+' ============================================================
 '  PRIVATE: Search a Range for all US spelling matches
 '  Iterates every US/UK pair, uses Word's Find to locate
 '  whole-word, case-insensitive matches, then filters by
 '  page range and whitelist before creating issues.
-' ════════════════════════════════════════════════════════════
+' ============================================================
 Private Sub SearchRangeForUSSpellings(searchRange As Range, _
                                        doc As Document, _
                                        ByRef usWords() As String, _
@@ -76,7 +75,7 @@ Private Sub SearchRangeForUSSpellings(searchRange As Range, _
     Dim i As Long
     Dim rng As Range
     Dim foundText As String
-    Dim issue As PleadingsIssue
+    Dim issue As Object
     Dim locStr As String
 
     For i = LBound(usWords) To UBound(usWords)
@@ -117,38 +116,31 @@ Private Sub SearchRangeForUSSpellings(searchRange As Range, _
 
             foundText = rng.Text
 
-            ' ── Skip exceptions ───────────────────────
+            ' -- Skip exceptions -----------------------
             If IsException(foundText, exceptions) Then
                 GoTo ContinueSearch
             End If
 
-            ' ── Skip whitelisted terms ────────────────
-            If PleadingsEngine.IsWhitelistedTerm(foundText) Then
+            ' -- Skip whitelisted terms ----------------
+            If EngineIsWhitelistedTerm(foundText) Then
                 GoTo ContinueSearch
             End If
 
-            ' ── Skip if outside configured page range ─
-            If Not PleadingsEngine.IsInPageRange(rng) Then
+            ' -- Skip if outside configured page range -
+            If Not EngineIsInPageRange(rng) Then
                 GoTo ContinueSearch
             End If
 
-            ' ── Create the issue ──────────────────────
+            ' -- Create the issue ----------------------
             On Error Resume Next
-            locStr = PleadingsEngine.GetLocationString(rng, doc)
+            locStr = EngineGetLocationString(rng, doc)
             If Err.Number <> 0 Then
                 locStr = "unknown location"
                 Err.Clear
             End If
             On Error GoTo 0
 
-            Set issue = New PleadingsIssue
-            issue.Init RULE_NAME, _
-                       locStr, _
-                       "US spelling detected: '" & foundText & "'", _
-                       ukWords(i), _
-                       rng.Start, _
-                       rng.End, _
-                       "error"
+            Set issue = CreateIssueDict(RULE_NAME, locStr, "US spelling detected: '" & foundText & "'", ukWords(i), rng.Start, rng.End, "error")
             issues.Add issue
 
 ContinueSearch:
@@ -167,9 +159,9 @@ NextWord:
     Next i
 End Sub
 
-' ════════════════════════════════════════════════════════════
+' ============================================================
 '  PRIVATE: Check if a found term is in the exceptions list
-' ════════════════════════════════════════════════════════════
+' ============================================================
 Private Function IsException(ByVal term As String, _
                               ByRef exceptions() As String) As Boolean
     Dim i As Long
@@ -188,10 +180,10 @@ Private Function IsException(ByVal term As String, _
     IsException = False
 End Function
 
-' ════════════════════════════════════════════════════════════
+' ============================================================
 '  PRIVATE: Build the parallel US/UK spelling arrays
 '  ~95 pairs across all categories.
-' ════════════════════════════════════════════════════════════
+' ============================================================
 Private Sub BuildSpellingArrays(ByRef usWords() As String, _
                                  ByRef ukWords() As String)
     Const PAIR_COUNT As Long = 95
@@ -202,7 +194,7 @@ Private Sub BuildSpellingArrays(ByRef usWords() As String, _
     Dim idx As Long
     idx = 0
 
-    ' ── -or → -our (25 pairs) ────────────────────────────
+    ' -- -or -> -our (25 pairs) ----------------------------
     usWords(idx) = "color":       ukWords(idx) = "colour":       idx = idx + 1
     usWords(idx) = "favor":       ukWords(idx) = "favour":       idx = idx + 1
     usWords(idx) = "honor":       ukWords(idx) = "honour":       idx = idx + 1
@@ -229,7 +221,7 @@ Private Sub BuildSpellingArrays(ByRef usWords() As String, _
     usWords(idx) = "armor":       ukWords(idx) = "armour":       idx = idx + 1
     usWords(idx) = "flavor":      ukWords(idx) = "flavour":      idx = idx + 1
 
-    ' ── -ize → -ise (20 pairs) ───────────────────────────
+    ' -- -ize -> -ise (20 pairs) ---------------------------
     usWords(idx) = "organize":      ukWords(idx) = "organise":      idx = idx + 1
     usWords(idx) = "realize":       ukWords(idx) = "realise":       idx = idx + 1
     usWords(idx) = "recognize":     ukWords(idx) = "recognise":     idx = idx + 1
@@ -251,7 +243,7 @@ Private Sub BuildSpellingArrays(ByRef usWords() As String, _
     usWords(idx) = "capitalize":    ukWords(idx) = "capitalise":    idx = idx + 1
     usWords(idx) = "criticize":     ukWords(idx) = "criticise":     idx = idx + 1
 
-    ' ── -ization → -isation (10 pairs) ───────────────────
+    ' -- -ization -> -isation (10 pairs) -------------------
     usWords(idx) = "organization":     ukWords(idx) = "organisation":     idx = idx + 1
     usWords(idx) = "authorization":    ukWords(idx) = "authorisation":    idx = idx + 1
     usWords(idx) = "characterization": ukWords(idx) = "characterisation": idx = idx + 1
@@ -263,7 +255,7 @@ Private Sub BuildSpellingArrays(ByRef usWords() As String, _
     usWords(idx) = "specialization":   ukWords(idx) = "specialisation":   idx = idx + 1
     usWords(idx) = "globalization":    ukWords(idx) = "globalisation":    idx = idx + 1
 
-    ' ── -er → -re (10 pairs) ─────────────────────────────
+    ' -- -er -> -re (10 pairs) -----------------------------
     usWords(idx) = "center":   ukWords(idx) = "centre":   idx = idx + 1
     usWords(idx) = "fiber":    ukWords(idx) = "fibre":    idx = idx + 1
     usWords(idx) = "liter":    ukWords(idx) = "litre":    idx = idx + 1
@@ -275,12 +267,12 @@ Private Sub BuildSpellingArrays(ByRef usWords() As String, _
     usWords(idx) = "specter":  ukWords(idx) = "spectre":  idx = idx + 1
     usWords(idx) = "meager":   ukWords(idx) = "meagre":   idx = idx + 1
 
-    ' ── -se → -ce (3 pairs) ──────────────────────────────
+    ' -- -se -> -ce (3 pairs) ------------------------------
     usWords(idx) = "defense":   ukWords(idx) = "defence":   idx = idx + 1
     usWords(idx) = "offense":   ukWords(idx) = "offence":   idx = idx + 1
     usWords(idx) = "pretense":  ukWords(idx) = "pretence":  idx = idx + 1
 
-    ' ── -og → -ogue (6 pairs) ────────────────────────────
+    ' -- -og -> -ogue (6 pairs) ----------------------------
     usWords(idx) = "analog":   ukWords(idx) = "analogue":   idx = idx + 1
     usWords(idx) = "catalog":  ukWords(idx) = "catalogue":  idx = idx + 1
     usWords(idx) = "dialog":   ukWords(idx) = "dialogue":   idx = idx + 1
@@ -288,14 +280,14 @@ Private Sub BuildSpellingArrays(ByRef usWords() As String, _
     usWords(idx) = "prolog":   ukWords(idx) = "prologue":   idx = idx + 1
     usWords(idx) = "epilog":   ukWords(idx) = "epilogue":   idx = idx + 1
 
-    ' ── -ment variants (5 pairs) ─────────────────────────
+    ' -- -ment variants (5 pairs) -------------------------
     usWords(idx) = "judgment":        ukWords(idx) = "judgement":        idx = idx + 1
     usWords(idx) = "acknowledgment":  ukWords(idx) = "acknowledgement":  idx = idx + 1
     usWords(idx) = "fulfillment":     ukWords(idx) = "fulfilment":       idx = idx + 1
     usWords(idx) = "enrollment":      ukWords(idx) = "enrolment":        idx = idx + 1
     usWords(idx) = "installment":     ukWords(idx) = "instalment":       idx = idx + 1
 
-    ' ── Other / miscellaneous (16 pairs) ─────────────────
+    ' -- Other / miscellaneous (16 pairs) -----------------
     usWords(idx) = "gray":        ukWords(idx) = "grey":        idx = idx + 1
     usWords(idx) = "plow":        ukWords(idx) = "plough":      idx = idx + 1
     usWords(idx) = "tire":        ukWords(idx) = "tyre":        idx = idx + 1
@@ -315,3 +307,78 @@ Private Sub BuildSpellingArrays(ByRef usWords() As String, _
 
     ' idx should now equal PAIR_COUNT (95)
 End Sub
+
+' ----------------------------------------------------------------
+'  PRIVATE: Create a dictionary-based issue (no class dependency)
+' ----------------------------------------------------------------
+Private Function CreateIssueDict(ByVal ruleName_ As String, _
+                                 ByVal location_ As String, _
+                                 ByVal issue_ As String, _
+                                 ByVal suggestion_ As String, _
+                                 ByVal rangeStart_ As Long, _
+                                 ByVal rangeEnd_ As Long, _
+                                 Optional ByVal severity_ As String = "error", _
+                                 Optional ByVal autoFixSafe_ As Boolean = False) As Object
+    Dim d As Object
+    Set d = CreateObject("Scripting.Dictionary")
+    d("RuleName") = ruleName_
+    d("Location") = location_
+    d("Issue") = issue_
+    d("Suggestion") = suggestion_
+    d("RangeStart") = rangeStart_
+    d("RangeEnd") = rangeEnd_
+    d("Severity") = severity_
+    d("AutoFixSafe") = autoFixSafe_
+    Set CreateIssueDict = d
+End Function
+
+' ----------------------------------------------------------------
+'  Late-bound wrapper: EngineIsInPageRange
+' ----------------------------------------------------------------
+
+' ----------------------------------------------------------------
+'  Late-bound wrapper: EngineGetLocationString
+' ----------------------------------------------------------------
+
+' ----------------------------------------------------------------
+'  Late-bound wrapper: PleadingsEngine.IsWhitelistedTerm
+' ----------------------------------------------------------------
+
+' ----------------------------------------------------------------
+'  Late-bound wrapper: PleadingsEngine.IsInPageRange
+' ----------------------------------------------------------------
+Private Function EngineIsInPageRange(rng As Object) As Boolean
+    On Error Resume Next
+    EngineIsInPageRange = Application.Run("PleadingsEngine.IsInPageRange", rng)
+    If Err.Number <> 0 Then
+        EngineIsInPageRange = True
+        Err.Clear
+    End If
+    On Error GoTo 0
+End Function
+
+' ----------------------------------------------------------------
+'  Late-bound wrapper: PleadingsEngine.GetLocationString
+' ----------------------------------------------------------------
+Private Function EngineGetLocationString(rng As Object, doc As Document) As String
+    On Error Resume Next
+    EngineGetLocationString = Application.Run("PleadingsEngine.GetLocationString", rng, doc)
+    If Err.Number <> 0 Then
+        EngineGetLocationString = "unknown location"
+        Err.Clear
+    End If
+    On Error GoTo 0
+End Function
+
+' ----------------------------------------------------------------
+'  Late-bound wrapper: PleadingsEngine.IsWhitelistedTerm
+' ----------------------------------------------------------------
+Private Function EngineIsWhitelistedTerm(ByVal term As String) As Boolean
+    On Error Resume Next
+    EngineIsWhitelistedTerm = Application.Run("PleadingsEngine.IsWhitelistedTerm", term)
+    If Err.Number <> 0 Then
+        EngineIsWhitelistedTerm = False
+        Err.Clear
+    End If
+    On Error GoTo 0
+End Function

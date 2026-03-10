@@ -2,7 +2,7 @@ Attribute VB_Name = "TestBucket1Rules"
 ' ============================================================
 ' TestBucket1Rules.bas
 ' Unit/integration tests for Bucket 1 Hart-style proofreading
-' rules (Rules 24–34).
+' rules (Rules 24-34).
 '
 ' Run via: TestBucket1Rules.RunAllBucket1Tests
 '
@@ -11,18 +11,17 @@ Attribute VB_Name = "TestBucket1Rules"
 ' results. Results are printed to the Immediate window.
 '
 ' Dependencies:
-'   - PleadingsIssue.cls
 '   - PleadingsEngine.bas
-'   - All Rule24–Rule34 modules
+'   - All Rule24-Rule34 modules
 ' ============================================================
 Option Explicit
 
 Private passCount As Long
 Private failCount As Long
 
-' ════════════════════════════════════════════════════════════
+' ============================================================
 '  MAIN TEST RUNNER
-' ════════════════════════════════════════════════════════════
+' ============================================================
 Public Sub RunAllBucket1Tests()
     passCount = 0
     failCount = 0
@@ -34,7 +33,7 @@ Public Sub RunAllBucket1Tests()
     Debug.Print "  Bucket 1 Rule Tests"
     Debug.Print "========================================"
 
-    ' ── Footnote rules ────────────────────────────────────────
+    ' -- Footnote rules ----------------------------------------
     Test_FootnotesNotEndnotes_FootnotesOnly
     Test_FootnotesNotEndnotes_EndnotesOnly
     Test_FootnotesNotEndnotes_Both
@@ -55,18 +54,18 @@ Public Sub RunAllBucket1Tests()
     Test_FootnoteAbbrevDict_Fail_DottedParas
     Test_FootnoteAbbrevDict_Suppressed_Ordinary
 
-    ' ── Hyphenation ───────────────────────────────────────────
+    ' -- Hyphenation -------------------------------------------
     Test_MandatedTermForms_Fail_SolicitorGeneral
     Test_MandatedTermForms_Fail_AttorneyGeneral
     Test_MandatedTermForms_Pass_Correct
 
-    ' ── Capitalisation ────────────────────────────────────────
+    ' -- Capitalisation ----------------------------------------
     Test_AlwaysCapitalise_Fail_PrimeMinister
     Test_AlwaysCapitalise_Pass_Correct
     Test_AlwaysCapitalise_Fail_LawLords
     Test_AlwaysCapitalise_Suppressed_Quoted
 
-    ' ── Foreign terms ─────────────────────────────────────────
+    ' -- Foreign terms -----------------------------------------
     Test_AnglicisedNotItalic_Fail_Italic
     Test_AnglicisedNotItalic_Pass_Roman
     Test_AnglicisedNotItalic_Suppressed_Ambiguous
@@ -74,7 +73,7 @@ Public Sub RunAllBucket1Tests()
     Test_ForeignNamesNotItalic_Fail_Italic
     Test_ForeignNamesNotItalic_Pass_Roman
 
-    ' ── Quotation marks ───────────────────────────────────────
+    ' -- Quotation marks ---------------------------------------
     Test_SingleQuotesDefault_Fail_DoubleQuotes
     Test_SingleQuotesDefault_Pass_SingleQuotes
     Test_SingleQuotesDefault_Suppressed_BlockQuote
@@ -83,13 +82,13 @@ Public Sub RunAllBucket1Tests()
     Test_SmartQuoteConsistency_Pass_AllCurly
     Test_SmartQuoteConsistency_Suppressed_Apostrophe
 
-    ' ── Numbers ───────────────────────────────────────────────
+    ' -- Numbers -----------------------------------------------
     Test_SpellOutUnderTen_Fail_SevenInProse
     Test_SpellOutUnderTen_Pass_ParaRef
     Test_SpellOutUnderTen_Pass_Range
     Test_SpellOutUnderTen_Suppressed_Table
 
-    ' ── Summary ───────────────────────────────────────────────
+    ' -- Summary -----------------------------------------------
     Debug.Print "========================================"
     Debug.Print "  PASSED: " & passCount
     Debug.Print "  FAILED: " & failCount
@@ -97,9 +96,9 @@ Public Sub RunAllBucket1Tests()
     Debug.Print "========================================"
 End Sub
 
-' ════════════════════════════════════════════════════════════
+' ============================================================
 '  ASSERTION HELPERS
-' ════════════════════════════════════════════════════════════
+' ============================================================
 Private Sub AssertIssueCount(testName As String, issues As Collection, expected As Long)
     Dim actual As Long
     If issues Is Nothing Then
@@ -149,7 +148,7 @@ Private Sub AssertSeverity(testName As String, issues As Collection, idx As Long
         Exit Sub
     End If
 
-    Dim issue As PleadingsIssue
+    Dim issue As Object
     Set issue = issues(idx)
     If issue.Severity = expected Then
         Debug.Print "  PASS: " & testName & " (severity=" & expected & ")"
@@ -160,9 +159,9 @@ Private Sub AssertSeverity(testName As String, issues As Collection, idx As Long
     End If
 End Sub
 
-' ════════════════════════════════════════════════════════════
+' ============================================================
 '  HELPER: Create temp document with content
-' ════════════════════════════════════════════════════════════
+' ============================================================
 Private Function CreateTempDoc(Optional content As String = "") As Document
     Dim doc As Document
     Set doc = Documents.Add
@@ -178,9 +177,9 @@ Private Sub CloseTempDoc(doc As Document)
     On Error GoTo 0
 End Sub
 
-' ════════════════════════════════════════════════════════════
+' ============================================================
 '  FOOTNOTES NOT ENDNOTES TESTS
-' ════════════════════════════════════════════════════════════
+' ============================================================
 Private Sub Test_FootnotesNotEndnotes_FootnotesOnly()
     Dim doc As Document
     Set doc = CreateTempDoc("Test paragraph with a reference point.")
@@ -215,9 +214,9 @@ Private Sub Test_FootnotesNotEndnotes_Both()
     CloseTempDoc doc
 End Sub
 
-' ════════════════════════════════════════════════════════════
+' ============================================================
 '  FOOTNOTE TERMINAL FULL STOP TESTS
-' ════════════════════════════════════════════════════════════
+' ============================================================
 Private Sub Test_FootnoteTerminalFullStop_Pass()
     Dim doc As Document
     Set doc = CreateTempDoc("Test paragraph with a reference point.")
@@ -249,9 +248,9 @@ Private Sub Test_FootnoteTerminalFullStop_Suppressed_Empty()
     CloseTempDoc doc
 End Sub
 
-' ════════════════════════════════════════════════════════════
+' ============================================================
 '  FOOTNOTE INITIAL CAPITAL TESTS
-' ════════════════════════════════════════════════════════════
+' ============================================================
 Private Sub Test_FootnoteInitialCapital_Pass_Capital()
     Dim doc As Document
     Set doc = CreateTempDoc("Test paragraph with a reference point.")
@@ -292,9 +291,9 @@ Private Sub Test_FootnoteInitialCapital_Fail_Lowercase()
     CloseTempDoc doc
 End Sub
 
-' ════════════════════════════════════════════════════════════
+' ============================================================
 '  FOOTNOTE ABBREVIATION DICTIONARY TESTS
-' ════════════════════════════════════════════════════════════
+' ============================================================
 Private Sub Test_FootnoteAbbrevDict_Pass_Approved()
     Dim doc As Document
     Set doc = CreateTempDoc("Test paragraph with a reference point.")
@@ -356,9 +355,9 @@ Private Sub Test_FootnoteAbbrevDict_Suppressed_Ordinary()
     CloseTempDoc doc
 End Sub
 
-' ════════════════════════════════════════════════════════════
+' ============================================================
 '  MANDATED LEGAL TERM FORMS TESTS
-' ════════════════════════════════════════════════════════════
+' ============================================================
 Private Sub Test_MandatedTermForms_Fail_SolicitorGeneral()
     Dim doc As Document
     Set doc = CreateTempDoc("The Solicitor General appeared for the Crown.")
@@ -386,9 +385,9 @@ Private Sub Test_MandatedTermForms_Pass_Correct()
     CloseTempDoc doc
 End Sub
 
-' ════════════════════════════════════════════════════════════
+' ============================================================
 '  ALWAYS CAPITALISE TERMS TESTS
-' ════════════════════════════════════════════════════════════
+' ============================================================
 Private Sub Test_AlwaysCapitalise_Fail_PrimeMinister()
     Dim doc As Document
     Set doc = CreateTempDoc("The prime minister addressed the house.")
@@ -403,7 +402,7 @@ Private Sub Test_AlwaysCapitalise_Pass_Correct()
     Set doc = CreateTempDoc("The Prime Minister addressed the House.")
     Dim issues As Collection
     Set issues = Check_AlwaysCapitaliseTerms(doc)
-    ' "Prime Minister" correct — only check this term is not flagged
+    ' "Prime Minister" correct -- only check this term is not flagged
     ' (Note: "House" is not in the seed dictionary so not flagged)
     AssertNoIssues "AlwaysCapitalise: 'Prime Minister' -> pass", issues
     CloseTempDoc doc
@@ -433,9 +432,9 @@ Private Sub Test_AlwaysCapitalise_Suppressed_Quoted()
     CloseTempDoc doc
 End Sub
 
-' ════════════════════════════════════════════════════════════
+' ============================================================
 '  ANGLICISED TERMS NOT ITALIC TESTS
-' ════════════════════════════════════════════════════════════
+' ============================================================
 Private Sub Test_AnglicisedNotItalic_Fail_Italic()
     Dim doc As Document
     Set doc = CreateTempDoc("The principle of prima facie evidence.")
@@ -473,9 +472,9 @@ Private Sub Test_AnglicisedNotItalic_Suppressed_Ambiguous()
     CloseTempDoc doc
 End Sub
 
-' ════════════════════════════════════════════════════════════
+' ============================================================
 '  FOREIGN NAMES NOT ITALIC TESTS
-' ════════════════════════════════════════════════════════════
+' ============================================================
 Private Sub Test_ForeignNamesNotItalic_Fail_Italic()
     Dim doc As Document
     Set doc = CreateTempDoc("The decision of the Cour de cassation was clear.")
@@ -502,9 +501,9 @@ Private Sub Test_ForeignNamesNotItalic_Pass_Roman()
     CloseTempDoc doc
 End Sub
 
-' ════════════════════════════════════════════════════════════
+' ============================================================
 '  SINGLE QUOTES DEFAULT TESTS
-' ════════════════════════════════════════════════════════════
+' ============================================================
 Private Sub Test_SingleQuotesDefault_Fail_DoubleQuotes()
     Dim doc As Document
     Set doc = CreateTempDoc("He discussed " & ChrW(8220) & "the principle" & ChrW(8221) & " at length.")
@@ -541,9 +540,9 @@ Private Sub Test_SingleQuotesDefault_Suppressed_BlockQuote()
     CloseTempDoc doc
 End Sub
 
-' ════════════════════════════════════════════════════════════
+' ============================================================
 '  SMART QUOTE CONSISTENCY TESTS
-' ════════════════════════════════════════════════════════════
+' ============================================================
 Private Sub Test_SmartQuoteConsistency_Fail_Mixed()
     Dim doc As Document
     ' Mix curly and straight double quotes
@@ -578,9 +577,9 @@ Private Sub Test_SmartQuoteConsistency_Suppressed_Apostrophe()
     CloseTempDoc doc
 End Sub
 
-' ════════════════════════════════════════════════════════════
+' ============================================================
 '  SPELL OUT UNDER TEN TESTS
-' ════════════════════════════════════════════════════════════
+' ============================================================
 Private Sub Test_SpellOutUnderTen_Fail_SevenInProse()
     Dim doc As Document
     Set doc = CreateTempDoc("There were 7 issues raised at the hearing.")

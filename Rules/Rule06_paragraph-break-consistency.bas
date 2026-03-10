@@ -9,7 +9,7 @@ Option Explicit
 
 Private Const RULE_NAME As String = "paragraph_break_consistency"
 
-' ── Classify spacing pattern after a heading ────────────────
+' -- Classify spacing pattern after a heading ----------------
 ' Returns: "no_spacing", "spacing_Npt", or "manual_double_break"
 Private Function ClassifyAfterSpacing(para As Paragraph, doc As Document, paraIdx As Long) As String
     Dim spAfter As Single
@@ -37,7 +37,7 @@ Private Function ClassifyAfterSpacing(para As Paragraph, doc As Document, paraId
     End If
 End Function
 
-' ── Classify SpaceBefore pattern ────────────────────────────
+' -- Classify SpaceBefore pattern ----------------------------
 Private Function ClassifyBeforeSpacing(para As Paragraph) As String
     Dim spBefore As Single
     spBefore = para.Format.SpaceBefore
@@ -48,9 +48,9 @@ Private Function ClassifyBeforeSpacing(para As Paragraph) As String
     End If
 End Function
 
-' ════════════════════════════════════════════════════════════
+' ============================================================
 '  MAIN RULE FUNCTION
-' ════════════════════════════════════════════════════════════
+' ============================================================
 Public Function Check_ParagraphBreakConsistency(doc As Document) As Collection
     Dim issues As New Collection
     Dim para As Paragraph
@@ -59,13 +59,16 @@ Public Function Check_ParagraphBreakConsistency(doc As Document) As Collection
 
     On Error Resume Next
 
-    ' ── Dictionaries keyed by outline level ─────────────────
+    ' -- Dictionaries keyed by outline level -----------------
     ' afterPatterns:  level -> Dictionary(pattern -> count)
     ' beforePatterns: level -> Dictionary(pattern -> count)
     ' headingInfos:   level -> Collection of Array(paraIdx, afterPattern, beforePattern, rangeStart, rangeEnd, text)
-    Dim afterPatterns As New Scripting.Dictionary
-    Dim beforePatterns As New Scripting.Dictionary
-    Dim headingInfos As New Scripting.Dictionary
+    Dim afterPatterns As Object
+    Set afterPatterns = CreateObject("Scripting.Dictionary")
+    Dim beforePatterns As Object
+    Set beforePatterns = CreateObject("Scripting.Dictionary")
+    Dim headingInfos As Object
+    Set headingInfos = CreateObject("Scripting.Dictionary")
 
     paraIdx = 0
     For Each para In doc.Paragraphs
@@ -75,7 +78,7 @@ Public Function Check_ParagraphBreakConsistency(doc As Document) As Collection
         If lvl < wdOutlineLevel1 Or lvl > wdOutlineLevel9 Then GoTo NextPara
 
         ' Page range filter
-        If Not PleadingsEngine.IsInPageRange(para.Range) Then GoTo NextPara
+        If Not EngineIsInPageRange(para.Range) Then GoTo NextPara
 
         ' Classify after-spacing
         Dim aftPat As String
@@ -85,11 +88,11 @@ Public Function Check_ParagraphBreakConsistency(doc As Document) As Collection
         Dim befPat As String
         befPat = ClassifyBeforeSpacing(para)
 
-        ' ── Track after-spacing counts ─────────────────────
+        ' -- Track after-spacing counts ---------------------
         If Not afterPatterns.Exists(lvl) Then
-            afterPatterns.Add lvl, New Scripting.Dictionary
+            afterPatterns.Add lvl, CreateObject("Scripting.Dictionary")
         End If
-        Dim aftDict As Scripting.Dictionary
+        Dim aftDict As Object
         Set aftDict = afterPatterns(lvl)
         If aftDict.Exists(aftPat) Then
             aftDict(aftPat) = aftDict(aftPat) + 1
@@ -97,11 +100,11 @@ Public Function Check_ParagraphBreakConsistency(doc As Document) As Collection
             aftDict.Add aftPat, 1
         End If
 
-        ' ── Track before-spacing counts ────────────────────
+        ' -- Track before-spacing counts --------------------
         If Not beforePatterns.Exists(lvl) Then
-            beforePatterns.Add lvl, New Scripting.Dictionary
+            beforePatterns.Add lvl, CreateObject("Scripting.Dictionary")
         End If
-        Dim befDict As Scripting.Dictionary
+        Dim befDict As Object
         Set befDict = beforePatterns(lvl)
         If befDict.Exists(befPat) Then
             befDict(befPat) = befDict(befPat) + 1
@@ -109,7 +112,7 @@ Public Function Check_ParagraphBreakConsistency(doc As Document) As Collection
             befDict.Add befPat, 1
         End If
 
-        ' ── Store heading info ─────────────────────────────
+        ' -- Store heading info -----------------------------
         If Not headingInfos.Exists(lvl) Then
             headingInfos.Add lvl, New Collection
         End If
@@ -124,7 +127,7 @@ Public Function Check_ParagraphBreakConsistency(doc As Document) As Collection
 NextPara:
     Next para
 
-    ' ── Determine dominant patterns and flag deviations ─────
+    ' -- Determine dominant patterns and flag deviations -----
     Dim lvlKey As Variant
     For Each lvlKey In headingInfos.keys
         Dim hdgs As Collection
@@ -176,35 +179,25 @@ NextPara:
 
             ' Check after-spacing deviation
             If hAft <> domAfter And Len(domAfter) > 0 Then
-                Dim issueA As New PleadingsIssue
+                Dim issueA As Object
                 Dim rngA As Range
                 Set rngA = doc.Range(CLng(hInfo(3)), CLng(hInfo(4)))
                 Dim locA As String
-                locA = PleadingsEngine.GetLocationString(rngA, doc)
+                locA = EngineGetLocationString(rngA, doc)
 
-                issueA.Init RULE_NAME, locA, _
-                    "After-heading spacing inconsistency at '" & hText & _
-                    "': uses " & hAft & " but dominant pattern for level " & _
-                    CLng(lvlKey) & " headings is " & domAfter, _
-                    "Change spacing after this heading to match: " & domAfter, _
-                    CLng(hInfo(3)), CLng(hInfo(4)), "possible_error"
+                Set issueA = CreateIssueDict(RULE_NAME, locA, "After-heading spacing inconsistency at '" & hText & "': uses " & hAft & " but dominant pattern for level " & CLng(lvlKey) & " headings is " & domAfter, "Change spacing after this heading to match: " & domAfter, CLng(hInfo(3)), CLng(hInfo(4)), "possible_error")
                 issues.Add issueA
             End If
 
             ' Check before-spacing deviation
             If hBef <> domBefore And Len(domBefore) > 0 Then
-                Dim issueB As New PleadingsIssue
+                Dim issueB As Object
                 Dim rngB As Range
                 Set rngB = doc.Range(CLng(hInfo(3)), CLng(hInfo(4)))
                 Dim locB As String
-                locB = PleadingsEngine.GetLocationString(rngB, doc)
+                locB = EngineGetLocationString(rngB, doc)
 
-                issueB.Init RULE_NAME, locB, _
-                    "Before-heading spacing inconsistency at '" & hText & _
-                    "': uses " & hBef & " but dominant pattern for level " & _
-                    CLng(lvlKey) & " headings is " & domBefore, _
-                    "Change spacing before this heading to match: " & domBefore, _
-                    CLng(hInfo(3)), CLng(hInfo(4)), "possible_error"
+                Set issueB = CreateIssueDict(RULE_NAME, locB, "Before-heading spacing inconsistency at '" & hText & "': uses " & hBef & " but dominant pattern for level " & CLng(lvlKey) & " headings is " & domBefore, "Change spacing before this heading to match: " & domBefore, CLng(hInfo(3)), CLng(hInfo(4)), "possible_error")
                 issues.Add issueB
             End If
         Next h
@@ -213,4 +206,62 @@ NextLevel:
 
     On Error GoTo 0
     Set Check_ParagraphBreakConsistency = issues
+End Function
+
+' ----------------------------------------------------------------
+'  PRIVATE: Create a dictionary-based issue (no class dependency)
+' ----------------------------------------------------------------
+Private Function CreateIssueDict(ByVal ruleName_ As String, _
+                                 ByVal location_ As String, _
+                                 ByVal issue_ As String, _
+                                 ByVal suggestion_ As String, _
+                                 ByVal rangeStart_ As Long, _
+                                 ByVal rangeEnd_ As Long, _
+                                 Optional ByVal severity_ As String = "error", _
+                                 Optional ByVal autoFixSafe_ As Boolean = False) As Object
+    Dim d As Object
+    Set d = CreateObject("Scripting.Dictionary")
+    d("RuleName") = ruleName_
+    d("Location") = location_
+    d("Issue") = issue_
+    d("Suggestion") = suggestion_
+    d("RangeStart") = rangeStart_
+    d("RangeEnd") = rangeEnd_
+    d("Severity") = severity_
+    d("AutoFixSafe") = autoFixSafe_
+    Set CreateIssueDict = d
+End Function
+
+' ----------------------------------------------------------------
+'  Late-bound wrapper: EngineIsInPageRange
+' ----------------------------------------------------------------
+
+' ----------------------------------------------------------------
+'  Late-bound wrapper: EngineGetLocationString
+' ----------------------------------------------------------------
+
+' ----------------------------------------------------------------
+'  Late-bound wrapper: PleadingsEngine.IsInPageRange
+' ----------------------------------------------------------------
+Private Function EngineIsInPageRange(rng As Object) As Boolean
+    On Error Resume Next
+    EngineIsInPageRange = Application.Run("PleadingsEngine.IsInPageRange", rng)
+    If Err.Number <> 0 Then
+        EngineIsInPageRange = True
+        Err.Clear
+    End If
+    On Error GoTo 0
+End Function
+
+' ----------------------------------------------------------------
+'  Late-bound wrapper: PleadingsEngine.GetLocationString
+' ----------------------------------------------------------------
+Private Function EngineGetLocationString(rng As Object, doc As Document) As String
+    On Error Resume Next
+    EngineGetLocationString = Application.Run("PleadingsEngine.GetLocationString", rng, doc)
+    If Err.Number <> 0 Then
+        EngineGetLocationString = "unknown location"
+        Err.Clear
+    End If
+    On Error GoTo 0
 End Function

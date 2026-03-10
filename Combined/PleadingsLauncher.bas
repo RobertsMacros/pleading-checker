@@ -6,7 +6,6 @@ Attribute VB_Name = "PleadingsLauncher"
 '
 ' Dependencies:
 '   - PleadingsEngine.bas
-'   - PleadingsIssue.cls
 ' ============================================================
 Option Explicit
 
@@ -41,7 +40,7 @@ End Sub
 '  RUN CHECKS
 ' ============================================================
 Private Sub RunChecks()
-    Dim cfg As Scripting.Dictionary
+    Dim cfg As Object
     Set cfg = PleadingsEngine.InitRuleConfig()
 
     ' -- Page range prompt --

@@ -7,17 +7,15 @@ Attribute VB_Name = "Rule13_colour_formatting"
 ' heading-styled paragraphs).
 '
 ' Dependencies:
-'   - PleadingsIssue.cls
 '   - PleadingsEngine.bas (IsInPageRange, GetLocationString)
-'   - Microsoft Scripting Runtime (Scripting.Dictionary)
 ' ============================================================
 Option Explicit
 
 Private Const RULE_NAME As String = "colour_formatting"
 
-' ════════════════════════════════════════════════════════════
+' ============================================================
 '  MAIN ENTRY POINT
-' ════════════════════════════════════════════════════════════
+' ============================================================
 Public Function Check_ColourFormatting(doc As Document) As Collection
     Dim issues As New Collection
     Dim colourCounts As Object ' Scripting.Dictionary
@@ -28,7 +26,7 @@ Public Function Check_ColourFormatting(doc As Document) As Collection
     Dim maxCount As Long
     Dim runText As String
 
-    ' ── First pass: count colour usage per run ───────────────
+    ' -- First pass: count colour usage per run ---------------
     Set colourCounts = CreateObject("Scripting.Dictionary")
 
     On Error Resume Next
@@ -43,7 +41,7 @@ Public Function Check_ColourFormatting(doc As Document) As Collection
         End If
 
         ' Skip paragraphs outside page range
-        If Not PleadingsEngine.IsInPageRange(paraRange) Then
+        If Not EngineIsInPageRange(paraRange) Then
             GoTo NextParaPass1
         End If
 
@@ -82,7 +80,7 @@ NextParaPass1:
     Next para
     On Error GoTo 0
 
-    ' ── Determine dominant colour ────────────────────────────
+    ' -- Determine dominant colour ----------------------------
     If colourCounts.Count = 0 Then
         Set Check_ColourFormatting = issues
         Exit Function
@@ -98,7 +96,7 @@ NextParaPass1:
         End If
     Next colourKey
 
-    ' ── Second pass: flag non-dominant, non-automatic colours ─
+    ' -- Second pass: flag non-dominant, non-automatic colours -
     Const WD_COLOR_AUTOMATIC As Long = -16777216
 
     ' Tracking for grouping consecutive same-colour runs
@@ -121,7 +119,7 @@ NextParaPass1:
         End If
 
         ' Skip paragraphs outside page range
-        If Not PleadingsEngine.IsInPageRange(paraRange) Then
+        If Not EngineIsInPageRange(paraRange) Then
             ' Flush any active group before skipping
             If groupActive Then
                 FlushColourGroup doc, issues, groupStartPos, groupEndPos, groupColour
@@ -186,7 +184,7 @@ NextParaPass1:
                 GoTo NextRunPass2
             End If
 
-            ' ── This run has a non-standard colour ───────────
+            ' -- This run has a non-standard colour -----------
             If groupActive And runColor = groupColour And _
                rn.Start = groupEndPos Then
                 ' Extend existing group
@@ -218,15 +216,15 @@ NextParaPass2:
     Set Check_ColourFormatting = issues
 End Function
 
-' ════════════════════════════════════════════════════════════
+' ============================================================
 '  PRIVATE: Flush a grouped colour issue
-' ════════════════════════════════════════════════════════════
+' ============================================================
 Private Sub FlushColourGroup(doc As Document, _
                               ByRef issues As Collection, _
                               ByVal startPos As Long, _
                               ByVal endPos As Long, _
                               ByVal fontColor As Long)
-    Dim issue As PleadingsIssue
+    Dim issue As Object
     Dim locStr As String
     Dim hexStr As String
     Dim rng As Range
@@ -241,7 +239,7 @@ Private Sub FlushColourGroup(doc As Document, _
         Exit Sub
     End If
 
-    locStr = PleadingsEngine.GetLocationString(rng, doc)
+    locStr = EngineGetLocationString(rng, doc)
     If Err.Number <> 0 Then
         locStr = "unknown location"
         Err.Clear
@@ -257,21 +255,13 @@ Private Sub FlushColourGroup(doc As Document, _
     End If
     On Error GoTo 0
 
-    Set issue = New PleadingsIssue
-    issue.Init RULE_NAME, _
-               locStr, _
-               "Non-standard font colour " & hexStr & " detected: '" & _
-               previewText & "'", _
-               "Change font colour to match document default", _
-               startPos, _
-               endPos, _
-               "possible_error"
+    Set issue = CreateIssueDict(RULE_NAME, locStr, "Non-standard font colour " & hexStr & " detected: '" & previewText & "'", "Change font colour to match document default", startPos, endPos, "possible_error")
     issues.Add issue
 End Sub
 
-' ════════════════════════════════════════════════════════════
+' ============================================================
 '  PRIVATE: Convert a Long colour value to hex string
-' ════════════════════════════════════════════════════════════
+' ============================================================
 Private Function ColourToHex(ByVal colorVal As Long) As String
     Dim R As Long
     Dim G As Long
@@ -287,9 +277,9 @@ Private Function ColourToHex(ByVal colorVal As Long) As String
                         Right("0" & Hex(B), 2)
 End Function
 
-' ════════════════════════════════════════════════════════════
+' ============================================================
 '  PRIVATE: Check if a run is inside a hyperlink
-' ════════════════════════════════════════════════════════════
+' ============================================================
 Private Function IsRunInsideHyperlink(rn As Range, doc As Document) As Boolean
     Dim hl As Hyperlink
 
@@ -307,4 +297,62 @@ Private Function IsRunInsideHyperlink(rn As Range, doc As Document) As Boolean
     On Error GoTo 0
 
     IsRunInsideHyperlink = False
+End Function
+
+' ----------------------------------------------------------------
+'  PRIVATE: Create a dictionary-based issue (no class dependency)
+' ----------------------------------------------------------------
+Private Function CreateIssueDict(ByVal ruleName_ As String, _
+                                 ByVal location_ As String, _
+                                 ByVal issue_ As String, _
+                                 ByVal suggestion_ As String, _
+                                 ByVal rangeStart_ As Long, _
+                                 ByVal rangeEnd_ As Long, _
+                                 Optional ByVal severity_ As String = "error", _
+                                 Optional ByVal autoFixSafe_ As Boolean = False) As Object
+    Dim d As Object
+    Set d = CreateObject("Scripting.Dictionary")
+    d("RuleName") = ruleName_
+    d("Location") = location_
+    d("Issue") = issue_
+    d("Suggestion") = suggestion_
+    d("RangeStart") = rangeStart_
+    d("RangeEnd") = rangeEnd_
+    d("Severity") = severity_
+    d("AutoFixSafe") = autoFixSafe_
+    Set CreateIssueDict = d
+End Function
+
+' ----------------------------------------------------------------
+'  Late-bound wrapper: EngineIsInPageRange
+' ----------------------------------------------------------------
+
+' ----------------------------------------------------------------
+'  Late-bound wrapper: EngineGetLocationString
+' ----------------------------------------------------------------
+
+' ----------------------------------------------------------------
+'  Late-bound wrapper: PleadingsEngine.IsInPageRange
+' ----------------------------------------------------------------
+Private Function EngineIsInPageRange(rng As Object) As Boolean
+    On Error Resume Next
+    EngineIsInPageRange = Application.Run("PleadingsEngine.IsInPageRange", rng)
+    If Err.Number <> 0 Then
+        EngineIsInPageRange = True
+        Err.Clear
+    End If
+    On Error GoTo 0
+End Function
+
+' ----------------------------------------------------------------
+'  Late-bound wrapper: PleadingsEngine.GetLocationString
+' ----------------------------------------------------------------
+Private Function EngineGetLocationString(rng As Object, doc As Document) As String
+    On Error Resume Next
+    EngineGetLocationString = Application.Run("PleadingsEngine.GetLocationString", rng, doc)
+    If Err.Number <> 0 Then
+        EngineGetLocationString = "unknown location"
+        Err.Clear
+    End If
+    On Error GoTo 0
 End Function

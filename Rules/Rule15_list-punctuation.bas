@@ -11,23 +11,22 @@ Attribute VB_Name = "Rule15_list_punctuation"
 '     its terminal punctuation
 '
 ' Dependencies:
-'   - PleadingsIssue.cls
 '   - PleadingsEngine.bas (IsInPageRange, GetLocationString)
 ' ============================================================
 Option Explicit
 
 Private Const RULE_NAME As String = "list_punctuation"
 
-' ════════════════════════════════════════════════════════════
+' ============================================================
 '  MAIN ENTRY POINT
-' ════════════════════════════════════════════════════════════
+' ============================================================
 Public Function Check_ListPunctuation(doc As Document) As Collection
     Dim issues As New Collection
     Dim para As Paragraph
     Dim paraIdx As Long
     Dim totalParas As Long
 
-    ' ── Collect all paragraphs into arrays for easier processing ─
+    ' -- Collect all paragraphs into arrays for easier processing -
     totalParas = doc.Paragraphs.Count
     If totalParas = 0 Then
         Set Check_ListPunctuation = issues
@@ -101,7 +100,7 @@ NextParaCollect:
     Next para
     On Error GoTo 0
 
-    ' ── Group consecutive list paragraphs into lists ─────────
+    ' -- Group consecutive list paragraphs into lists ---------
     Dim groupStart As Long
     Dim groupEnd As Long
     Dim inGroup As Boolean
@@ -135,9 +134,9 @@ NextParaCollect:
     Set Check_ListPunctuation = issues
 End Function
 
-' ════════════════════════════════════════════════════════════
+' ============================================================
 '  PRIVATE: Process a single list group for punctuation issues
-' ════════════════════════════════════════════════════════════
+' ============================================================
 Private Sub ProcessListGroup(doc As Document, _
                               ByRef issues As Collection, _
                               ByRef paraStarts() As Long, _
@@ -155,14 +154,14 @@ Private Sub ProcessListGroup(doc As Document, _
     itemCount = groupEnd - groupStart + 1
     If itemCount < 2 Then Exit Sub ' Single-item list, nothing to check
 
-    ' ── Classify the ending of each list item ────────────────
+    ' -- Classify the ending of each list item ----------------
     ReDim endings(groupStart To groupEnd)
 
     For i = groupStart To groupEnd
         endings(i) = ClassifyEnding(paraTexts(i))
     Next i
 
-    ' ── Count endings to find dominant ───────────────────────
+    ' -- Count endings to find dominant -----------------------
     Set endingCounts = CreateObject("Scripting.Dictionary")
 
     For i = groupStart To groupEnd
@@ -183,7 +182,7 @@ Private Sub ProcessListGroup(doc As Document, _
         End If
     Next key
 
-    ' ── Flag items that deviate from dominant ending ──────────
+    ' -- Flag items that deviate from dominant ending ----------
     For i = groupStart To groupEnd
         If endings(i) <> dominantEnding Then
             ' Skip the last item if dominant is semicolon (special rule below)
@@ -193,7 +192,7 @@ Private Sub ProcessListGroup(doc As Document, _
 
             Dim rng As Range
             Dim locStr As String
-            Dim issue As PleadingsIssue
+            Dim issue As Object
 
             On Error Resume Next
             Set rng = doc.Range(paraStarts(i), paraEnds(i))
@@ -203,63 +202,46 @@ Private Sub ProcessListGroup(doc As Document, _
                 GoTo ContinueItem
             End If
 
-            If Not PleadingsEngine.IsInPageRange(rng) Then
+            If Not EngineIsInPageRange(rng) Then
                 On Error GoTo 0
                 GoTo ContinueItem
             End If
 
-            locStr = PleadingsEngine.GetLocationString(rng, doc)
+            locStr = EngineGetLocationString(rng, doc)
             If Err.Number <> 0 Then
                 locStr = "unknown location"
                 Err.Clear
             End If
             On Error GoTo 0
 
-            Set issue = New PleadingsIssue
-            issue.Init RULE_NAME, _
-                       locStr, _
-                       "List item ending '" & endings(i) & "' differs from " & _
-                       "dominant ending '" & dominantEnding & "'", _
-                       "Change ending punctuation to match list style (" & _
-                       dominantEnding & ")", _
-                       paraStarts(i), _
-                       paraEnds(i), _
-                       "possible_error"
+            Set issue = CreateIssueDict(RULE_NAME, locStr, "List item ending '" & endings(i) & "' differs from " & "dominant ending '" & dominantEnding & "'", "Change ending punctuation to match list style (" & dominantEnding & ")", paraStarts(i), paraEnds(i), "possible_error")
             issues.Add issue
         End If
 
 ContinueItem:
     Next i
 
-    ' ── Special: if dominant is semicolon, last item should end with full stop ─
+    ' -- Special: if dominant is semicolon, last item should end with full stop -
     If dominantEnding = "semicolon" Then
         If endings(groupEnd) <> "full_stop" Then
             On Error Resume Next
             Set rng = doc.Range(paraStarts(groupEnd), paraEnds(groupEnd))
             If Err.Number = 0 Then
-                If PleadingsEngine.IsInPageRange(rng) Then
-                    locStr = PleadingsEngine.GetLocationString(rng, doc)
+                If EngineIsInPageRange(rng) Then
+                    locStr = EngineGetLocationString(rng, doc)
                     If Err.Number <> 0 Then
                         locStr = "unknown location"
                         Err.Clear
                     End If
 
-                    Set issue = New PleadingsIssue
-                    issue.Init RULE_NAME, _
-                               locStr, _
-                               "Last list item should end with a full stop, not '" & _
-                               endings(groupEnd) & "'", _
-                               "End the final list item with a full stop", _
-                               paraStarts(groupEnd), _
-                               paraEnds(groupEnd), _
-                               "possible_error"
+                    Set issue = CreateIssueDict(RULE_NAME, locStr, "Last list item should end with a full stop, not '" & endings(groupEnd) & "'", "End the final list item with a full stop", paraStarts(groupEnd), paraEnds(groupEnd), "possible_error")
                     issues.Add issue
                 End If
             End If
             On Error GoTo 0
         End If
 
-        ' ── Check penultimate item for "and" or "or" ─────────
+        ' -- Check penultimate item for "and" or "or" ---------
         If itemCount >= 2 Then
             Dim penIdx As Long
             penIdx = groupEnd - 1
@@ -287,22 +269,14 @@ ContinueItem:
                 On Error Resume Next
                 Set rng = doc.Range(paraStarts(penIdx), paraEnds(penIdx))
                 If Err.Number = 0 Then
-                    If PleadingsEngine.IsInPageRange(rng) Then
-                        locStr = PleadingsEngine.GetLocationString(rng, doc)
+                    If EngineIsInPageRange(rng) Then
+                        locStr = EngineGetLocationString(rng, doc)
                         If Err.Number <> 0 Then
                             locStr = "unknown location"
                             Err.Clear
                         End If
 
-                        Set issue = New PleadingsIssue
-                        issue.Init RULE_NAME, _
-                                   locStr, _
-                                   "Penultimate list item should include 'and' or 'or' " & _
-                                   "before terminal punctuation", _
-                                   "Add 'and' or 'or' before the semicolon", _
-                                   paraStarts(penIdx), _
-                                   paraEnds(penIdx), _
-                                   "possible_error"
+                        Set issue = CreateIssueDict(RULE_NAME, locStr, "Penultimate list item should include 'and' or 'or' " & "before terminal punctuation", "Add 'and' or 'or' before the semicolon", paraStarts(penIdx), paraEnds(penIdx), "possible_error")
                         issues.Add issue
                     End If
                 End If
@@ -312,9 +286,9 @@ ContinueItem:
     End If
 End Sub
 
-' ════════════════════════════════════════════════════════════
+' ============================================================
 '  PRIVATE: Classify the ending punctuation of a list item
-' ════════════════════════════════════════════════════════════
+' ============================================================
 Private Function ClassifyEnding(ByVal text As String) As String
     Dim trimmed As String
     Dim lastChar As String
@@ -343,9 +317,9 @@ Private Function ClassifyEnding(ByVal text As String) As String
     End Select
 End Function
 
-' ════════════════════════════════════════════════════════════
+' ============================================================
 '  PRIVATE: Strip trailing carriage return / line feed
-' ════════════════════════════════════════════════════════════
+' ============================================================
 Private Function StripTrailingCr(ByVal text As String) As String
     Dim result As String
     result = text
@@ -363,13 +337,71 @@ Private Function StripTrailingCr(ByVal text As String) As String
     StripTrailingCr = result
 End Function
 
-' ════════════════════════════════════════════════════════════
+' ============================================================
 '  PRIVATE: Get last N characters of a string
-' ════════════════════════════════════════════════════════════
+' ============================================================
 Private Function GetLastNChars(ByVal text As String, ByVal n As Long) As String
     If Len(text) <= n Then
         GetLastNChars = text
     Else
         GetLastNChars = Right(text, n)
     End If
+End Function
+
+' ----------------------------------------------------------------
+'  PRIVATE: Create a dictionary-based issue (no class dependency)
+' ----------------------------------------------------------------
+Private Function CreateIssueDict(ByVal ruleName_ As String, _
+                                 ByVal location_ As String, _
+                                 ByVal issue_ As String, _
+                                 ByVal suggestion_ As String, _
+                                 ByVal rangeStart_ As Long, _
+                                 ByVal rangeEnd_ As Long, _
+                                 Optional ByVal severity_ As String = "error", _
+                                 Optional ByVal autoFixSafe_ As Boolean = False) As Object
+    Dim d As Object
+    Set d = CreateObject("Scripting.Dictionary")
+    d("RuleName") = ruleName_
+    d("Location") = location_
+    d("Issue") = issue_
+    d("Suggestion") = suggestion_
+    d("RangeStart") = rangeStart_
+    d("RangeEnd") = rangeEnd_
+    d("Severity") = severity_
+    d("AutoFixSafe") = autoFixSafe_
+    Set CreateIssueDict = d
+End Function
+
+' ----------------------------------------------------------------
+'  Late-bound wrapper: EngineIsInPageRange
+' ----------------------------------------------------------------
+
+' ----------------------------------------------------------------
+'  Late-bound wrapper: EngineGetLocationString
+' ----------------------------------------------------------------
+
+' ----------------------------------------------------------------
+'  Late-bound wrapper: PleadingsEngine.IsInPageRange
+' ----------------------------------------------------------------
+Private Function EngineIsInPageRange(rng As Object) As Boolean
+    On Error Resume Next
+    EngineIsInPageRange = Application.Run("PleadingsEngine.IsInPageRange", rng)
+    If Err.Number <> 0 Then
+        EngineIsInPageRange = True
+        Err.Clear
+    End If
+    On Error GoTo 0
+End Function
+
+' ----------------------------------------------------------------
+'  Late-bound wrapper: PleadingsEngine.GetLocationString
+' ----------------------------------------------------------------
+Private Function EngineGetLocationString(rng As Object, doc As Document) As String
+    On Error Resume Next
+    EngineGetLocationString = Application.Run("PleadingsEngine.GetLocationString", rng, doc)
+    If Err.Number <> 0 Then
+        EngineGetLocationString = "unknown location"
+        Err.Clear
+    End If
+    On Error GoTo 0
 End Function

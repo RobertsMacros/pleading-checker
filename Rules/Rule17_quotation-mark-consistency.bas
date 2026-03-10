@@ -9,7 +9,6 @@ Attribute VB_Name = "Rule17_quotation_mark_consistency"
 ' by a letter).
 '
 ' Dependencies:
-'   - PleadingsIssue.cls
 '   - PleadingsEngine.bas (IsInPageRange, GetLocationString)
 ' ============================================================
 Option Explicit
@@ -24,9 +23,9 @@ Private Const STRAIGHT_SINGLE As Long = 39         ' Chr(39) '
 Private Const CURLY_SINGLE_OPEN As Long = 8216     ' ChrW(8216)
 Private Const CURLY_SINGLE_CLOSE As Long = 8217    ' ChrW(8217)
 
-' ════════════════════════════════════════════════════════════
+' ============================================================
 '  MAIN ENTRY POINT
-' ════════════════════════════════════════════════════════════
+' ============================================================
 Public Function Check_QuotationMarkConsistency(doc As Document) As Collection
     Dim issues As New Collection
     Dim docText As String
@@ -46,7 +45,7 @@ Public Function Check_QuotationMarkConsistency(doc As Document) As Collection
     straightSingleCount = 0
     curlySingleCount = 0
 
-    ' ── Get full document text ───────────────────────────────
+    ' -- Get full document text -------------------------------
     On Error Resume Next
     docText = doc.Content.Text
     If Err.Number <> 0 Then
@@ -63,7 +62,7 @@ Public Function Check_QuotationMarkConsistency(doc As Document) As Collection
         Exit Function
     End If
 
-    ' ── First pass: count quotation mark types ───────────────
+    ' -- First pass: count quotation mark types ---------------
     For i = 1 To textLen
         charCode = AscW(Mid(docText, i, 1))
 
@@ -91,7 +90,7 @@ Public Function Check_QuotationMarkConsistency(doc As Document) As Collection
         End Select
     Next i
 
-    ' ── Determine dominant styles ────────────────────────────
+    ' -- Determine dominant styles ----------------------------
     Dim dominantDouble As String ' "straight" or "curly"
     Dim dominantSingle As String ' "straight" or "curly"
 
@@ -107,7 +106,7 @@ Public Function Check_QuotationMarkConsistency(doc As Document) As Collection
         dominantSingle = "curly"
     End If
 
-    ' ── Flag minority double quotation marks ─────────────────
+    ' -- Flag minority double quotation marks -----------------
     If dominantDouble = "straight" And curlyDoubleCount > 0 Then
         ' Flag curly doubles
         FlagQuotationMarks doc, issues, ChrW(CURLY_DOUBLE_OPEN), _
@@ -124,7 +123,7 @@ Public Function Check_QuotationMarkConsistency(doc As Document) As Collection
             ChrW(CURLY_DOUBLE_CLOSE) & ")"
     End If
 
-    ' ── Flag minority single quotation marks ─────────────────
+    ' -- Flag minority single quotation marks -----------------
     If dominantSingle = "straight" And curlySingleCount > 0 Then
         ' Flag curly singles (excluding apostrophes)
         FlagSingleQuotationMarks doc, issues, ChrW(CURLY_SINGLE_OPEN), _
@@ -147,10 +146,10 @@ Public Function Check_QuotationMarkConsistency(doc As Document) As Collection
     Set Check_QuotationMarkConsistency = issues
 End Function
 
-' ════════════════════════════════════════════════════════════
+' ============================================================
 '  PRIVATE: Check if a character at position is an apostrophe
 '  (preceded AND followed by a letter = mid-word)
-' ════════════════════════════════════════════════════════════
+' ============================================================
 Private Function IsApostrophe(ByRef docText As String, _
                                ByVal pos As Long, _
                                ByVal textLen As Long) As Boolean
@@ -169,13 +168,13 @@ Private Function IsApostrophe(ByRef docText As String, _
     nextChar = Mid(docText, pos + 1, 1)
     If Not IsLetterChar(nextChar) Then Exit Function
 
-    ' Both sides are letters — this is an apostrophe
+    ' Both sides are letters -- this is an apostrophe
     IsApostrophe = True
 End Function
 
-' ════════════════════════════════════════════════════════════
+' ============================================================
 '  PRIVATE: Check if a character is a letter (A-Z, a-z)
-' ════════════════════════════════════════════════════════════
+' ============================================================
 Private Function IsLetterChar(ByVal ch As String) As Boolean
     Dim code As Long
     code = AscW(ch)
@@ -184,9 +183,9 @@ Private Function IsLetterChar(ByVal ch As String) As Boolean
                    (code >= 192 And code <= 687) ' Extended Latin
 End Function
 
-' ════════════════════════════════════════════════════════════
+' ============================================================
 '  PRIVATE: Flag double quotation marks using Find
-' ════════════════════════════════════════════════════════════
+' ============================================================
 Private Sub FlagQuotationMarks(doc As Document, _
                                 ByRef issues As Collection, _
                                 ByVal searchChar As String, _
@@ -194,7 +193,7 @@ Private Sub FlagQuotationMarks(doc As Document, _
                                 ByVal suggestion As String)
     Dim rng As Range
     Dim found As Boolean
-    Dim issue As PleadingsIssue
+    Dim issue As Object
     Dim locStr As String
 
     Set rng = doc.Content.Duplicate
@@ -216,22 +215,15 @@ Private Sub FlagQuotationMarks(doc As Document, _
         If Err.Number <> 0 Then Exit Do
         If Not found Then Exit Do
 
-        If Not PleadingsEngine.IsInPageRange(rng) Then GoTo ContinueFlag
+        If Not EngineIsInPageRange(rng) Then GoTo ContinueFlag
 
-        locStr = PleadingsEngine.GetLocationString(rng, doc)
+        locStr = EngineGetLocationString(rng, doc)
         If Err.Number <> 0 Then
             locStr = "unknown location"
             Err.Clear
         End If
 
-        Set issue = New PleadingsIssue
-        issue.Init RULE_NAME, _
-                   locStr, _
-                   issueText, _
-                   suggestion, _
-                   rng.Start, _
-                   rng.End, _
-                   "possible_error"
+        Set issue = CreateIssueDict(RULE_NAME, locStr, issueText, suggestion, rng.Start, rng.End, "possible_error")
         issues.Add issue
 
 ContinueFlag:
@@ -241,9 +233,9 @@ ContinueFlag:
     On Error GoTo 0
 End Sub
 
-' ════════════════════════════════════════════════════════════
+' ============================================================
 '  PRIVATE: Flag single quotation marks, skipping apostrophes
-' ════════════════════════════════════════════════════════════
+' ============================================================
 Private Sub FlagSingleQuotationMarks(doc As Document, _
                                       ByRef issues As Collection, _
                                       ByVal searchChar As String, _
@@ -252,7 +244,7 @@ Private Sub FlagSingleQuotationMarks(doc As Document, _
                                       ByVal checkApostrophe As Boolean)
     Dim rng As Range
     Dim found As Boolean
-    Dim issue As PleadingsIssue
+    Dim issue As Object
     Dim locStr As String
 
     Set rng = doc.Content.Duplicate
@@ -274,7 +266,7 @@ Private Sub FlagSingleQuotationMarks(doc As Document, _
         If Err.Number <> 0 Then Exit Do
         If Not found Then Exit Do
 
-        If Not PleadingsEngine.IsInPageRange(rng) Then GoTo ContinueSingle
+        If Not EngineIsInPageRange(rng) Then GoTo ContinueSingle
 
         ' Skip apostrophes: check if preceded AND followed by a letter
         If checkApostrophe Then
@@ -308,20 +300,13 @@ Private Sub FlagSingleQuotationMarks(doc As Document, _
             If isApost Then GoTo ContinueSingle
         End If
 
-        locStr = PleadingsEngine.GetLocationString(rng, doc)
+        locStr = EngineGetLocationString(rng, doc)
         If Err.Number <> 0 Then
             locStr = "unknown location"
             Err.Clear
         End If
 
-        Set issue = New PleadingsIssue
-        issue.Init RULE_NAME, _
-                   locStr, _
-                   issueText, _
-                   suggestion, _
-                   rng.Start, _
-                   rng.End, _
-                   "possible_error"
+        Set issue = CreateIssueDict(RULE_NAME, locStr, issueText, suggestion, rng.Start, rng.End, "possible_error")
         issues.Add issue
 
 ContinueSingle:
@@ -330,3 +315,61 @@ ContinueSingle:
     Loop
     On Error GoTo 0
 End Sub
+
+' ----------------------------------------------------------------
+'  PRIVATE: Create a dictionary-based issue (no class dependency)
+' ----------------------------------------------------------------
+Private Function CreateIssueDict(ByVal ruleName_ As String, _
+                                 ByVal location_ As String, _
+                                 ByVal issue_ As String, _
+                                 ByVal suggestion_ As String, _
+                                 ByVal rangeStart_ As Long, _
+                                 ByVal rangeEnd_ As Long, _
+                                 Optional ByVal severity_ As String = "error", _
+                                 Optional ByVal autoFixSafe_ As Boolean = False) As Object
+    Dim d As Object
+    Set d = CreateObject("Scripting.Dictionary")
+    d("RuleName") = ruleName_
+    d("Location") = location_
+    d("Issue") = issue_
+    d("Suggestion") = suggestion_
+    d("RangeStart") = rangeStart_
+    d("RangeEnd") = rangeEnd_
+    d("Severity") = severity_
+    d("AutoFixSafe") = autoFixSafe_
+    Set CreateIssueDict = d
+End Function
+
+' ----------------------------------------------------------------
+'  Late-bound wrapper: EngineIsInPageRange
+' ----------------------------------------------------------------
+
+' ----------------------------------------------------------------
+'  Late-bound wrapper: EngineGetLocationString
+' ----------------------------------------------------------------
+
+' ----------------------------------------------------------------
+'  Late-bound wrapper: PleadingsEngine.IsInPageRange
+' ----------------------------------------------------------------
+Private Function EngineIsInPageRange(rng As Object) As Boolean
+    On Error Resume Next
+    EngineIsInPageRange = Application.Run("PleadingsEngine.IsInPageRange", rng)
+    If Err.Number <> 0 Then
+        EngineIsInPageRange = True
+        Err.Clear
+    End If
+    On Error GoTo 0
+End Function
+
+' ----------------------------------------------------------------
+'  Late-bound wrapper: PleadingsEngine.GetLocationString
+' ----------------------------------------------------------------
+Private Function EngineGetLocationString(rng As Object, doc As Document) As String
+    On Error Resume Next
+    EngineGetLocationString = Application.Run("PleadingsEngine.GetLocationString", rng, doc)
+    If Err.Number <> 0 Then
+        EngineGetLocationString = "unknown location"
+        Err.Clear
+    End If
+    On Error GoTo 0
+End Function

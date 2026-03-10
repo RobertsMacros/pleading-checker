@@ -8,31 +8,29 @@ Attribute VB_Name = "Rules_Italics"
 '     places or courts that should not be italicised.
 '
 ' Dependencies:
-'   - PleadingsIssue.cls
 '   - PleadingsEngine.bas (IsInPageRange, GetLocationString)
-'   - Microsoft Scripting Runtime (Scripting.Dictionary)
 ' ============================================================
 Option Explicit
 
-' ── Rule-name constants ─────────────────────────────────────
+' -- Rule-name constants -------------------------------------
 Private Const RULE_NAME_ANGLICISED As String = "known_anglicised_terms_not_italic"
 Private Const RULE_NAME_FOREIGN   As String = "foreign_names_not_italic"
 
-' ── Seed list of anglicised terms (Rule 30) ─────────────────
+' -- Seed list of anglicised terms (Rule 30) -----------------
 Private seedTerms As Variant
 Private seedInitialised As Boolean
 
-' ── Module-level dictionary of protected foreign names (Rule 31) ─
-' Key = name (String), Value = True (Boolean) — used as a set
-Private foreignNames As Scripting.Dictionary
+' -- Module-level dictionary of protected foreign names (Rule 31) -
+' Key = name (String), Value = True (Boolean) -- used as a set
+Private foreignNames As Object
 
-' ════════════════════════════════════════════════════════════
+' ============================================================
 '  SHARED PRIVATE HELPERS
-' ════════════════════════════════════════════════════════════
+' ============================================================
 
-' ────────────────────────────────────────────────────────────
+' ------------------------------------------------------------
 '  Check whether a character is a letter (A-Z, a-z)
-' ────────────────────────────────────────────────────────────
+' ------------------------------------------------------------
 Private Function IsLetter(ByVal ch As String) As Boolean
     Dim c As Long
     If Len(ch) = 0 Then
@@ -43,10 +41,10 @@ Private Function IsLetter(ByVal ch As String) As Boolean
     IsLetter = (c >= 65 And c <= 90) Or (c >= 97 And c <= 122)
 End Function
 
-' ────────────────────────────────────────────────────────────
+' ------------------------------------------------------------
 '  Check whether a range span is italic
 '  Returns True if any part of the range is italic.
-' ────────────────────────────────────────────────────────────
+' ------------------------------------------------------------
 Private Function IsRangeItalic(rng As Range) As Boolean
     On Error Resume Next
 
@@ -57,7 +55,7 @@ Private Function IsRangeItalic(rng As Range) As Boolean
     End If
 
     ' If Font.Italic is wdUndefined (9999999) the range has
-    ' mixed formatting — check individual characters
+    ' mixed formatting -- check individual characters
     If rng.Font.Italic = wdUndefined Then
         Dim i As Long
         Dim charRng As Range
@@ -80,13 +78,13 @@ Private Function IsRangeItalic(rng As Range) As Boolean
     On Error GoTo 0
 End Function
 
-' ════════════════════════════════════════════════════════════
-'  RULE 30 — ANGLICISED TERMS NOT ITALIC
-' ════════════════════════════════════════════════════════════
+' ============================================================
+'  RULE 30 -- ANGLICISED TERMS NOT ITALIC
+' ============================================================
 
-' ────────────────────────────────────────────────────────────
+' ------------------------------------------------------------
 '  Initialise the seed term list
-' ────────────────────────────────────────────────────────────
+' ------------------------------------------------------------
 Private Sub InitSeedTerms()
     If seedInitialised Then Exit Sub
     seedTerms = Array( _
@@ -121,9 +119,9 @@ Private Sub InitSeedTerms()
     seedInitialised = True
 End Sub
 
-' ────────────────────────────────────────────────────────────
-'  MAIN ENTRY POINT — Rule 30
-' ────────────────────────────────────────────────────────────
+' ------------------------------------------------------------
+'  MAIN ENTRY POINT -- Rule 30
+' ------------------------------------------------------------
 Public Function Check_AnglicisedTermsNotItalic(doc As Document) As Collection
     Dim issues As New Collection
 
@@ -141,11 +139,11 @@ Public Function Check_AnglicisedTermsNotItalic(doc As Document) As Collection
     Dim charAfter As String
     Dim rng As Range
     Dim locStr As String
-    Dim issue As PleadingsIssue
+    Dim issue As Object
 
     For Each para In doc.Paragraphs
         ' Skip paragraphs outside the configured page range
-        If Not PleadingsEngine.IsInPageRange(para.Range) Then GoTo NextParaR30
+        If Not EngineIsInPageRange(para.Range) Then GoTo NextParaR30
 
         paraText = para.Range.Text
         If Len(paraText) = 0 Then GoTo NextParaR30
@@ -157,7 +155,7 @@ Public Function Check_AnglicisedTermsNotItalic(doc As Document) As Collection
             ' Search for all occurrences of the term in this paragraph
             pos = InStr(1, paraText, term, vbTextCompare)
             Do While pos > 0
-                ' ── Word-boundary check ───────────────────────
+                ' -- Word-boundary check -----------------------
                 ' Character before match must be non-letter (or match starts at position 1)
                 If pos > 1 Then
                     charBefore = Mid$(paraText, pos - 1, 1)
@@ -172,25 +170,17 @@ Public Function Check_AnglicisedTermsNotItalic(doc As Document) As Collection
                     If IsLetter(charAfter) Then GoTo NextMatchR30
                 End If
 
-                ' ── Build Range for the matched span ──────────
+                ' -- Build Range for the matched span ----------
                 Set rng = doc.Range( _
                     para.Range.Start + pos - 1, _
                     para.Range.Start + pos - 1 + termLen)
 
-                ' ── Check italic formatting ───────────────────
+                ' -- Check italic formatting -------------------
                 If IsRangeItalic(rng) Then
-                    locStr = PleadingsEngine.GetLocationString(rng, doc)
+                    locStr = EngineGetLocationString(rng, doc)
                     If Err.Number <> 0 Then locStr = "unknown location": Err.Clear
 
-                    Set issue = New PleadingsIssue
-                    issue.Init RULE_NAME_ANGLICISED, _
-                               locStr, _
-                               "Anglicised foreign term is italicised.", _
-                               "Set '" & term & "' in roman, not italics.", _
-                               rng.Start, _
-                               rng.End, _
-                               "warning", _
-                               False
+                    Set issue = CreateIssueDict(RULE_NAME_ANGLICISED, locStr, "Anglicised foreign term is italicised.", "Set)
                     issues.Add issue
                 End If
 
@@ -207,15 +197,15 @@ NextParaR30:
     Set Check_AnglicisedTermsNotItalic = issues
 End Function
 
-' ════════════════════════════════════════════════════════════
-'  RULE 31 — FOREIGN NAMES NOT ITALIC
-' ════════════════════════════════════════════════════════════
+' ============================================================
+'  RULE 31 -- FOREIGN NAMES NOT ITALIC
+' ============================================================
 
-' ────────────────────────────────────────────────────────────
+' ------------------------------------------------------------
 '  Initialise the seed name dictionary
-' ────────────────────────────────────────────────────────────
+' ------------------------------------------------------------
 Private Sub InitSeedNames()
-    Set foreignNames = New Scripting.Dictionary
+    Set foreignNames = CreateObject("Scripting.Dictionary")
     foreignNames.CompareMode = vbTextCompare
 
     foreignNames.Add "Cour de cassation", True
@@ -223,9 +213,9 @@ Private Sub InitSeedNames()
     foreignNames.Add "Bayerisches Staatsministerium der Justiz", True
 End Sub
 
-' ────────────────────────────────────────────────────────────
+' ------------------------------------------------------------
 '  PUBLIC: Add a foreign name to the protected list
-' ────────────────────────────────────────────────────────────
+' ------------------------------------------------------------
 Public Sub AddForeignName(ByVal termName As String)
     If foreignNames Is Nothing Then
         InitSeedNames
@@ -236,9 +226,9 @@ Public Sub AddForeignName(ByVal termName As String)
     End If
 End Sub
 
-' ────────────────────────────────────────────────────────────
-'  MAIN ENTRY POINT — Rule 31
-' ────────────────────────────────────────────────────────────
+' ------------------------------------------------------------
+'  MAIN ENTRY POINT -- Rule 31
+' ------------------------------------------------------------
 Public Function Check_ForeignNamesNotItalic(doc As Document) As Collection
     Dim issues As New Collection
 
@@ -259,14 +249,14 @@ Public Function Check_ForeignNamesNotItalic(doc As Document) As Collection
     Dim charAfter As String
     Dim rng As Range
     Dim locStr As String
-    Dim issue As PleadingsIssue
+    Dim issue As Object
     Dim keys As Variant
 
     keys = foreignNames.keys
 
     For Each para In doc.Paragraphs
         ' Skip paragraphs outside the configured page range
-        If Not PleadingsEngine.IsInPageRange(para.Range) Then GoTo NextParaR31
+        If Not EngineIsInPageRange(para.Range) Then GoTo NextParaR31
 
         paraText = para.Range.Text
         If Len(paraText) = 0 Then GoTo NextParaR31
@@ -279,7 +269,7 @@ Public Function Check_ForeignNamesNotItalic(doc As Document) As Collection
             ' Search for all occurrences of the name in this paragraph
             pos = InStr(1, paraText, term, vbTextCompare)
             Do While pos > 0
-                ' ── Word-boundary check ───────────────────────
+                ' -- Word-boundary check -----------------------
                 ' Character before match must be non-letter (or match starts at position 1)
                 If pos > 1 Then
                     charBefore = Mid$(paraText, pos - 1, 1)
@@ -294,25 +284,17 @@ Public Function Check_ForeignNamesNotItalic(doc As Document) As Collection
                     If IsLetter(charAfter) Then GoTo NextMatchR31
                 End If
 
-                ' ── Build Range for the matched span ──────────
+                ' -- Build Range for the matched span ----------
                 Set rng = doc.Range( _
                     para.Range.Start + pos - 1, _
                     para.Range.Start + pos - 1 + termLen)
 
-                ' ── Check italic formatting ───────────────────
+                ' -- Check italic formatting -------------------
                 If IsRangeItalic(rng) Then
-                    locStr = PleadingsEngine.GetLocationString(rng, doc)
+                    locStr = EngineGetLocationString(rng, doc)
                     If Err.Number <> 0 Then locStr = "unknown location": Err.Clear
 
-                    Set issue = New PleadingsIssue
-                    issue.Init RULE_NAME_FOREIGN, _
-                               locStr, _
-                               "Foreign name or institution should not be italicised.", _
-                               "Set '" & term & "' in roman, not italics.", _
-                               rng.Start, _
-                               rng.End, _
-                               "warning", _
-                               False
+                    Set issue = CreateIssueDict(RULE_NAME_FOREIGN, locStr, "Foreign name or institution should not be italicised.", "Set)
                     issues.Add issue
                 End If
 
@@ -327,4 +309,70 @@ NextParaR31:
 
     On Error GoTo 0
     Set Check_ForeignNamesNotItalic = issues
+End Function
+
+' ----------------------------------------------------------------
+'  PRIVATE: Late-bound wrapper for EngineIsInPageRange
+' ----------------------------------------------------------------
+
+' ----------------------------------------------------------------
+'  PRIVATE: Late-bound wrapper for EngineGetLocationString
+' ----------------------------------------------------------------
+
+' ----------------------------------------------------------------
+'  PRIVATE: Create a dictionary-based issue (no class dependency)
+' ----------------------------------------------------------------
+Private Function CreateIssueDict(ByVal ruleName_ As String, _
+                                 ByVal location_ As String, _
+                                 ByVal issue_ As String, _
+                                 ByVal suggestion_ As String, _
+                                 ByVal rangeStart_ As Long, _
+                                 ByVal rangeEnd_ As Long, _
+                                 Optional ByVal severity_ As String = "error", _
+                                 Optional ByVal autoFixSafe_ As Boolean = False) As Object
+    Dim d As Object
+    Set d = CreateObject("Scripting.Dictionary")
+    d("RuleName") = ruleName_
+    d("Location") = location_
+    d("Issue") = issue_
+    d("Suggestion") = suggestion_
+    d("RangeStart") = rangeStart_
+    d("RangeEnd") = rangeEnd_
+    d("Severity") = severity_
+    d("AutoFixSafe") = autoFixSafe_
+    Set CreateIssueDict = d
+End Function
+
+' ----------------------------------------------------------------
+'  Late-bound wrapper: EngineIsInPageRange
+' ----------------------------------------------------------------
+
+' ----------------------------------------------------------------
+'  Late-bound wrapper: EngineGetLocationString
+' ----------------------------------------------------------------
+
+' ----------------------------------------------------------------
+'  Late-bound wrapper: PleadingsEngine.IsInPageRange
+' ----------------------------------------------------------------
+Private Function EngineIsInPageRange(rng As Object) As Boolean
+    On Error Resume Next
+    EngineIsInPageRange = Application.Run("PleadingsEngine.IsInPageRange", rng)
+    If Err.Number <> 0 Then
+        EngineIsInPageRange = True
+        Err.Clear
+    End If
+    On Error GoTo 0
+End Function
+
+' ----------------------------------------------------------------
+'  Late-bound wrapper: PleadingsEngine.GetLocationString
+' ----------------------------------------------------------------
+Private Function EngineGetLocationString(rng As Object, doc As Document) As String
+    On Error Resume Next
+    EngineGetLocationString = Application.Run("PleadingsEngine.GetLocationString", rng, doc)
+    If Err.Number <> 0 Then
+        EngineGetLocationString = "unknown location"
+        Err.Clear
+    End If
+    On Error GoTo 0
 End Function

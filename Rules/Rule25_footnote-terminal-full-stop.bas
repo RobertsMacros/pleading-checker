@@ -7,20 +7,19 @@ Attribute VB_Name = "Rule25_footnote_terminal_full_stop"
 ' brackets/quotes (checks character before them for ".").
 '
 ' Dependencies:
-'   - PleadingsIssue.cls
 '   - PleadingsEngine.bas (IsInPageRange, GetLocationString)
 ' ============================================================
 Option Explicit
 
 Private Const RULE_NAME As String = "footnote_terminal_full_stop"
 
-' ════════════════════════════════════════════════════════════
+' ============================================================
 '  MAIN ENTRY POINT
-' ════════════════════════════════════════════════════════════
+' ============================================================
 Public Function Check_FootnoteTerminalFullStop(doc As Document) As Collection
     Dim issues As New Collection
     Dim fn As Footnote
-    Dim issue As PleadingsIssue
+    Dim issue As Object
     Dim locStr As String
     Dim noteText As String
     Dim trimmed As String
@@ -38,15 +37,15 @@ Public Function Check_FootnoteTerminalFullStop(doc As Document) As Collection
         End If
         On Error GoTo 0
 
-        ' ── Check page range on the reference mark ───────────
+        ' -- Check page range on the reference mark -----------
         On Error Resume Next
-        If Not PleadingsEngine.IsInPageRange(fn.Reference) Then
+        If Not EngineIsInPageRange(fn.Reference) Then
             On Error GoTo 0
             GoTo NextFootnote
         End If
         On Error GoTo 0
 
-        ' ── Get footnote text ────────────────────────────────
+        ' -- Get footnote text --------------------------------
         On Error Resume Next
         noteText = fn.Range.Text
         If Err.Number <> 0 Then
@@ -56,17 +55,17 @@ Public Function Check_FootnoteTerminalFullStop(doc As Document) As Collection
         End If
         On Error GoTo 0
 
-        ' ── Trim trailing whitespace / paragraph marks ───────
+        ' -- Trim trailing whitespace / paragraph marks -------
         trimmed = noteText
         trimmed = TrimTrailingWhitespace(trimmed)
 
-        ' ── Skip empty footnotes ─────────────────────────────
+        ' -- Skip empty footnotes -----------------------------
         If Len(trimmed) = 0 Then GoTo NextFootnote
 
-        ' ── Get last character ───────────────────────────────
+        ' -- Get last character -------------------------------
         lastChar = Mid(trimmed, Len(trimmed), 1)
 
-        ' ── If last char is closing bracket/quote, check penultimate ──
+        ' -- If last char is closing bracket/quote, check penultimate --
         If IsClosingPunctuation(lastChar) Then
             If Len(trimmed) >= 2 Then
                 penultChar = Mid(trimmed, Len(trimmed) - 1, 1)
@@ -77,21 +76,13 @@ Public Function Check_FootnoteTerminalFullStop(doc As Document) As Collection
             GoTo NextFootnote
         End If
 
-        ' ── Flag missing full stop ───────────────────────────
+        ' -- Flag missing full stop ---------------------------
         On Error Resume Next
-        locStr = PleadingsEngine.GetLocationString(fn.Reference, doc)
+        locStr = EngineGetLocationString(fn.Reference, doc)
         If Err.Number <> 0 Then locStr = "unknown location": Err.Clear
         On Error GoTo 0
 
-        Set issue = New PleadingsIssue
-        issue.Init RULE_NAME, _
-                   locStr, _
-                   "Footnote does not end with a full stop.", _
-                   "Add a full stop at the end of the footnote.", _
-                   fn.Range.Start, _
-                   fn.Range.End, _
-                   "warning", _
-                   True
+        Set issue = CreateIssueDict(RULE_NAME, locStr, "Footnote does not end with a full stop.", "Add a full stop at the end of the footnote.", fn.Range.Start, fn.Range.End, "warning", True)
         issues.Add issue
 
 NextFootnote:
@@ -100,9 +91,9 @@ NextFootnote:
     Set Check_FootnoteTerminalFullStop = issues
 End Function
 
-' ════════════════════════════════════════════════════════════
+' ============================================================
 '  PRIVATE: Strip trailing CR, LF, VT, and spaces
-' ════════════════════════════════════════════════════════════
+' ============================================================
 Private Function TrimTrailingWhitespace(ByVal s As String) As String
     Dim ch As String
     Do While Len(s) > 0
@@ -117,9 +108,9 @@ Private Function TrimTrailingWhitespace(ByVal s As String) As String
     TrimTrailingWhitespace = s
 End Function
 
-' ════════════════════════════════════════════════════════════
+' ============================================================
 '  PRIVATE: Check if character is a closing bracket or quote
-' ════════════════════════════════════════════════════════════
+' ============================================================
 Private Function IsClosingPunctuation(ByVal ch As String) As Boolean
     Select Case ch
         Case ")", "]", ChrW(8217), ChrW(8221)
@@ -127,4 +118,62 @@ Private Function IsClosingPunctuation(ByVal ch As String) As Boolean
         Case Else
             IsClosingPunctuation = False
     End Select
+End Function
+
+' ----------------------------------------------------------------
+'  PRIVATE: Create a dictionary-based issue (no class dependency)
+' ----------------------------------------------------------------
+Private Function CreateIssueDict(ByVal ruleName_ As String, _
+                                 ByVal location_ As String, _
+                                 ByVal issue_ As String, _
+                                 ByVal suggestion_ As String, _
+                                 ByVal rangeStart_ As Long, _
+                                 ByVal rangeEnd_ As Long, _
+                                 Optional ByVal severity_ As String = "error", _
+                                 Optional ByVal autoFixSafe_ As Boolean = False) As Object
+    Dim d As Object
+    Set d = CreateObject("Scripting.Dictionary")
+    d("RuleName") = ruleName_
+    d("Location") = location_
+    d("Issue") = issue_
+    d("Suggestion") = suggestion_
+    d("RangeStart") = rangeStart_
+    d("RangeEnd") = rangeEnd_
+    d("Severity") = severity_
+    d("AutoFixSafe") = autoFixSafe_
+    Set CreateIssueDict = d
+End Function
+
+' ----------------------------------------------------------------
+'  Late-bound wrapper: EngineIsInPageRange
+' ----------------------------------------------------------------
+
+' ----------------------------------------------------------------
+'  Late-bound wrapper: EngineGetLocationString
+' ----------------------------------------------------------------
+
+' ----------------------------------------------------------------
+'  Late-bound wrapper: PleadingsEngine.IsInPageRange
+' ----------------------------------------------------------------
+Private Function EngineIsInPageRange(rng As Object) As Boolean
+    On Error Resume Next
+    EngineIsInPageRange = Application.Run("PleadingsEngine.IsInPageRange", rng)
+    If Err.Number <> 0 Then
+        EngineIsInPageRange = True
+        Err.Clear
+    End If
+    On Error GoTo 0
+End Function
+
+' ----------------------------------------------------------------
+'  Late-bound wrapper: PleadingsEngine.GetLocationString
+' ----------------------------------------------------------------
+Private Function EngineGetLocationString(rng As Object, doc As Document) As String
+    On Error Resume Next
+    EngineGetLocationString = Application.Run("PleadingsEngine.GetLocationString", rng, doc)
+    If Err.Number <> 0 Then
+        EngineGetLocationString = "unknown location"
+        Err.Clear
+    End If
+    On Error GoTo 0
 End Function

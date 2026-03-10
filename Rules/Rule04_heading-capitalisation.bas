@@ -9,9 +9,10 @@ Option Explicit
 
 Private Const RULE_NAME As String = "heading_capitalisation"
 
-' ── Minor words to skip when checking Title Case ────────────
-Private Function GetMinorWords() As Scripting.Dictionary
-    Dim d As New Scripting.Dictionary
+' -- Minor words to skip when checking Title Case ------------
+Private Function GetMinorWords() As Object
+    Dim d As Object
+    Set d = CreateObject("Scripting.Dictionary")
     Dim w As Variant
     For Each w In Array("the", "a", "an", "in", "on", "at", "to", _
                         "for", "of", "and", "but", "or", "nor", _
@@ -21,9 +22,10 @@ Private Function GetMinorWords() As Scripting.Dictionary
     Set GetMinorWords = d
 End Function
 
-' ── Proper nouns that are always capitalised ────────────────
-Private Function GetProperNouns() As Scripting.Dictionary
-    Dim d As New Scripting.Dictionary
+' -- Proper nouns that are always capitalised ----------------
+Private Function GetProperNouns() As Object
+    Dim d As Object
+    Set d = CreateObject("Scripting.Dictionary")
     Dim w As Variant
     For Each w In Array("Court", "Claimant", "Defendant", "Respondent", _
                         "Applicant", "Tribunal", "Parliament", "Crown", _
@@ -33,7 +35,7 @@ Private Function GetProperNouns() As Scripting.Dictionary
     Set GetProperNouns = d
 End Function
 
-' ── Classify a heading's capitalisation pattern ─────────────
+' -- Classify a heading's capitalisation pattern -------------
 ' Returns "ALL_CAPS", "TITLE_CASE", "SENTENCE_CASE", or "MIXED"
 Private Function ClassifyCapitalisation(ByVal headingText As String) As String
     Dim cleanText As String
@@ -79,10 +81,10 @@ Private Function ClassifyCapitalisation(ByVal headingText As String) As String
     Dim words() As String
     words = Split(cleanText, " ")
 
-    Dim minorWords As Scripting.Dictionary
+    Dim minorWords As Object
     Set minorWords = GetMinorWords()
 
-    Dim properNouns As Scripting.Dictionary
+    Dim properNouns As Object
     Set properNouns = GetProperNouns()
 
     ' Check Title Case: significant words start with uppercase
@@ -145,7 +147,7 @@ NextWordTitle:
     Dim sentenceCaseViolations As Long
     sentenceCaseViolations = 0
     If firstCharOfFirst Like "[a-z]" Then
-        ' First word not capitalised — not sentence case
+        ' First word not capitalised -- not sentence case
         sentenceCaseViolations = significantCount ' force fail
     Else
         ' Check that subsequent significant words start lowercase
@@ -187,7 +189,7 @@ NextWordSentence:
     End If
 End Function
 
-' ── Count words in a heading (excluding trailing marks) ─────
+' -- Count words in a heading (excluding trailing marks) -----
 Private Function CountWords(ByVal txt As String) As Long
     Dim cleanText As String
     cleanText = Trim$(Replace(txt, vbCr, ""))
@@ -206,9 +208,9 @@ Private Function CountWords(ByVal txt As String) As Long
     CountWords = cnt
 End Function
 
-' ════════════════════════════════════════════════════════════
+' ============================================================
 '  MAIN RULE FUNCTION
-' ════════════════════════════════════════════════════════════
+' ============================================================
 Public Function Check_HeadingCapitalisation(doc As Document) As Collection
     Dim issues As New Collection
     Dim para As Paragraph
@@ -217,11 +219,13 @@ Public Function Check_HeadingCapitalisation(doc As Document) As Collection
 
     On Error Resume Next
 
-    ' ── Dictionaries keyed by outline level ─────────────────
+    ' -- Dictionaries keyed by outline level -----------------
     ' levelPatterns: level -> Dictionary(pattern -> count)
     ' levelHeadings: level -> Collection of Array(paraIdx, text, pattern, rangeStart, rangeEnd)
-    Dim levelPatterns As New Scripting.Dictionary
-    Dim levelHeadings As New Scripting.Dictionary
+    Dim levelPatterns As Object
+    Set levelPatterns = CreateObject("Scripting.Dictionary")
+    Dim levelHeadings As Object
+    Set levelHeadings = CreateObject("Scripting.Dictionary")
 
     paraIdx = 0
     For Each para In doc.Paragraphs
@@ -232,7 +236,7 @@ Public Function Check_HeadingCapitalisation(doc As Document) As Collection
         If lvl >= wdOutlineLevel1 And lvl <= wdOutlineLevel9 Then
 
             ' Page range filter
-            If Not PleadingsEngine.IsInPageRange(para.Range) Then GoTo NextPara
+            If Not EngineIsInPageRange(para.Range) Then GoTo NextPara
 
             Dim headingText As String
             headingText = para.Range.Text
@@ -246,9 +250,9 @@ Public Function Check_HeadingCapitalisation(doc As Document) As Collection
 
             ' Store pattern count per level
             If Not levelPatterns.Exists(lvl) Then
-                levelPatterns.Add lvl, New Scripting.Dictionary
+                levelPatterns.Add lvl, CreateObject("Scripting.Dictionary")
             End If
-            Dim patDict As Scripting.Dictionary
+            Dim patDict As Object
             Set patDict = levelPatterns(lvl)
             If patDict.Exists(pattern) Then
                 patDict(pattern) = patDict(pattern) + 1
@@ -271,7 +275,7 @@ Public Function Check_HeadingCapitalisation(doc As Document) As Collection
 NextPara:
     Next para
 
-    ' ── Determine dominant pattern per level and flag outliers ──
+    ' -- Determine dominant pattern per level and flag outliers --
     Dim lvlKey As Variant
     For Each lvlKey In levelPatterns.keys
         Set patDict = levelPatterns(lvlKey)
@@ -303,11 +307,11 @@ NextPara:
             Dim hPattern As String
             hPattern = CStr(hInfo(2))
             If hPattern <> dominantPattern Then
-                Dim issue As New PleadingsIssue
+                Dim issue As Object
                 Dim loc As String
                 Dim rng As Range
                 Set rng = doc.Range(CLng(hInfo(3)), CLng(hInfo(4)))
-                loc = PleadingsEngine.GetLocationString(rng, doc)
+                loc = EngineGetLocationString(rng, doc)
 
                 Dim cleanHText As String
                 cleanHText = Trim$(Replace(CStr(hInfo(1)), vbCr, ""))
@@ -324,10 +328,7 @@ NextPara:
                         suggestion = "Review capitalisation for consistency with other level " & CLng(lvlKey) & " headings"
                 End Select
 
-                issue.Init RULE_NAME, loc, _
-                           "Heading capitalisation mismatch: '" & cleanHText & _
-                           "' uses " & hPattern & " but dominant pattern is " & dominantPattern, _
-                           suggestion, CLng(hInfo(3)), CLng(hInfo(4)), "possible_error"
+                Set issue = CreateIssueDict(RULE_NAME, loc, "Heading capitalisation mismatch: '" & cleanHText & "' uses " & hPattern & " but dominant pattern is " & dominantPattern, suggestion, CLng(hInfo(3)), CLng(hInfo(4)), "possible_error")
                 issues.Add issue
             End If
         Next h
@@ -336,4 +337,62 @@ NextLevel:
 
     On Error GoTo 0
     Set Check_HeadingCapitalisation = issues
+End Function
+
+' ----------------------------------------------------------------
+'  PRIVATE: Create a dictionary-based issue (no class dependency)
+' ----------------------------------------------------------------
+Private Function CreateIssueDict(ByVal ruleName_ As String, _
+                                 ByVal location_ As String, _
+                                 ByVal issue_ As String, _
+                                 ByVal suggestion_ As String, _
+                                 ByVal rangeStart_ As Long, _
+                                 ByVal rangeEnd_ As Long, _
+                                 Optional ByVal severity_ As String = "error", _
+                                 Optional ByVal autoFixSafe_ As Boolean = False) As Object
+    Dim d As Object
+    Set d = CreateObject("Scripting.Dictionary")
+    d("RuleName") = ruleName_
+    d("Location") = location_
+    d("Issue") = issue_
+    d("Suggestion") = suggestion_
+    d("RangeStart") = rangeStart_
+    d("RangeEnd") = rangeEnd_
+    d("Severity") = severity_
+    d("AutoFixSafe") = autoFixSafe_
+    Set CreateIssueDict = d
+End Function
+
+' ----------------------------------------------------------------
+'  Late-bound wrapper: EngineIsInPageRange
+' ----------------------------------------------------------------
+
+' ----------------------------------------------------------------
+'  Late-bound wrapper: EngineGetLocationString
+' ----------------------------------------------------------------
+
+' ----------------------------------------------------------------
+'  Late-bound wrapper: PleadingsEngine.IsInPageRange
+' ----------------------------------------------------------------
+Private Function EngineIsInPageRange(rng As Object) As Boolean
+    On Error Resume Next
+    EngineIsInPageRange = Application.Run("PleadingsEngine.IsInPageRange", rng)
+    If Err.Number <> 0 Then
+        EngineIsInPageRange = True
+        Err.Clear
+    End If
+    On Error GoTo 0
+End Function
+
+' ----------------------------------------------------------------
+'  Late-bound wrapper: PleadingsEngine.GetLocationString
+' ----------------------------------------------------------------
+Private Function EngineGetLocationString(rng As Object, doc As Document) As String
+    On Error Resume Next
+    EngineGetLocationString = Application.Run("PleadingsEngine.GetLocationString", rng, doc)
+    If Err.Number <> 0 Then
+        EngineGetLocationString = "unknown location"
+        Err.Clear
+    End If
+    On Error GoTo 0
 End Function

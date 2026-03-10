@@ -14,7 +14,7 @@ Private Const RULE_NAME_FONT As String = "font_consistency"
 '  RULE 06 HELPERS
 ' ============================================================
 
-' ── Classify spacing pattern after a heading ────────────────
+' -- Classify spacing pattern after a heading ----------------
 ' Returns: "no_spacing", "spacing_Npt", or "manual_double_break"
 Private Function ClassifyAfterSpacing(para As Paragraph, doc As Document, paraIdx As Long) As String
     Dim spAfter As Single
@@ -42,7 +42,7 @@ Private Function ClassifyAfterSpacing(para As Paragraph, doc As Document, paraId
     End If
 End Function
 
-' ── Classify SpaceBefore pattern ────────────────────────────
+' -- Classify SpaceBefore pattern ----------------------------
 Private Function ClassifyBeforeSpacing(para As Paragraph) As String
     Dim spBefore As Single
     spBefore = para.Format.SpaceBefore
@@ -57,13 +57,13 @@ End Function
 '  RULE 11 HELPERS
 ' ============================================================
 
-' ── Helper: build a font profile key ────────────────────────
+' -- Helper: build a font profile key ------------------------
 Private Function FontKey(ByVal fontName As String, ByVal fontSize As Single) As String
     FontKey = fontName & "|" & CStr(fontSize)
 End Function
 
-' ── Helper: find dominant key in a dictionary of counts ─────
-Private Function GetDominant(counts As Scripting.Dictionary) As String
+' -- Helper: find dominant key in a dictionary of counts -----
+Private Function GetDominant(counts As Object) As String
     Dim k As Variant
     Dim maxCnt As Long
     Dim domKey As String
@@ -78,7 +78,7 @@ Private Function GetDominant(counts As Scripting.Dictionary) As String
     GetDominant = domKey
 End Function
 
-' ── Helper: parse font key back to readable description ─────
+' -- Helper: parse font key back to readable description -----
 Private Function FontDescription(ByVal fKey As String) As String
     Dim parts() As String
     parts = Split(fKey, "|")
@@ -89,9 +89,9 @@ Private Function FontDescription(ByVal fKey As String) As String
     End If
 End Function
 
-' ════════════════════════════════════════════════════════════
+' ============================================================
 '  RULE 06: PARAGRAPH BREAK CONSISTENCY
-' ════════════════════════════════════════════════════════════
+' ============================================================
 Public Function Check_ParagraphBreakConsistency(doc As Document) As Collection
     Dim issues As New Collection
     Dim para As Paragraph
@@ -100,13 +100,16 @@ Public Function Check_ParagraphBreakConsistency(doc As Document) As Collection
 
     On Error Resume Next
 
-    ' ── Dictionaries keyed by outline level ─────────────────
+    ' -- Dictionaries keyed by outline level -----------------
     ' afterPatterns:  level -> Dictionary(pattern -> count)
     ' beforePatterns: level -> Dictionary(pattern -> count)
     ' headingInfos:   level -> Collection of Array(paraIdx, afterPattern, beforePattern, rangeStart, rangeEnd, text)
-    Dim afterPatterns As New Scripting.Dictionary
-    Dim beforePatterns As New Scripting.Dictionary
-    Dim headingInfos As New Scripting.Dictionary
+    Dim afterPatterns As Object
+    Set afterPatterns = CreateObject("Scripting.Dictionary")
+    Dim beforePatterns As Object
+    Set beforePatterns = CreateObject("Scripting.Dictionary")
+    Dim headingInfos As Object
+    Set headingInfos = CreateObject("Scripting.Dictionary")
 
     paraIdx = 0
     For Each para In doc.Paragraphs
@@ -116,7 +119,7 @@ Public Function Check_ParagraphBreakConsistency(doc As Document) As Collection
         If lvl < wdOutlineLevel1 Or lvl > wdOutlineLevel9 Then GoTo NextPara
 
         ' Page range filter
-        If Not PleadingsEngine.IsInPageRange(para.Range) Then GoTo NextPara
+        If Not EngineIsInPageRange(para.Range) Then GoTo NextPara
 
         ' Classify after-spacing
         Dim aftPat As String
@@ -126,11 +129,11 @@ Public Function Check_ParagraphBreakConsistency(doc As Document) As Collection
         Dim befPat As String
         befPat = ClassifyBeforeSpacing(para)
 
-        ' ── Track after-spacing counts ─────────────────────
+        ' -- Track after-spacing counts ---------------------
         If Not afterPatterns.Exists(lvl) Then
-            afterPatterns.Add lvl, New Scripting.Dictionary
+            afterPatterns.Add lvl, CreateObject("Scripting.Dictionary")
         End If
-        Dim aftDict As Scripting.Dictionary
+        Dim aftDict As Object
         Set aftDict = afterPatterns(lvl)
         If aftDict.Exists(aftPat) Then
             aftDict(aftPat) = aftDict(aftPat) + 1
@@ -138,11 +141,11 @@ Public Function Check_ParagraphBreakConsistency(doc As Document) As Collection
             aftDict.Add aftPat, 1
         End If
 
-        ' ── Track before-spacing counts ────────────────────
+        ' -- Track before-spacing counts --------------------
         If Not beforePatterns.Exists(lvl) Then
-            beforePatterns.Add lvl, New Scripting.Dictionary
+            beforePatterns.Add lvl, CreateObject("Scripting.Dictionary")
         End If
-        Dim befDict As Scripting.Dictionary
+        Dim befDict As Object
         Set befDict = beforePatterns(lvl)
         If befDict.Exists(befPat) Then
             befDict(befPat) = befDict(befPat) + 1
@@ -150,7 +153,7 @@ Public Function Check_ParagraphBreakConsistency(doc As Document) As Collection
             befDict.Add befPat, 1
         End If
 
-        ' ── Store heading info ─────────────────────────────
+        ' -- Store heading info -----------------------------
         If Not headingInfos.Exists(lvl) Then
             headingInfos.Add lvl, New Collection
         End If
@@ -165,7 +168,7 @@ Public Function Check_ParagraphBreakConsistency(doc As Document) As Collection
 NextPara:
     Next para
 
-    ' ── Determine dominant patterns and flag deviations ─────
+    ' -- Determine dominant patterns and flag deviations -----
     Dim lvlKey As Variant
     For Each lvlKey In headingInfos.keys
         Dim hdgs As Collection
@@ -217,35 +220,25 @@ NextPara:
 
             ' Check after-spacing deviation
             If hAft <> domAfter And Len(domAfter) > 0 Then
-                Dim issueA As New PleadingsIssue
+                Dim issueA As Object
                 Dim rngA As Range
                 Set rngA = doc.Range(CLng(hInfo(3)), CLng(hInfo(4)))
                 Dim locA As String
-                locA = PleadingsEngine.GetLocationString(rngA, doc)
+                locA = EngineGetLocationString(rngA, doc)
 
-                issueA.Init RULE_NAME_PARAGRAPH_BREAK, locA, _
-                    "After-heading spacing inconsistency at '" & hText & _
-                    "': uses " & hAft & " but dominant pattern for level " & _
-                    CLng(lvlKey) & " headings is " & domAfter, _
-                    "Change spacing after this heading to match: " & domAfter, _
-                    CLng(hInfo(3)), CLng(hInfo(4)), "possible_error"
+                Set issueA = CreateIssueDict(RULE_NAME_PARAGRAPH_BREAK, locA, "After-heading spacing inconsistency at)
                 issues.Add issueA
             End If
 
             ' Check before-spacing deviation
             If hBef <> domBefore And Len(domBefore) > 0 Then
-                Dim issueB As New PleadingsIssue
+                Dim issueB As Object
                 Dim rngB As Range
                 Set rngB = doc.Range(CLng(hInfo(3)), CLng(hInfo(4)))
                 Dim locB As String
-                locB = PleadingsEngine.GetLocationString(rngB, doc)
+                locB = EngineGetLocationString(rngB, doc)
 
-                issueB.Init RULE_NAME_PARAGRAPH_BREAK, locB, _
-                    "Before-heading spacing inconsistency at '" & hText & _
-                    "': uses " & hBef & " but dominant pattern for level " & _
-                    CLng(lvlKey) & " headings is " & domBefore, _
-                    "Change spacing before this heading to match: " & domBefore, _
-                    CLng(hInfo(3)), CLng(hInfo(4)), "possible_error"
+                Set issueB = CreateIssueDict(RULE_NAME_PARAGRAPH_BREAK, locB, "Before-heading spacing inconsistency at)
                 issues.Add issueB
             End If
         Next h
@@ -256,31 +249,37 @@ NextLevel:
     Set Check_ParagraphBreakConsistency = issues
 End Function
 
-' ════════════════════════════════════════════════════════════
+' ============================================================
 '  RULE 11: FONT CONSISTENCY
-' ════════════════════════════════════════════════════════════
+' ============================================================
 Public Function Check_FontConsistency(doc As Document) As Collection
     Dim issues As New Collection
 
     On Error Resume Next
 
-    ' ══════════════════════════════════════════════════════════
+    ' ==========================================================
     '  PASS 1: Build font profiles per context
-    ' ══════════════════════════════════════════════════════════
-    Dim headingFonts As New Scripting.Dictionary  ' FontKey -> count
-    Dim bodyFonts As New Scripting.Dictionary     ' FontKey -> count
-    Dim footnoteFonts As New Scripting.Dictionary ' FontKey -> count
+    ' ==========================================================
+    Dim headingFonts As Object  ' FontKey -> count
+    Dim headingFonts As Object
+    Set headingFonts = CreateObject("Scripting.Dictionary")
+    Dim bodyFonts As Object     ' FontKey -> count
+    Dim bodyFonts As Object
+    Set bodyFonts = CreateObject("Scripting.Dictionary")
+    Dim footnoteFonts As Object ' FontKey -> count
+    Dim footnoteFonts As Object
+    Set footnoteFonts = CreateObject("Scripting.Dictionary")
 
     Dim para As Paragraph
     Dim paraIdx As Long
     Dim fk As String
 
-    ' ── Headings and body text ─────────────────────────────
+    ' -- Headings and body text -----------------------------
     paraIdx = 0
     For Each para In doc.Paragraphs
         paraIdx = paraIdx + 1
 
-        If Not PleadingsEngine.IsInPageRange(para.Range) Then GoTo NextParaFont1
+        If Not EngineIsInPageRange(para.Range) Then GoTo NextParaFont1
 
         Dim lvl As Long
         lvl = para.OutlineLevel
@@ -319,10 +318,10 @@ Public Function Check_FontConsistency(doc As Document) As Collection
 NextParaFont1:
     Next para
 
-    ' ── Footnotes ──────────────────────────────────────────
+    ' -- Footnotes ------------------------------------------
     Dim fn As Footnote
     For Each fn In doc.Footnotes
-        If Not PleadingsEngine.IsInPageRange(fn.Range) Then GoTo NextFootnote
+        If Not EngineIsInPageRange(fn.Range) Then GoTo NextFootnote
 
         Dim fnFontName As String
         Dim fnFontSize As Single
@@ -340,9 +339,9 @@ NextParaFont1:
 NextFootnote:
     Next fn
 
-    ' ══════════════════════════════════════════════════════════
+    ' ==========================================================
     '  PASS 2: Determine dominant fonts per context
-    ' ══════════════════════════════════════════════════════════
+    ' ==========================================================
     Dim domHeading As String
     Dim domBody As String
     Dim domFootnote As String
@@ -351,14 +350,14 @@ NextFootnote:
     domBody = GetDominant(bodyFonts)
     domFootnote = GetDominant(footnoteFonts)
 
-    ' ══════════════════════════════════════════════════════════
+    ' ==========================================================
     '  PASS 3: Flag deviations at paragraph and run level
-    ' ══════════════════════════════════════════════════════════
+    ' ==========================================================
     paraIdx = 0
     For Each para In doc.Paragraphs
         paraIdx = paraIdx + 1
 
-        If Not PleadingsEngine.IsInPageRange(para.Range) Then GoTo NextParaFont2
+        If Not EngineIsInPageRange(para.Range) Then GoTo NextParaFont2
 
         lvl = para.OutlineLevel
         isHeading = (lvl >= wdOutlineLevel1 And lvl <= wdOutlineLevel9)
@@ -376,33 +375,28 @@ NextFootnote:
             GoTo NextParaFont2
         End If
 
-        ' ── Check at paragraph level ───────────────────────
+        ' -- Check at paragraph level -----------------------
         paraFontName = para.Range.Font.Name
         paraFontSize = para.Range.Font.Size
 
         If Len(paraFontName) > 0 And paraFontSize > 0 Then
             fk = FontKey(paraFontName, paraFontSize)
             If fk <> expectedFont Then
-                Dim issuePara As New PleadingsIssue
+                Dim issuePara As Object
                 Dim locP As String
-                locP = PleadingsEngine.GetLocationString(para.Range, doc)
+                locP = EngineGetLocationString(para.Range, doc)
 
                 Dim cleanParaText As String
                 cleanParaText = Trim$(Replace(Left$(para.Range.Text, 60), vbCr, ""))
 
-                issuePara.Init RULE_NAME_FONT, locP, _
-                    "Font inconsistency in " & context & ": '" & cleanParaText & _
-                    "...' uses " & FontDescription(fk) & " but dominant " & _
-                    context & " font is " & FontDescription(expectedFont), _
-                    "Change to " & FontDescription(expectedFont), _
-                    para.Range.Start, para.Range.End, "error"
+                Set issuePara = CreateIssueDict(RULE_NAME_FONT, locP, "Font inconsistency in " & context & ":)
                 issues.Add issuePara
                 ' Skip run-level check if paragraph-level already flagged
                 GoTo NextParaFont2
             End If
         End If
 
-        ' ── Check at run level for mid-paragraph changes ───
+        ' -- Check at run level for mid-paragraph changes ---
         Dim run As Range
         Dim runIdx As Long
         runIdx = 0
@@ -436,7 +430,7 @@ NextFootnote:
                 If runRange.Font.Name <> currentFontName Or _
                    runRange.Font.Size <> currentFontSize Then
 
-                    ' End of a run — check the previous run
+                    ' End of a run -- check the previous run
                     runEnd = charPos
 
                     ' Skip whitespace-only runs
@@ -452,19 +446,14 @@ NextFootnote:
                         If Not isField Then
                             fk = FontKey(currentFontName, currentFontSize)
                             If fk <> expectedFont And Len(currentFontName) > 0 And currentFontSize > 0 Then
-                                Dim issueRun As New PleadingsIssue
+                                Dim issueRun As Object
                                 Dim locR As String
-                                locR = PleadingsEngine.GetLocationString(runRange, doc)
+                                locR = EngineGetLocationString(runRange, doc)
 
                                 Dim cleanRunText As String
                                 cleanRunText = Trim$(Replace(Left$(runText, 40), vbCr, ""))
 
-                                issueRun.Init RULE_NAME_FONT, locR, _
-                                    "Mid-paragraph font change in " & context & _
-                                    ": '" & cleanRunText & "' uses " & FontDescription(fk) & _
-                                    " instead of " & FontDescription(expectedFont), _
-                                    "Change to " & FontDescription(expectedFont), _
-                                    runStart, runEnd, "error"
+                                Set issueRun = CreateIssueDict(RULE_NAME_FONT, locR, "Mid-paragraph font change in " & context & ":)
                                 issues.Add issueRun
                                 ' Only flag once per paragraph for run-level
                                 GoTo NextParaFont2
@@ -484,12 +473,12 @@ NextFootnote:
 NextParaFont2:
     Next para
 
-    ' ══════════════════════════════════════════════════════════
+    ' ==========================================================
     '  PASS 4: Check footnote font deviations
-    ' ══════════════════════════════════════════════════════════
+    ' ==========================================================
     If Len(domFootnote) > 0 Then
         For Each fn In doc.Footnotes
-            If Not PleadingsEngine.IsInPageRange(fn.Range) Then GoTo NextFN2
+            If Not EngineIsInPageRange(fn.Range) Then GoTo NextFN2
 
             fnFontName = fn.Range.Font.Name
             fnFontSize = fn.Range.Font.Size
@@ -497,19 +486,14 @@ NextParaFont2:
             If Len(fnFontName) > 0 And fnFontSize > 0 Then
                 fk = FontKey(fnFontName, fnFontSize)
                 If fk <> domFootnote Then
-                    Dim issueFN As New PleadingsIssue
+                    Dim issueFN As Object
                     Dim locFN As String
-                    locFN = PleadingsEngine.GetLocationString(fn.Range, doc)
+                    locFN = EngineGetLocationString(fn.Range, doc)
 
                     Dim cleanFNText As String
                     cleanFNText = Trim$(Replace(Left$(fn.Range.Text, 50), vbCr, ""))
 
-                    issueFN.Init RULE_NAME_FONT, locFN, _
-                        "Footnote font inconsistency: '" & cleanFNText & _
-                        "...' uses " & FontDescription(fk) & " but dominant " & _
-                        "footnote font is " & FontDescription(domFootnote), _
-                        "Change to " & FontDescription(domFootnote), _
-                        fn.Range.Start, fn.Range.End, "error"
+                    Set issueFN = CreateIssueDict(RULE_NAME_FONT, locFN, "Footnote font inconsistency:)
                     issues.Add issueFN
                 End If
             End If
@@ -519,4 +503,70 @@ NextFN2:
 
     On Error GoTo 0
     Set Check_FontConsistency = issues
+End Function
+
+' ----------------------------------------------------------------
+'  PRIVATE: Late-bound wrapper for EngineIsInPageRange
+' ----------------------------------------------------------------
+
+' ----------------------------------------------------------------
+'  PRIVATE: Late-bound wrapper for EngineGetLocationString
+' ----------------------------------------------------------------
+
+' ----------------------------------------------------------------
+'  PRIVATE: Create a dictionary-based issue (no class dependency)
+' ----------------------------------------------------------------
+Private Function CreateIssueDict(ByVal ruleName_ As String, _
+                                 ByVal location_ As String, _
+                                 ByVal issue_ As String, _
+                                 ByVal suggestion_ As String, _
+                                 ByVal rangeStart_ As Long, _
+                                 ByVal rangeEnd_ As Long, _
+                                 Optional ByVal severity_ As String = "error", _
+                                 Optional ByVal autoFixSafe_ As Boolean = False) As Object
+    Dim d As Object
+    Set d = CreateObject("Scripting.Dictionary")
+    d("RuleName") = ruleName_
+    d("Location") = location_
+    d("Issue") = issue_
+    d("Suggestion") = suggestion_
+    d("RangeStart") = rangeStart_
+    d("RangeEnd") = rangeEnd_
+    d("Severity") = severity_
+    d("AutoFixSafe") = autoFixSafe_
+    Set CreateIssueDict = d
+End Function
+
+' ----------------------------------------------------------------
+'  Late-bound wrapper: EngineIsInPageRange
+' ----------------------------------------------------------------
+
+' ----------------------------------------------------------------
+'  Late-bound wrapper: EngineGetLocationString
+' ----------------------------------------------------------------
+
+' ----------------------------------------------------------------
+'  Late-bound wrapper: PleadingsEngine.IsInPageRange
+' ----------------------------------------------------------------
+Private Function EngineIsInPageRange(rng As Object) As Boolean
+    On Error Resume Next
+    EngineIsInPageRange = Application.Run("PleadingsEngine.IsInPageRange", rng)
+    If Err.Number <> 0 Then
+        EngineIsInPageRange = True
+        Err.Clear
+    End If
+    On Error GoTo 0
+End Function
+
+' ----------------------------------------------------------------
+'  Late-bound wrapper: PleadingsEngine.GetLocationString
+' ----------------------------------------------------------------
+Private Function EngineGetLocationString(rng As Object, doc As Document) As String
+    On Error Resume Next
+    EngineGetLocationString = Application.Run("PleadingsEngine.GetLocationString", rng, doc)
+    If Err.Number <> 0 Then
+        EngineGetLocationString = "unknown location"
+        Err.Clear
+    End If
+    On Error GoTo 0
 End Function

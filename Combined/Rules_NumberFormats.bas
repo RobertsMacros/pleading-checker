@@ -12,24 +12,22 @@ Attribute VB_Name = "Rules_NumberFormats"
 '   Check_CurrencyNumberFormat  (Rule19)
 '
 ' Dependencies:
-'   - PleadingsIssue.cls
 '   - PleadingsEngine.bas (IsInPageRange, GetLocationString, SetPageRange)
-'   - Microsoft Scripting Runtime (Scripting.Dictionary)
 ' ============================================================
 Option Explicit
 
-' ── Rule name constants ───────────────────────────────────────
+' -- Rule name constants ---------------------------------------
 Private Const RULE_NAME_DATE_TIME As String = "date_time_format"
 Private Const RULE_NAME_PAGE_RANGE As String = "page_range"
 Private Const RULE_NAME_CURRENCY As String = "currency_number_format"
 
-' ── Currency format category constants (Rule19) ───────────────
+' -- Currency format category constants (Rule19) ---------------
 Private Const FMT_WORDS As String = "words"
 Private Const FMT_ABBREVIATED As String = "abbreviated"
 Private Const FMT_FULL_NUMERIC As String = "full_numeric"
 Private Const FMT_ISO_PREFIX As String = "iso_prefix"
 
-' ── Module-level page range state (Rule18) ────────────────────
+' -- Module-level page range state (Rule18) --------------------
 Private mStartPage As Long   ' 0 = no restriction
 Private mEndPage   As Long   ' 0 = no restriction
 
@@ -37,7 +35,7 @@ Private mEndPage   As Long   ' 0 = no restriction
 '  PRIVATE HELPERS  -  Rule09 (Date/Time)
 ' ============================================================
 
-' ── Helper: validate a month name ─────────────────────────────
+' -- Helper: validate a month name -----------------------------
 Private Function IsValidMonth(ByVal monthName As String) As Boolean
     Dim months As Variant
     months = Array("January", "February", "March", "April", "May", "June", _
@@ -52,7 +50,7 @@ Private Function IsValidMonth(ByVal monthName As String) As Boolean
     IsValidMonth = False
 End Function
 
-' ── Helper: search and collect date/time occurrences ──────────
+' -- Helper: search and collect date/time occurrences ----------
 Private Sub FindWithWildcard(doc As Document, ByVal pattern As String, _
                               results As Collection, ByVal formatType As String)
     Dim rng As Range
@@ -68,7 +66,7 @@ Private Sub FindWithWildcard(doc As Document, ByVal pattern As String, _
     End With
 
     Do While rng.Find.Execute
-        If PleadingsEngine.IsInPageRange(rng) Then
+        If EngineIsInPageRange(rng) Then
             Dim info(0 To 3) As Variant
             info(0) = formatType
             info(1) = rng.Text
@@ -84,7 +82,7 @@ End Sub
 '  PRIVATE HELPERS  -  Rule19 (Currency/Number)
 ' ============================================================
 
-' ── Check format consistency for a single symbol ──────────────
+' -- Check format consistency for a single symbol --------------
 '  Searches for words, abbreviated, and full_numeric formats,
 '  determines the dominant format, and flags minorities.
 Private Sub CheckSymbolConsistency(doc As Document, _
@@ -102,8 +100,8 @@ Private Sub CheckSymbolConsistency(doc As Document, _
     Set abbrRanges = New Collection
     Set numericRanges = New Collection
 
-    ' ── Search for "words" format: symbol + digits + space + word ──
-    ' Pattern: e.g. £[0-9.]@ [a-z]@  (wildcard)
+    ' -- Search for "words" format: symbol + digits + space + word --
+    ' Pattern: e.g. ?[0-9.]@ [a-z]@  (wildcard)
     Dim rng As Range
     Dim wordPattern As String
     wordPattern = sym & "[0-9.]@" & " [a-z]@"
@@ -136,7 +134,7 @@ Private Sub CheckSymbolConsistency(doc As Document, _
         Dim matchText As String
         matchText = LCase(rng.Text)
         If IsMagnitudeWord(matchText) Then
-            If PleadingsEngine.IsInPageRange(rng) Then
+            If EngineIsInPageRange(rng) Then
                 wordsCount = wordsCount + 1
                 wordsRanges.Add doc.Range(rng.Start, rng.End)
             End If
@@ -148,7 +146,7 @@ Private Sub CheckSymbolConsistency(doc As Document, _
         On Error GoTo 0
     Loop
 
-    ' ── Search for "abbreviated" format: symbol + digits + m/bn/k ──
+    ' -- Search for "abbreviated" format: symbol + digits + m/bn/k --
     Dim abbrPattern As String
     abbrPattern = sym & "[0-9.]@[mbk]"
 
@@ -171,7 +169,7 @@ Private Sub CheckSymbolConsistency(doc As Document, _
 
         If Not found Then Exit Do
 
-        If PleadingsEngine.IsInPageRange(rng) Then
+        If EngineIsInPageRange(rng) Then
             abbrCount = abbrCount + 1
             abbrRanges.Add doc.Range(rng.Start, rng.End)
         End If
@@ -182,7 +180,7 @@ Private Sub CheckSymbolConsistency(doc As Document, _
         On Error GoTo 0
     Loop
 
-    ' ── Search for "full_numeric" format: symbol + digits with commas ──
+    ' -- Search for "full_numeric" format: symbol + digits with commas --
     Dim numPattern As String
     numPattern = sym & "[0-9,.]@"
 
@@ -209,7 +207,7 @@ Private Sub CheckSymbolConsistency(doc As Document, _
         Dim numText As String
         numText = rng.Text
         If InStr(numText, ",") > 0 And Len(numText) >= 5 Then
-            If PleadingsEngine.IsInPageRange(rng) Then
+            If EngineIsInPageRange(rng) Then
                 numericCount = numericCount + 1
                 numericRanges.Add doc.Range(rng.Start, rng.End)
             End If
@@ -221,7 +219,7 @@ Private Sub CheckSymbolConsistency(doc As Document, _
         On Error GoTo 0
     Loop
 
-    ' ── Determine dominant format and flag minorities ──────────
+    ' -- Determine dominant format and flag minorities ----------
     Dim totalFormats As Long
     totalFormats = 0
     If wordsCount > 0 Then totalFormats = totalFormats + 1
@@ -254,14 +252,14 @@ Private Sub CheckSymbolConsistency(doc As Document, _
     End If
 End Sub
 
-' ── Check ISO code prefixed amounts ───────────────────────────
+' -- Check ISO code prefixed amounts ---------------------------
 '  Searches for patterns like "GBP 1,500" or "USD 25.00"
 Private Sub CheckISOCodeFormat(doc As Document, _
                                 isoCode As String, _
                                 ByRef issues As Collection)
     Dim rng As Range
     Dim isoPattern As String
-    Dim issue As PleadingsIssue
+    Dim issue As Object
     Dim locStr As String
 
     ' Search for ISO code followed by space and number
@@ -290,24 +288,17 @@ Private Sub CheckISOCodeFormat(doc As Document, _
 
         If Not found Then Exit Do
 
-        If PleadingsEngine.IsInPageRange(rng) Then
+        If EngineIsInPageRange(rng) Then
             isoCount = isoCount + 1
 
             ' Flag ISO prefix usage as informational (possible_error)
             ' since mixing ISO codes with symbol notation is inconsistent
             On Error Resume Next
-            locStr = PleadingsEngine.GetLocationString(rng, doc)
+            locStr = EngineGetLocationString(rng, doc)
             If Err.Number <> 0 Then locStr = "unknown location": Err.Clear
             On Error GoTo 0
 
-            Set issue = New PleadingsIssue
-            issue.Init RULE_NAME_CURRENCY, _
-                       locStr, _
-                       "ISO code format used: '" & rng.Text & "'", _
-                       "Consider using symbol notation for consistency", _
-                       rng.Start, _
-                       rng.End, _
-                       "possible_error"
+            Set issue = CreateIssueDict(RULE_NAME_CURRENCY, locStr, "ISO code format used:)
             issues.Add issue
         End If
 
@@ -318,7 +309,7 @@ Private Sub CheckISOCodeFormat(doc As Document, _
     Loop
 End Sub
 
-' ── Flag all ranges in a minority format collection ───────────
+' -- Flag all ranges in a minority format collection -----------
 Private Sub FlagMinorityRanges(doc As Document, _
                                 ranges As Collection, _
                                 symLabel As String, _
@@ -327,30 +318,23 @@ Private Sub FlagMinorityRanges(doc As Document, _
                                 ByRef issues As Collection)
     Dim i As Long
     Dim rng As Range
-    Dim issue As PleadingsIssue
+    Dim issue As Object
     Dim locStr As String
 
     For i = 1 To ranges.Count
         Set rng = ranges(i)
 
         On Error Resume Next
-        locStr = PleadingsEngine.GetLocationString(rng, doc)
+        locStr = EngineGetLocationString(rng, doc)
         If Err.Number <> 0 Then locStr = "unknown location": Err.Clear
         On Error GoTo 0
 
-        Set issue = New PleadingsIssue
-        issue.Init RULE_NAME_CURRENCY, _
-                   locStr, _
-                   symLabel & " amount uses '" & minorityFmt & "' format: '" & rng.Text & "'", _
-                   "Use '" & dominantFmt & "' format for consistency (dominant style)", _
-                   rng.Start, _
-                   rng.End, _
-                   "error"
+        Set issue = CreateIssueDict(RULE_NAME_CURRENCY, locStr, symLabel & " amount uses)
         issues.Add issue
     Next i
 End Sub
 
-' ── Check if matched text contains a magnitude word ───────────
+' -- Check if matched text contains a magnitude word -----------
 Private Function IsMagnitudeWord(ByVal txt As String) As Boolean
     Dim lTxt As String
     lTxt = LCase(txt)
@@ -366,28 +350,29 @@ End Function
 '  PUBLIC FUNCTIONS
 ' ============================================================
 
-' ════════════════════════════════════════════════════════════════
+' ================================================================
 '  Rule09: Check_DateTimeFormat
 '  Detects date and time format inconsistencies across the
 '  document. Identifies UK, US, and numeric date formats,
 '  determines the dominant style, and flags deviations.
 '  Also checks for mixed 12-hour / 24-hour time formats.
-' ════════════════════════════════════════════════════════════════
+' ================================================================
 Public Function Check_DateTimeFormat(doc As Document) As Collection
     Dim issues As New Collection
 
     On Error Resume Next
 
-    ' ══════════════════════════════════════════════════════════
+    ' ==========================================================
     '  PASS 1: Find all date occurrences
-    ' ══════════════════════════════════════════════════════════
+    ' ==========================================================
     Dim dateFinds As New Collection
-    Dim dateCounts As New Scripting.Dictionary
+    Dim dateCounts As Object
+    Set dateCounts = CreateObject("Scripting.Dictionary")
     dateCounts.Add "UK", 0
     dateCounts.Add "US", 0
     dateCounts.Add "numeric", 0
 
-    ' ── UK format: "1 January 2024" or "12 March 2025" ──────
+    ' -- UK format: "1 January 2024" or "12 March 2025" ------
     ' VBA wildcard: one or two digits, space, word, space, four digits
     Dim ukResults As New Collection
     FindWithWildcard doc, "[0-9]{1,2} [A-Z][a-z]{2,} [0-9]{4}", ukResults, "UK"
@@ -412,7 +397,7 @@ Public Function Check_DateTimeFormat(doc As Document) As Collection
         End If
     Next i
 
-    ' ── US format: "January 1, 2024" or "March 12, 2025" ────
+    ' -- US format: "January 1, 2024" or "March 12, 2025" ----
     Dim usResults As New Collection
     FindWithWildcard doc, "[A-Z][a-z]{2,} [0-9]{1,2}, [0-9]{4}", usResults, "US"
 
@@ -431,7 +416,7 @@ Public Function Check_DateTimeFormat(doc As Document) As Collection
         End If
     Next i
 
-    ' ── Numeric format: "01/02/2024" or "1/2/24" ─────────────
+    ' -- Numeric format: "01/02/2024" or "1/2/24" -------------
     Dim numResults As New Collection
     FindWithWildcard doc, "[0-9]{1,2}/[0-9]{1,2}/[0-9]{2,4}", numResults, "numeric"
 
@@ -440,7 +425,7 @@ Public Function Check_DateTimeFormat(doc As Document) As Collection
         dateCounts("numeric") = dateCounts("numeric") + 1
     Next i
 
-    ' ── Determine dominant date format ────────────────────────
+    ' -- Determine dominant date format ------------------------
     Dim dominantDate As String
     Dim maxDateCount As Long
     dominantDate = ""
@@ -453,7 +438,7 @@ Public Function Check_DateTimeFormat(doc As Document) As Collection
         End If
     Next dk
 
-    ' ── Flag non-dominant date formats ────────────────────────
+    ' -- Flag non-dominant date formats ------------------------
     If maxDateCount > 0 Then
         Dim totalDateFormats As Long
         totalDateFormats = 0
@@ -470,11 +455,11 @@ Public Function Check_DateTimeFormat(doc As Document) As Collection
                 dType = CStr(dInfo(0))
 
                 If dType <> dominantDate Then
-                    Dim issueD As New PleadingsIssue
+                    Dim issueD As Object
                     Dim rngD As Range
                     Set rngD = doc.Range(CLng(dInfo(2)), CLng(dInfo(3)))
                     Dim locD As String
-                    locD = PleadingsEngine.GetLocationString(rngD, doc)
+                    locD = EngineGetLocationString(rngD, doc)
 
                     Dim suggestion As String
                     Select Case dominantDate
@@ -486,25 +471,23 @@ Public Function Check_DateTimeFormat(doc As Document) As Collection
                             suggestion = "Reformat to numeric style (e.g., '01/01/2024')"
                     End Select
 
-                    issueD.Init RULE_NAME_DATE_TIME, locD, _
-                        "Inconsistent date format: '" & CStr(dInfo(1)) & _
-                        "' uses " & dType & " format but dominant is " & dominantDate, _
-                        suggestion, CLng(dInfo(2)), CLng(dInfo(3)), "error"
+                    Set issueD = CreateIssueDict(RULE_NAME_DATE_TIME, locD, "Inconsistent date format:)
                     issues.Add issueD
                 End If
             Next i
         End If
     End If
 
-    ' ══════════════════════════════════════════════════════════
+    ' ==========================================================
     '  PASS 2: Find time format inconsistencies
-    ' ══════════════════════════════════════════════════════════
+    ' ==========================================================
     Dim timeFinds As New Collection
-    Dim timeCounts As New Scripting.Dictionary
+    Dim timeCounts As Object
+    Set timeCounts = CreateObject("Scripting.Dictionary")
     timeCounts.Add "12hr", 0
     timeCounts.Add "24hr", 0
 
-    ' ── 12-hour format: "2:30 PM", "11:00 am" ────────────────
+    ' -- 12-hour format: "2:30 PM", "11:00 am" ----------------
     Dim time12Results As New Collection
     FindWithWildcard doc, "[0-9]{1,2}:[0-9]{2} [AaPp][Mm]", time12Results, "12hr"
 
@@ -513,7 +496,7 @@ Public Function Check_DateTimeFormat(doc As Document) As Collection
         timeCounts("12hr") = timeCounts("12hr") + 1
     Next i
 
-    ' ── 24-hour format: "14:30", "23:00" (hour >= 13) ────────
+    ' -- 24-hour format: "14:30", "23:00" (hour >= 13) --------
     Dim time24Results As New Collection
     FindWithWildcard doc, "[0-9]{2}:[0-9]{2}", time24Results, "24hr"
 
@@ -539,7 +522,7 @@ Public Function Check_DateTimeFormat(doc As Document) As Collection
         End If
     Next i
 
-    ' ── Determine dominant time format and flag deviations ────
+    ' -- Determine dominant time format and flag deviations ----
     Dim dominantTime As String
     Dim maxTimeCount As Long
     dominantTime = ""
@@ -566,11 +549,11 @@ Public Function Check_DateTimeFormat(doc As Document) As Collection
                 tType = CStr(tInfo(0))
 
                 If tType <> dominantTime Then
-                    Dim issueT As New PleadingsIssue
+                    Dim issueT As Object
                     Dim rngT As Range
                     Set rngT = doc.Range(CLng(tInfo(2)), CLng(tInfo(3)))
                     Dim locT As String
-                    locT = PleadingsEngine.GetLocationString(rngT, doc)
+                    locT = EngineGetLocationString(rngT, doc)
 
                     Dim timeSugg As String
                     If dominantTime = "12hr" Then
@@ -579,10 +562,7 @@ Public Function Check_DateTimeFormat(doc As Document) As Collection
                         timeSugg = "Use 24-hour format (e.g., '14:30') for consistency"
                     End If
 
-                    issueT.Init RULE_NAME_DATE_TIME, locT, _
-                        "Inconsistent time format: '" & CStr(tInfo(1)) & _
-                        "' uses " & tType & " format but dominant is " & dominantTime, _
-                        timeSugg, CLng(tInfo(2)), CLng(tInfo(3)), "error"
+                    Set issueT = CreateIssueDict(RULE_NAME_DATE_TIME, locT, "Inconsistent time format:)
                     issues.Add issueT
                 End If
             Next i
@@ -593,42 +573,42 @@ Public Function Check_DateTimeFormat(doc As Document) As Collection
     Set Check_DateTimeFormat = issues
 End Function
 
-' ════════════════════════════════════════════════════════════════
+' ================================================================
 '  Rule18: SetRange
 '  Called by the form to configure the page window before
 '  rules are executed. Pass 0, 0 to clear the restriction.
-' ════════════════════════════════════════════════════════════════
+' ================================================================
 Public Sub SetRange(s As Long, e As Long)
     mStartPage = s
     mEndPage = e
 End Sub
 
-' ════════════════════════════════════════════════════════════════
+' ================================================================
 '  Rule18: Check_PageRange
 '  Pushes the configured page range into PleadingsEngine
 '  so that IsInPageRange() respects the restriction.
 '  Returns an empty Collection (this rule produces no issues).
-' ════════════════════════════════════════════════════════════════
+' ================================================================
 Public Function Check_PageRange(doc As Document) As Collection
     Dim issues As New Collection
 
     On Error Resume Next
 
     ' Push the stored page range into the engine
-    PleadingsEngine.SetPageRange mStartPage, mEndPage
+    EngineSetPageRange mStartPage, mEndPage
 
     On Error GoTo 0
 
     Set Check_PageRange = issues
 End Function
 
-' ════════════════════════════════════════════════════════════════
+' ================================================================
 '  Rule19: Check_CurrencyNumberFormat
 '  Detects inconsistent currency/number formatting across
 '  the document. Checks symbol-prefixed amounts (GBP, USD, EUR)
 '  and ISO-code-prefixed amounts, then flags minority format
 '  usage.
-' ════════════════════════════════════════════════════════════════
+' ================================================================
 Public Function Check_CurrencyNumberFormat(doc As Document) As Collection
     Dim issues As New Collection
     Dim symbols As Variant
@@ -639,12 +619,12 @@ Public Function Check_CurrencyNumberFormat(doc As Document) As Collection
     symbols = Array(ChrW(163), "$", ChrW(8364))   ' GBP, USD, EUR
     symLabels = Array("GBP", "USD", "EUR")
 
-    ' ── Check each symbol for format consistency ──────────────
+    ' -- Check each symbol for format consistency --------------
     For i = LBound(symbols) To UBound(symbols)
         CheckSymbolConsistency doc, CStr(symbols(i)), CStr(symLabels(i)), issues
     Next i
 
-    ' ── Check ISO code prefixed amounts ───────────────────────
+    ' -- Check ISO code prefixed amounts -----------------------
     Dim isoCodes As Variant
     isoCodes = Array("GBP", "USD", "EUR", "JPY", "AUD", "CAD", "CHF", _
                      "BTC", "ETH", "USDT", "USDC", "BNB", "XRP", "SOL", "ADA", "DOGE")
@@ -655,3 +635,87 @@ Public Function Check_CurrencyNumberFormat(doc As Document) As Collection
 
     Set Check_CurrencyNumberFormat = issues
 End Function
+
+' ----------------------------------------------------------------
+'  PRIVATE: Late-bound wrapper for EngineIsInPageRange
+' ----------------------------------------------------------------
+
+' ----------------------------------------------------------------
+'  PRIVATE: Late-bound wrapper for EngineGetLocationString
+' ----------------------------------------------------------------
+
+' ----------------------------------------------------------------
+'  PRIVATE: Late-bound wrapper for PleadingsEngine.SetPageRange
+' ----------------------------------------------------------------
+
+' ----------------------------------------------------------------
+'  PRIVATE: Create a dictionary-based issue (no class dependency)
+' ----------------------------------------------------------------
+Private Function CreateIssueDict(ByVal ruleName_ As String, _
+                                 ByVal location_ As String, _
+                                 ByVal issue_ As String, _
+                                 ByVal suggestion_ As String, _
+                                 ByVal rangeStart_ As Long, _
+                                 ByVal rangeEnd_ As Long, _
+                                 Optional ByVal severity_ As String = "error", _
+                                 Optional ByVal autoFixSafe_ As Boolean = False) As Object
+    Dim d As Object
+    Set d = CreateObject("Scripting.Dictionary")
+    d("RuleName") = ruleName_
+    d("Location") = location_
+    d("Issue") = issue_
+    d("Suggestion") = suggestion_
+    d("RangeStart") = rangeStart_
+    d("RangeEnd") = rangeEnd_
+    d("Severity") = severity_
+    d("AutoFixSafe") = autoFixSafe_
+    Set CreateIssueDict = d
+End Function
+
+' ----------------------------------------------------------------
+'  Late-bound wrapper: EngineIsInPageRange
+' ----------------------------------------------------------------
+
+' ----------------------------------------------------------------
+'  Late-bound wrapper: EngineGetLocationString
+' ----------------------------------------------------------------
+
+' ----------------------------------------------------------------
+'  Late-bound wrapper: PleadingsEngine.SetPageRange
+' ----------------------------------------------------------------
+
+' ----------------------------------------------------------------
+'  Late-bound wrapper: PleadingsEngine.IsInPageRange
+' ----------------------------------------------------------------
+Private Function EngineIsInPageRange(rng As Object) As Boolean
+    On Error Resume Next
+    EngineIsInPageRange = Application.Run("PleadingsEngine.IsInPageRange", rng)
+    If Err.Number <> 0 Then
+        EngineIsInPageRange = True
+        Err.Clear
+    End If
+    On Error GoTo 0
+End Function
+
+' ----------------------------------------------------------------
+'  Late-bound wrapper: PleadingsEngine.GetLocationString
+' ----------------------------------------------------------------
+Private Function EngineGetLocationString(rng As Object, doc As Document) As String
+    On Error Resume Next
+    EngineGetLocationString = Application.Run("PleadingsEngine.GetLocationString", rng, doc)
+    If Err.Number <> 0 Then
+        EngineGetLocationString = "unknown location"
+        Err.Clear
+    End If
+    On Error GoTo 0
+End Function
+
+' ----------------------------------------------------------------
+'  Late-bound wrapper: PleadingsEngine.SetPageRange
+' ----------------------------------------------------------------
+Private Sub EngineSetPageRange(ByVal startPg As Long, ByVal endPg As Long)
+    On Error Resume Next
+    Application.Run "PleadingsEngine.SetPageRange", startPg, endPg
+    If Err.Number <> 0 Then Err.Clear
+    On Error GoTo 0
+End Sub

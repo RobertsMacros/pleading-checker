@@ -11,21 +11,19 @@ Attribute VB_Name = "Rule28_mandated_legal_term_forms"
 ' Additional terms can be added at runtime via AddMandatedTerm.
 '
 ' Dependencies:
-'   - PleadingsIssue.cls
 '   - PleadingsEngine.bas (IsInPageRange, GetLocationString)
-'   - Microsoft Scripting Runtime (Scripting.Dictionary)
 ' ============================================================
 Option Explicit
 
 Private Const RULE_NAME As String = "mandated_legal_term_forms"
 
-' ── Module-level dictionary ───────────────────────────────
+' -- Module-level dictionary -------------------------------
 ' Key = LCase(correct form), Value = correct form (String)
-Private mandatedTerms As Scripting.Dictionary
+Private mandatedTerms As Object
 
-' ════════════════════════════════════════════════════════════
+' ============================================================
 '  MAIN ENTRY POINT
-' ════════════════════════════════════════════════════════════
+' ============================================================
 Public Function Check_MandatedLegalTermForms(doc As Document) As Collection
     Dim issues As New Collection
 
@@ -56,16 +54,16 @@ Public Function Check_MandatedLegalTermForms(doc As Document) As Collection
     Set Check_MandatedLegalTermForms = issues
 End Function
 
-' ════════════════════════════════════════════════════════════
+' ============================================================
 '  PRIVATE: Search for an unhyphenated variant and flag matches
-' ════════════════════════════════════════════════════════════
+' ============================================================
 Private Sub SearchAndFlag(doc As Document, _
                            searchPhrase As String, _
                            correctForm As String, _
                            ByRef issues As Collection)
     Dim rng As Range
     Dim found As Boolean
-    Dim issue As PleadingsIssue
+    Dim issue As Object
     Dim locStr As String
 
     Set rng = doc.Content.Duplicate
@@ -93,23 +91,15 @@ Private Sub SearchAndFlag(doc As Document, _
         End If
 
         ' Verify it is not actually the hyphenated form by checking
-        ' the surrounding context — the Find matched with MatchCase=False
+        ' the surrounding context -- the Find matched with MatchCase=False
         ' and spaces, so an exact binary comparison rules out false positives
-        If PleadingsEngine.IsInPageRange(rng) Then
+        If EngineIsInPageRange(rng) Then
             On Error Resume Next
-            locStr = PleadingsEngine.GetLocationString(rng, doc)
+            locStr = EngineGetLocationString(rng, doc)
             If Err.Number <> 0 Then locStr = "unknown location": Err.Clear
             On Error GoTo 0
 
-            Set issue = New PleadingsIssue
-            issue.Init RULE_NAME, _
-                       locStr, _
-                       "Mandatory term is not hyphenated in the approved form.", _
-                       "Use '" & correctForm & "'.", _
-                       rng.Start, _
-                       rng.End, _
-                       "warning", _
-                       False
+            Set issue = CreateIssueDict(RULE_NAME, locStr, "Mandatory term is not hyphenated in the approved form.", "Use '" & correctForm & "'.", rng.Start, rng.End, "warning", False)
             issues.Add issue
         End If
 
@@ -121,21 +111,21 @@ SkipMatch:
     Loop
 End Sub
 
-' ════════════════════════════════════════════════════════════
+' ============================================================
 '  PRIVATE: Populate default mandatory terms
-' ════════════════════════════════════════════════════════════
+' ============================================================
 Private Sub InitDefaultTerms()
-    Set mandatedTerms = New Scripting.Dictionary
+    Set mandatedTerms = CreateObject("Scripting.Dictionary")
 
     mandatedTerms.Add LCase("Solicitor-General"), "Solicitor-General"
     mandatedTerms.Add LCase("Attorney-General"), "Attorney-General"
 End Sub
 
-' ════════════════════════════════════════════════════════════
+' ============================================================
 '  PUBLIC: Add a mandated term at runtime
 '  The term must contain a hyphen (e.g. "Director-General").
 '  If the term already exists it is silently ignored.
-' ════════════════════════════════════════════════════════════
+' ============================================================
 Public Sub AddMandatedTerm(term As String)
     If mandatedTerms Is Nothing Then
         InitDefaultTerms
@@ -148,3 +138,61 @@ Public Sub AddMandatedTerm(term As String)
         mandatedTerms.Add lcKey, term
     End If
 End Sub
+
+' ----------------------------------------------------------------
+'  PRIVATE: Create a dictionary-based issue (no class dependency)
+' ----------------------------------------------------------------
+Private Function CreateIssueDict(ByVal ruleName_ As String, _
+                                 ByVal location_ As String, _
+                                 ByVal issue_ As String, _
+                                 ByVal suggestion_ As String, _
+                                 ByVal rangeStart_ As Long, _
+                                 ByVal rangeEnd_ As Long, _
+                                 Optional ByVal severity_ As String = "error", _
+                                 Optional ByVal autoFixSafe_ As Boolean = False) As Object
+    Dim d As Object
+    Set d = CreateObject("Scripting.Dictionary")
+    d("RuleName") = ruleName_
+    d("Location") = location_
+    d("Issue") = issue_
+    d("Suggestion") = suggestion_
+    d("RangeStart") = rangeStart_
+    d("RangeEnd") = rangeEnd_
+    d("Severity") = severity_
+    d("AutoFixSafe") = autoFixSafe_
+    Set CreateIssueDict = d
+End Function
+
+' ----------------------------------------------------------------
+'  Late-bound wrapper: EngineIsInPageRange
+' ----------------------------------------------------------------
+
+' ----------------------------------------------------------------
+'  Late-bound wrapper: EngineGetLocationString
+' ----------------------------------------------------------------
+
+' ----------------------------------------------------------------
+'  Late-bound wrapper: PleadingsEngine.IsInPageRange
+' ----------------------------------------------------------------
+Private Function EngineIsInPageRange(rng As Object) As Boolean
+    On Error Resume Next
+    EngineIsInPageRange = Application.Run("PleadingsEngine.IsInPageRange", rng)
+    If Err.Number <> 0 Then
+        EngineIsInPageRange = True
+        Err.Clear
+    End If
+    On Error GoTo 0
+End Function
+
+' ----------------------------------------------------------------
+'  Late-bound wrapper: PleadingsEngine.GetLocationString
+' ----------------------------------------------------------------
+Private Function EngineGetLocationString(rng As Object, doc As Document) As String
+    On Error Resume Next
+    EngineGetLocationString = Application.Run("PleadingsEngine.GetLocationString", rng, doc)
+    If Err.Number <> 0 Then
+        EngineGetLocationString = "unknown location"
+        Err.Clear
+    End If
+    On Error GoTo 0
+End Function

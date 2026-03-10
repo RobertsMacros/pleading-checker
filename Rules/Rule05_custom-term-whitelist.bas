@@ -3,22 +3,22 @@ Attribute VB_Name = "Rule05_custom_term_whitelist"
 ' Rule05_custom-term-whitelist.bas
 ' Utility rule that populates the PleadingsEngine whitelist
 ' with standard legal/Latin terms. Does not find issues itself.
-' Other rules can call PleadingsEngine.IsWhitelistedTerm()
+' Other rules can call EngineIsWhitelistedTerm()
 ' to skip flagging these accepted terms.
 ' ============================================================
 Option Explicit
 
 Private Const RULE_NAME As String = "custom_term_whitelist"
 
-' ════════════════════════════════════════════════════════════
+' ============================================================
 '  MAIN RULE FUNCTION
-' ════════════════════════════════════════════════════════════
+' ============================================================
 Public Function Check_CustomTermWhitelist(doc As Document) As Collection
     Dim issues As New Collection
 
     On Error Resume Next
 
-    ' ── Define default whitelist terms ──────────────────────
+    ' -- Define default whitelist terms ----------------------
     Dim terms As Variant
     terms = Array( _
         "co-counsel", _
@@ -44,8 +44,9 @@ Public Function Check_CustomTermWhitelist(doc As Document) As Collection
         "vis-a-vis" _
     )
 
-    ' ── Build the dictionary ───────────────────────────────
-    Dim dict As New Scripting.Dictionary
+    ' -- Build the dictionary -------------------------------
+    Dim dict As Object
+    Set dict = CreateObject("Scripting.Dictionary")
     Dim t As Variant
     For Each t In terms
         Dim lcTerm As String
@@ -55,11 +56,41 @@ Public Function Check_CustomTermWhitelist(doc As Document) As Collection
         End If
     Next t
 
-    ' ── Store in the engine for other rules to query ───────
-    PleadingsEngine.SetWhitelist dict
+    ' -- Store in the engine for other rules to query -------
+    EngineSetWhitelist dict
 
     On Error GoTo 0
 
-    ' This rule returns no issues — it is purely a setup rule
+    ' This rule returns no issues -- it is purely a setup rule
     Set Check_CustomTermWhitelist = issues
 End Function
+
+' ----------------------------------------------------------------
+'  Late-bound wrapper: PleadingsEngine.IsWhitelistedTerm
+' ----------------------------------------------------------------
+
+' ----------------------------------------------------------------
+'  Late-bound wrapper: EngineSetWhitelist ' ----------------------------------------------------------------
+
+' ----------------------------------------------------------------
+'  Late-bound wrapper: PleadingsEngine.IsWhitelistedTerm
+' ----------------------------------------------------------------
+Private Function EngineIsWhitelistedTerm(ByVal term As String) As Boolean
+    On Error Resume Next
+    EngineIsWhitelistedTerm = Application.Run("PleadingsEngine.IsWhitelistedTerm", term)
+    If Err.Number <> 0 Then
+        EngineIsWhitelistedTerm = False
+        Err.Clear
+    End If
+    On Error GoTo 0
+End Function
+
+' ----------------------------------------------------------------
+'  Late-bound wrapper: PleadingsEngine.SetWhitelist
+' ----------------------------------------------------------------
+Private Sub EngineSetWhitelist(dict As Object)
+    On Error Resume Next
+    Application.Run "PleadingsEngine.SetWhitelist", dict
+    If Err.Number <> 0 Then Err.Clear
+    On Error GoTo 0
+End Sub

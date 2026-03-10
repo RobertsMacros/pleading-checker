@@ -16,26 +16,24 @@ Attribute VB_Name = "Rules_LegalTerms"
 '   any occurrence whose capitalisation does not match the
 '   approved form. Matches inside quoted material are skipped.
 '   Context-sensitive terms (Province, State, party names) are
-'   intentionally omitted — the engine does not yet have
+'   intentionally omitted -- the engine does not yet have
 '   reliable context handling.
 '
 ' Dependencies:
-'   - PleadingsIssue.cls
 '   - PleadingsEngine.bas (IsInPageRange, GetLocationString)
-'   - Microsoft Scripting Runtime (Scripting.Dictionary)
 ' ============================================================
 Option Explicit
 
 Private Const RULE28_NAME As String = "mandated_legal_term_forms"
 Private Const RULE29_NAME As String = "always_capitalise_terms"
 
-' ── Module-level dictionary for Rule28 ──────────────────────
+' -- Module-level dictionary for Rule28 ----------------------
 ' Key = LCase(correct form), Value = correct form (String)
-Private mandatedTerms As Scripting.Dictionary
+Private mandatedTerms As Object
 
-' ════════════════════════════════════════════════════════════
-'  RULE 28 — MAIN ENTRY POINT
-' ════════════════════════════════════════════════════════════
+' ============================================================
+'  RULE 28 -- MAIN ENTRY POINT
+' ============================================================
 Public Function Check_MandatedLegalTermForms(doc As Document) As Collection
     Dim issues As New Collection
 
@@ -66,16 +64,16 @@ Public Function Check_MandatedLegalTermForms(doc As Document) As Collection
     Set Check_MandatedLegalTermForms = issues
 End Function
 
-' ════════════════════════════════════════════════════════════
-'  RULE 28 — PRIVATE: Search for an unhyphenated variant and flag matches
-' ════════════════════════════════════════════════════════════
+' ============================================================
+'  RULE 28 -- PRIVATE: Search for an unhyphenated variant and flag matches
+' ============================================================
 Private Sub SearchAndFlag(doc As Document, _
                            searchPhrase As String, _
                            correctForm As String, _
                            ByRef issues As Collection)
     Dim rng As Range
     Dim found As Boolean
-    Dim issue As PleadingsIssue
+    Dim issue As Object
     Dim locStr As String
 
     Set rng = doc.Content.Duplicate
@@ -103,23 +101,15 @@ Private Sub SearchAndFlag(doc As Document, _
         End If
 
         ' Verify it is not actually the hyphenated form by checking
-        ' the surrounding context — the Find matched with MatchCase=False
+        ' the surrounding context -- the Find matched with MatchCase=False
         ' and spaces, so an exact binary comparison rules out false positives
-        If PleadingsEngine.IsInPageRange(rng) Then
+        If EngineIsInPageRange(rng) Then
             On Error Resume Next
-            locStr = PleadingsEngine.GetLocationString(rng, doc)
+            locStr = EngineGetLocationString(rng, doc)
             If Err.Number <> 0 Then locStr = "unknown location": Err.Clear
             On Error GoTo 0
 
-            Set issue = New PleadingsIssue
-            issue.Init RULE28_NAME, _
-                       locStr, _
-                       "Mandatory term is not hyphenated in the approved form.", _
-                       "Use '" & correctForm & "'.", _
-                       rng.Start, _
-                       rng.End, _
-                       "warning", _
-                       False
+            Set issue = CreateIssueDict(RULE28_NAME, locStr, "Mandatory term is not hyphenated in the approved form.", "Use)
             issues.Add issue
         End If
 
@@ -131,21 +121,21 @@ SkipMatch:
     Loop
 End Sub
 
-' ════════════════════════════════════════════════════════════
-'  RULE 28 — PRIVATE: Populate default mandatory terms
-' ════════════════════════════════════════════════════════════
+' ============================================================
+'  RULE 28 -- PRIVATE: Populate default mandatory terms
+' ============================================================
 Private Sub InitDefaultTerms()
-    Set mandatedTerms = New Scripting.Dictionary
+    Set mandatedTerms = CreateObject("Scripting.Dictionary")
 
     mandatedTerms.Add LCase("Solicitor-General"), "Solicitor-General"
     mandatedTerms.Add LCase("Attorney-General"), "Attorney-General"
 End Sub
 
-' ════════════════════════════════════════════════════════════
-'  RULE 28 — PUBLIC: Add a mandated term at runtime
+' ============================================================
+'  RULE 28 -- PUBLIC: Add a mandated term at runtime
 '  The term must contain a hyphen (e.g. "Director-General").
 '  If the term already exists it is silently ignored.
-' ════════════════════════════════════════════════════════════
+' ============================================================
 Public Sub AddMandatedTerm(term As String)
     If mandatedTerms Is Nothing Then
         InitDefaultTerms
@@ -159,13 +149,13 @@ Public Sub AddMandatedTerm(term As String)
     End If
 End Sub
 
-' ════════════════════════════════════════════════════════════
-'  RULE 29 — MAIN ENTRY POINT
-' ════════════════════════════════════════════════════════════
+' ============================================================
+'  RULE 29 -- MAIN ENTRY POINT
+' ============================================================
 Public Function Check_AlwaysCapitaliseTerms(doc As Document) As Collection
     Dim issues As New Collection
 
-    ' ── Seed dictionary of correct forms ───────────────────
+    ' -- Seed dictionary of correct forms -------------------
     Dim terms As Variant
     terms = Array( _
         "Act", _
@@ -193,7 +183,7 @@ Public Function Check_AlwaysCapitaliseTerms(doc As Document) As Collection
         "Vice-Chancellor" _
     )
 
-    ' ── Iterate paragraphs ─────────────────────────────────
+    ' -- Iterate paragraphs ---------------------------------
     Dim para As Paragraph
     Dim paraRng As Range
     Dim paraText As String
@@ -206,14 +196,14 @@ Public Function Check_AlwaysCapitaliseTerms(doc As Document) As Collection
         On Error GoTo 0
 
         ' Check page range filter
-        If Not PleadingsEngine.IsInPageRange(paraRng) Then GoTo NextPara
+        If Not EngineIsInPageRange(paraRng) Then GoTo NextPara
 
         paraText = paraRng.Text
         paraStart = paraRng.Start
 
         If Len(paraText) = 0 Then GoTo NextPara
 
-        ' ── Check each term against this paragraph ─────────
+        ' -- Check each term against this paragraph ---------
         Dim t As Long
         For t = LBound(terms) To UBound(terms)
             CheckTermInParagraph doc, CStr(terms(t)), paraText, paraStart, paraRng, issues
@@ -225,9 +215,9 @@ NextPara:
     Set Check_AlwaysCapitaliseTerms = issues
 End Function
 
-' ════════════════════════════════════════════════════════════
-'  RULE 29 — PRIVATE: Search for a single term within one paragraph
-' ════════════════════════════════════════════════════════════
+' ============================================================
+'  RULE 29 -- PRIVATE: Search for a single term within one paragraph
+' ============================================================
 Private Sub CheckTermInParagraph(doc As Document, _
                                   correctForm As String, _
                                   paraText As String, _
@@ -239,7 +229,7 @@ Private Sub CheckTermInParagraph(doc As Document, _
     Dim actualText As String
     Dim matchStart As Long
     Dim matchEnd As Long
-    Dim issue As PleadingsIssue
+    Dim issue As Object
     Dim locStr As String
     Dim charBefore As String
     Dim charAfter As String
@@ -250,7 +240,7 @@ Private Sub CheckTermInParagraph(doc As Document, _
     pos = InStr(1, paraText, correctForm, vbTextCompare)
 
     Do While pos > 0
-        ' ── Word boundary check ────────────────────────────
+        ' -- Word boundary check ----------------------------
         ' Ensure we are not matching a substring of a longer word
         If pos > 1 Then
             charBefore = Mid(paraText, pos - 1, 1)
@@ -262,37 +252,29 @@ Private Sub CheckTermInParagraph(doc As Document, _
             If IsWordChar(charAfter) Then GoTo NextMatch
         End If
 
-        ' ── Extract the actual text at the match position ──
+        ' -- Extract the actual text at the match position --
         actualText = Mid(paraText, pos, termLen)
 
-        ' ── Skip if capitalisation already matches ─────────
+        ' -- Skip if capitalisation already matches ---------
         If StrComp(actualText, correctForm, vbBinaryCompare) = 0 Then
             GoTo NextMatch
         End If
 
-        ' ── Skip if inside quoted material ─────────────────
+        ' -- Skip if inside quoted material -----------------
         If IsInsideQuote(paraText, pos) Then GoTo NextMatch
 
-        ' ── Calculate range positions ──────────────────────
+        ' -- Calculate range positions ----------------------
         matchStart = paraStart + pos - 1
         matchEnd = matchStart + termLen
 
         On Error Resume Next
         Dim matchRng As Range
         Set matchRng = doc.Range(matchStart, matchEnd)
-        locStr = PleadingsEngine.GetLocationString(matchRng, doc)
+        locStr = EngineGetLocationString(matchRng, doc)
         If Err.Number <> 0 Then locStr = "unknown location": Err.Clear
         On Error GoTo 0
 
-        Set issue = New PleadingsIssue
-        issue.Init RULE29_NAME, _
-                   locStr, _
-                   "Term should be capitalised in the approved form.", _
-                   "Use '" & correctForm & "'.", _
-                   matchStart, _
-                   matchEnd, _
-                   "warning", _
-                   False
+        Set issue = CreateIssueDict(RULE29_NAME, locStr, "Term should be capitalised in the approved form.", "Use)
         issues.Add issue
 
 NextMatch:
@@ -302,10 +284,10 @@ NextMatch:
     Loop
 End Sub
 
-' ════════════════════════════════════════════════════════════
+' ============================================================
 '  PRIVATE: Check whether a character is a word character
 '  (letter, digit, hyphen, or underscore)
-' ════════════════════════════════════════════════════════════
+' ============================================================
 Private Function IsWordChar(ch As String) As Boolean
     Dim c As Long
     If Len(ch) = 0 Then
@@ -336,11 +318,11 @@ Private Function IsWordChar(ch As String) As Boolean
     IsWordChar = False
 End Function
 
-' ════════════════════════════════════════════════════════════
+' ============================================================
 '  PRIVATE: Determine if position is inside quoted material
 '  Checks for smart quotes and straight quotes in a window
 '  before the match position.
-' ════════════════════════════════════════════════════════════
+' ============================================================
 Private Function IsInsideQuote(paraText As String, matchPos As Long) As Boolean
     Dim openCount As Long
     Dim i As Long
@@ -369,7 +351,7 @@ Private Function IsInsideQuote(paraText As String, matchPos As Long) As Boolean
                 openCount = openCount + 1
             Case 8217  ' right single smart quote
                 If openCount > 0 Then openCount = openCount - 1
-            Case 34    ' straight double quote — toggle
+            Case 34    ' straight double quote -- toggle
                 If openCount > 0 Then
                     openCount = openCount - 1
                 Else
@@ -395,4 +377,70 @@ Private Function IsInsideQuote(paraText As String, matchPos As Long) As Boolean
     If openCount > 0 Then
         IsInsideQuote = True
     End If
+End Function
+
+' ----------------------------------------------------------------
+'  PRIVATE: Late-bound wrapper for EngineIsInPageRange
+' ----------------------------------------------------------------
+
+' ----------------------------------------------------------------
+'  PRIVATE: Late-bound wrapper for EngineGetLocationString
+' ----------------------------------------------------------------
+
+' ----------------------------------------------------------------
+'  PRIVATE: Create a dictionary-based issue (no class dependency)
+' ----------------------------------------------------------------
+Private Function CreateIssueDict(ByVal ruleName_ As String, _
+                                 ByVal location_ As String, _
+                                 ByVal issue_ As String, _
+                                 ByVal suggestion_ As String, _
+                                 ByVal rangeStart_ As Long, _
+                                 ByVal rangeEnd_ As Long, _
+                                 Optional ByVal severity_ As String = "error", _
+                                 Optional ByVal autoFixSafe_ As Boolean = False) As Object
+    Dim d As Object
+    Set d = CreateObject("Scripting.Dictionary")
+    d("RuleName") = ruleName_
+    d("Location") = location_
+    d("Issue") = issue_
+    d("Suggestion") = suggestion_
+    d("RangeStart") = rangeStart_
+    d("RangeEnd") = rangeEnd_
+    d("Severity") = severity_
+    d("AutoFixSafe") = autoFixSafe_
+    Set CreateIssueDict = d
+End Function
+
+' ----------------------------------------------------------------
+'  Late-bound wrapper: EngineIsInPageRange
+' ----------------------------------------------------------------
+
+' ----------------------------------------------------------------
+'  Late-bound wrapper: EngineGetLocationString
+' ----------------------------------------------------------------
+
+' ----------------------------------------------------------------
+'  Late-bound wrapper: PleadingsEngine.IsInPageRange
+' ----------------------------------------------------------------
+Private Function EngineIsInPageRange(rng As Object) As Boolean
+    On Error Resume Next
+    EngineIsInPageRange = Application.Run("PleadingsEngine.IsInPageRange", rng)
+    If Err.Number <> 0 Then
+        EngineIsInPageRange = True
+        Err.Clear
+    End If
+    On Error GoTo 0
+End Function
+
+' ----------------------------------------------------------------
+'  Late-bound wrapper: PleadingsEngine.GetLocationString
+' ----------------------------------------------------------------
+Private Function EngineGetLocationString(rng As Object, doc As Document) As String
+    On Error Resume Next
+    EngineGetLocationString = Application.Run("PleadingsEngine.GetLocationString", rng, doc)
+    If Err.Number <> 0 Then
+        EngineGetLocationString = "unknown location"
+        Err.Clear
+    End If
+    On Error GoTo 0
 End Function

@@ -10,16 +10,15 @@ Attribute VB_Name = "Rule12_licence_license"
 '   licensed, licensing = always -s- (verb derivatives)
 '
 ' Dependencies:
-'   - PleadingsIssue.cls
 '   - PleadingsEngine.bas (IsInPageRange, GetLocationString)
 ' ============================================================
 Option Explicit
 
 Private Const RULE_NAME As String = "licence_license"
 
-' ════════════════════════════════════════════════════════════
+' ============================================================
 '  MAIN ENTRY POINT
-' ════════════════════════════════════════════════════════════
+' ============================================================
 Public Function Check_LicenceLicense(doc As Document) As Collection
     Dim issues As New Collection
 
@@ -49,9 +48,9 @@ Public Function Check_LicenceLicense(doc As Document) As Collection
     Set Check_LicenceLicense = issues
 End Function
 
-' ════════════════════════════════════════════════════════════
+' ============================================================
 '  PRIVATE: Search a range for licence/license issues
-' ════════════════════════════════════════════════════════════
+' ============================================================
 Private Sub SearchForLicenceIssues(searchRange As Range, _
                                     doc As Document, _
                                     ByRef issues As Collection)
@@ -67,16 +66,16 @@ Private Sub SearchForLicenceIssues(searchRange As Range, _
     Next t
 End Sub
 
-' ════════════════════════════════════════════════════════════
+' ============================================================
 '  PRIVATE: Search for a single term and analyse context
-' ════════════════════════════════════════════════════════════
+' ============================================================
 Private Sub SearchSingleTerm(ByVal term As String, _
                               searchRange As Range, _
                               doc As Document, _
                               ByRef issues As Collection)
     Dim rng As Range
     Dim found As Boolean
-    Dim issue As PleadingsIssue
+    Dim issue As Object
     Dim locStr As String
     Dim contextBefore As String
     Dim contextAfter As String
@@ -120,21 +119,21 @@ Private Sub SearchSingleTerm(ByVal term As String, _
         If Not found Then Exit Do
 
         ' Skip if outside page range
-        If Not PleadingsEngine.IsInPageRange(rng) Then
+        If Not EngineIsInPageRange(rng) Then
             GoTo ContinueSearch
         End If
 
         ' Determine if the found word uses -s- or -c-
         usesS = (InStr(1, LCase(rng.Text), "license") > 0)
 
-        ' Skip "licensed" and "licensing" — always correct with -s-
+        ' Skip "licensed" and "licensing" -- always correct with -s-
         Dim foundLower As String
         foundLower = LCase(Trim(rng.Text))
         If foundLower = "licensed" Or foundLower = "licensing" Then
             GoTo ContinueSearch
         End If
 
-        ' ── Get surrounding context ──────────────────────────
+        ' -- Get surrounding context --------------------------
         contextBefore = GetContextBefore(rng, doc, 50)
         contextAfter = GetContextAfter(rng, doc, 50)
 
@@ -144,38 +143,38 @@ Private Sub SearchSingleTerm(ByVal term As String, _
         ' Extract the first word after the match
         wordAfter = GetFirstWord(contextAfter)
 
-        ' ── Determine noun or verb context ───────────────────
+        ' -- Determine noun or verb context -------------------
         baseIsVerb = IsVerbIndicator(wordBefore)
         baseIsNoun = IsNounIndicator(wordBefore) Or IsNounFollower(wordAfter)
 
-        ' ── Decide if there is an issue ──────────────────────
+        ' -- Decide if there is an issue ----------------------
         issueText = ""
         suggestion = ""
 
         If usesS And baseIsNoun And Not baseIsVerb Then
-            ' "license" used in noun context — should be "licence"
+            ' "license" used in noun context -- should be "licence"
             issueText = "'" & rng.Text & "' appears in a noun context; " & _
                         "UK convention uses 'licence' for the noun"
             suggestion = ReplaceSWithC(rng.Text)
         ElseIf Not usesS And baseIsVerb And Not baseIsNoun Then
-            ' "licence" used in verb context — should be "license"
+            ' "licence" used in verb context -- should be "license"
             issueText = "'" & rng.Text & "' appears in a verb context; " & _
                         "UK convention uses 'license' for the verb"
             suggestion = ReplaceCWithS(rng.Text)
         ElseIf (usesS And Not baseIsVerb And Not baseIsNoun) Or _
                (Not usesS And Not baseIsVerb And Not baseIsNoun) Then
             ' Context ambiguous
-            issueText = "'" & rng.Text & "' — unable to determine noun/verb context; " & _
+            issueText = "'" & rng.Text & "' -- unable to determine noun/verb context; " & _
                         "review context to ensure correct UK spelling"
             suggestion = "Review context: 'licence' = noun, 'license' = verb"
         ElseIf usesS And baseIsVerb And baseIsNoun Then
-            ' Both indicators present — ambiguous
-            issueText = "'" & rng.Text & "' — conflicting noun/verb indicators; " & _
+            ' Both indicators present -- ambiguous
+            issueText = "'" & rng.Text & "' -- conflicting noun/verb indicators; " & _
                         "review context"
             suggestion = "Review context: 'licence' = noun, 'license' = verb"
         ElseIf Not usesS And baseIsVerb And baseIsNoun Then
-            ' Both indicators present — ambiguous
-            issueText = "'" & rng.Text & "' — conflicting noun/verb indicators; " & _
+            ' Both indicators present -- ambiguous
+            issueText = "'" & rng.Text & "' -- conflicting noun/verb indicators; " & _
                         "review context"
             suggestion = "Review context: 'licence' = noun, 'license' = verb"
         End If
@@ -183,21 +182,14 @@ Private Sub SearchSingleTerm(ByVal term As String, _
         ' Only create issue if we found something to flag
         If Len(issueText) > 0 Then
             On Error Resume Next
-            locStr = PleadingsEngine.GetLocationString(rng, doc)
+            locStr = EngineGetLocationString(rng, doc)
             If Err.Number <> 0 Then
                 locStr = "unknown location"
                 Err.Clear
             End If
             On Error GoTo 0
 
-            Set issue = New PleadingsIssue
-            issue.Init RULE_NAME, _
-                       locStr, _
-                       issueText, _
-                       suggestion, _
-                       rng.Start, _
-                       rng.End, _
-                       "possible_error"
+            Set issue = CreateIssueDict(RULE_NAME, locStr, issueText, suggestion, rng.Start, rng.End, "possible_error")
             issues.Add issue
         End If
 
@@ -213,9 +205,9 @@ ContinueSearch:
     Loop
 End Sub
 
-' ════════════════════════════════════════════════════════════
+' ============================================================
 '  PRIVATE: Get text before the match range (up to N chars)
-' ════════════════════════════════════════════════════════════
+' ============================================================
 Private Function GetContextBefore(rng As Range, doc As Document, _
                                    ByVal charCount As Long) As String
     Dim startPos As Long
@@ -237,9 +229,9 @@ Private Function GetContextBefore(rng As Range, doc As Document, _
     GetContextBefore = contextRng.Text
 End Function
 
-' ════════════════════════════════════════════════════════════
+' ============================================================
 '  PRIVATE: Get text after the match range (up to N chars)
-' ════════════════════════════════════════════════════════════
+' ============================================================
 Private Function GetContextAfter(rng As Range, doc As Document, _
                                   ByVal charCount As Long) As String
     Dim endPos As Long
@@ -263,9 +255,9 @@ Private Function GetContextAfter(rng As Range, doc As Document, _
     GetContextAfter = contextRng.Text
 End Function
 
-' ════════════════════════════════════════════════════════════
+' ============================================================
 '  PRIVATE: Extract the last word from a context string
-' ════════════════════════════════════════════════════════════
+' ============================================================
 Private Function GetLastWord(ByVal text As String) As String
     Dim trimmed As String
     Dim i As Long
@@ -289,9 +281,9 @@ Private Function GetLastWord(ByVal text As String) As String
     GetLastWord = LCase(trimmed)
 End Function
 
-' ════════════════════════════════════════════════════════════
+' ============================================================
 '  PRIVATE: Extract the first word from a context string
-' ════════════════════════════════════════════════════════════
+' ============================================================
 Private Function GetFirstWord(ByVal text As String) As String
     Dim trimmed As String
     Dim spacePos As Long
@@ -321,9 +313,9 @@ Private Function GetFirstWord(ByVal text As String) As String
     GetFirstWord = result
 End Function
 
-' ════════════════════════════════════════════════════════════
+' ============================================================
 '  PRIVATE: Check if a word is a verb indicator
-' ════════════════════════════════════════════════════════════
+' ============================================================
 Private Function IsVerbIndicator(ByVal word As String) As Boolean
     Dim indicators As Variant
     Dim i As Long
@@ -342,9 +334,9 @@ Private Function IsVerbIndicator(ByVal word As String) As Boolean
     IsVerbIndicator = False
 End Function
 
-' ════════════════════════════════════════════════════════════
+' ============================================================
 '  PRIVATE: Check if a word is a noun indicator
-' ════════════════════════════════════════════════════════════
+' ============================================================
 Private Function IsNounIndicator(ByVal word As String) As Boolean
     Dim indicators As Variant
     Dim i As Long
@@ -363,9 +355,9 @@ Private Function IsNounIndicator(ByVal word As String) As Boolean
     IsNounIndicator = False
 End Function
 
-' ════════════════════════════════════════════════════════════
+' ============================================================
 '  PRIVATE: Check if the word after indicates noun usage
-' ════════════════════════════════════════════════════════════
+' ============================================================
 Private Function IsNounFollower(ByVal word As String) As Boolean
     Dim followers As Variant
     Dim i As Long
@@ -384,18 +376,76 @@ Private Function IsNounFollower(ByVal word As String) As Boolean
     IsNounFollower = False
 End Function
 
-' ════════════════════════════════════════════════════════════
+' ============================================================
 '  PRIVATE: Replace -s- with -c- in licence/license words
-' ════════════════════════════════════════════════════════════
+' ============================================================
 Private Function ReplaceSWithC(ByVal word As String) As String
     ReplaceSWithC = Replace(word, "license", "licence", , , vbTextCompare)
     ReplaceSWithC = Replace(ReplaceSWithC, "License", "Licence", , , vbBinaryCompare)
 End Function
 
-' ════════════════════════════════════════════════════════════
+' ============================================================
 '  PRIVATE: Replace -c- with -s- in licence/license words
-' ════════════════════════════════════════════════════════════
+' ============================================================
 Private Function ReplaceCWithS(ByVal word As String) As String
     ReplaceCWithS = Replace(word, "licence", "license", , , vbTextCompare)
     ReplaceCWithS = Replace(ReplaceCWithS, "Licence", "License", , , vbBinaryCompare)
+End Function
+
+' ----------------------------------------------------------------
+'  PRIVATE: Create a dictionary-based issue (no class dependency)
+' ----------------------------------------------------------------
+Private Function CreateIssueDict(ByVal ruleName_ As String, _
+                                 ByVal location_ As String, _
+                                 ByVal issue_ As String, _
+                                 ByVal suggestion_ As String, _
+                                 ByVal rangeStart_ As Long, _
+                                 ByVal rangeEnd_ As Long, _
+                                 Optional ByVal severity_ As String = "error", _
+                                 Optional ByVal autoFixSafe_ As Boolean = False) As Object
+    Dim d As Object
+    Set d = CreateObject("Scripting.Dictionary")
+    d("RuleName") = ruleName_
+    d("Location") = location_
+    d("Issue") = issue_
+    d("Suggestion") = suggestion_
+    d("RangeStart") = rangeStart_
+    d("RangeEnd") = rangeEnd_
+    d("Severity") = severity_
+    d("AutoFixSafe") = autoFixSafe_
+    Set CreateIssueDict = d
+End Function
+
+' ----------------------------------------------------------------
+'  Late-bound wrapper: EngineIsInPageRange
+' ----------------------------------------------------------------
+
+' ----------------------------------------------------------------
+'  Late-bound wrapper: EngineGetLocationString
+' ----------------------------------------------------------------
+
+' ----------------------------------------------------------------
+'  Late-bound wrapper: PleadingsEngine.IsInPageRange
+' ----------------------------------------------------------------
+Private Function EngineIsInPageRange(rng As Object) As Boolean
+    On Error Resume Next
+    EngineIsInPageRange = Application.Run("PleadingsEngine.IsInPageRange", rng)
+    If Err.Number <> 0 Then
+        EngineIsInPageRange = True
+        Err.Clear
+    End If
+    On Error GoTo 0
+End Function
+
+' ----------------------------------------------------------------
+'  Late-bound wrapper: PleadingsEngine.GetLocationString
+' ----------------------------------------------------------------
+Private Function EngineGetLocationString(rng As Object, doc As Document) As String
+    On Error Resume Next
+    EngineGetLocationString = Application.Run("PleadingsEngine.GetLocationString", rng, doc)
+    If Err.Number <> 0 Then
+        EngineGetLocationString = "unknown location"
+        Err.Clear
+    End If
+    On Error GoTo 0
 End Function

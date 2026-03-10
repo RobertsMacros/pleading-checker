@@ -8,21 +8,20 @@ Attribute VB_Name = "Rule26_footnote_initial_capital"
 '   c, cf, cp, eg, ie, p, pp, ibid
 '
 ' Dependencies:
-'   - PleadingsIssue.cls
 '   - PleadingsEngine.bas (IsInPageRange, GetLocationString)
 ' ============================================================
 Option Explicit
 
 Private Const RULE_NAME As String = "footnote_initial_capital"
 
-' ════════════════════════════════════════════════════════════
+' ============================================================
 '  MAIN ENTRY POINT
-' ════════════════════════════════════════════════════════════
+' ============================================================
 Public Function Check_FootnoteInitialCapital(doc As Document) As Collection
     Dim issues As New Collection
     Dim allowed As Object
     Dim fn As Footnote
-    Dim issue As PleadingsIssue
+    Dim issue As Object
     Dim locStr As String
     Dim noteText As String
     Dim trimmed As String
@@ -32,7 +31,7 @@ Public Function Check_FootnoteInitialCapital(doc As Document) As Collection
     Dim j As Long
     Dim ch As String
 
-    ' ── Build allowed lower-case starts dictionary ───────────
+    ' -- Build allowed lower-case starts dictionary -----------
     Set allowed = CreateObject("Scripting.Dictionary")
     allowed.CompareMode = vbTextCompare
     allowed.Add "c", True
@@ -54,15 +53,15 @@ Public Function Check_FootnoteInitialCapital(doc As Document) As Collection
         End If
         On Error GoTo 0
 
-        ' ── Check page range on the reference mark ───────────
+        ' -- Check page range on the reference mark -----------
         On Error Resume Next
-        If Not PleadingsEngine.IsInPageRange(fn.Reference) Then
+        If Not EngineIsInPageRange(fn.Reference) Then
             On Error GoTo 0
             GoTo NextFootnote
         End If
         On Error GoTo 0
 
-        ' ── Get footnote text ────────────────────────────────
+        ' -- Get footnote text --------------------------------
         On Error Resume Next
         noteText = fn.Range.Text
         If Err.Number <> 0 Then
@@ -72,11 +71,11 @@ Public Function Check_FootnoteInitialCapital(doc As Document) As Collection
         End If
         On Error GoTo 0
 
-        ' ── Trim leading whitespace ──────────────────────────
+        ' -- Trim leading whitespace --------------------------
         trimmed = LTrim(noteText)
         If Len(trimmed) = 0 Then GoTo NextFootnote
 
-        ' ── Skip past leading punctuation (quotes, brackets) ─
+        ' -- Skip past leading punctuation (quotes, brackets) -
         j = 1
         Do While j <= Len(trimmed)
             ch = Mid(trimmed, j, 1)
@@ -91,31 +90,23 @@ Public Function Check_FootnoteInitialCapital(doc As Document) As Collection
         trimmed = Mid(trimmed, j)
         If Len(trimmed) = 0 Then GoTo NextFootnote
 
-        ' ── Extract first lexical token (letters only) ───────
+        ' -- Extract first lexical token (letters only) -------
         token = ExtractFirstToken(trimmed)
         If Len(token) = 0 Then GoTo NextFootnote
 
-        ' ── Check if token is in allowed list ────────────────
+        ' -- Check if token is in allowed list ----------------
         If allowed.Exists(LCase(token)) Then GoTo NextFootnote
 
-        ' ── Check if first character is lower-case ───────────
+        ' -- Check if first character is lower-case -----------
         firstCharCode = AscW(Mid(token, 1, 1))
         If firstCharCode >= 97 And firstCharCode <= 122 Then
             ' Lower-case and not in allowed list: flag
             On Error Resume Next
-            locStr = PleadingsEngine.GetLocationString(fn.Reference, doc)
+            locStr = EngineGetLocationString(fn.Reference, doc)
             If Err.Number <> 0 Then locStr = "unknown location": Err.Clear
             On Error GoTo 0
 
-            Set issue = New PleadingsIssue
-            issue.Init RULE_NAME, _
-                       locStr, _
-                       "Footnote begins with lower-case text outside the approved exceptions.", _
-                       "Begin the footnote with a capital letter, unless it starts with an approved lower-case abbreviation.", _
-                       fn.Range.Start, _
-                       fn.Range.End, _
-                       "warning", _
-                       False
+            Set issue = CreateIssueDict(RULE_NAME, locStr, "Footnote begins with lower-case text outside the approved exceptions.", "Begin the footnote with a capital letter, unless it starts with an approved lower-case abbreviation.", fn.Range.Start, fn.Range.End, "warning", False)
             issues.Add issue
         End If
 
@@ -125,9 +116,9 @@ NextFootnote:
     Set Check_FootnoteInitialCapital = issues
 End Function
 
-' ════════════════════════════════════════════════════════════
+' ============================================================
 '  PRIVATE: Check if character is leading punctuation to skip
-' ════════════════════════════════════════════════════════════
+' ============================================================
 Private Function IsLeadingPunctuation(ByVal ch As String) As Boolean
     Select Case ch
         Case "(", "[", ChrW(8216), ChrW(8220), """", "'"
@@ -137,9 +128,9 @@ Private Function IsLeadingPunctuation(ByVal ch As String) As Boolean
     End Select
 End Function
 
-' ════════════════════════════════════════════════════════════
+' ============================================================
 '  PRIVATE: Extract the first token of letters from a string
-' ════════════════════════════════════════════════════════════
+' ============================================================
 Private Function ExtractFirstToken(ByVal s As String) As String
     Dim i As Long
     Dim charCode As Long
@@ -158,4 +149,62 @@ Private Function ExtractFirstToken(ByVal s As String) As String
     Next i
 
     ExtractFirstToken = result
+End Function
+
+' ----------------------------------------------------------------
+'  PRIVATE: Create a dictionary-based issue (no class dependency)
+' ----------------------------------------------------------------
+Private Function CreateIssueDict(ByVal ruleName_ As String, _
+                                 ByVal location_ As String, _
+                                 ByVal issue_ As String, _
+                                 ByVal suggestion_ As String, _
+                                 ByVal rangeStart_ As Long, _
+                                 ByVal rangeEnd_ As Long, _
+                                 Optional ByVal severity_ As String = "error", _
+                                 Optional ByVal autoFixSafe_ As Boolean = False) As Object
+    Dim d As Object
+    Set d = CreateObject("Scripting.Dictionary")
+    d("RuleName") = ruleName_
+    d("Location") = location_
+    d("Issue") = issue_
+    d("Suggestion") = suggestion_
+    d("RangeStart") = rangeStart_
+    d("RangeEnd") = rangeEnd_
+    d("Severity") = severity_
+    d("AutoFixSafe") = autoFixSafe_
+    Set CreateIssueDict = d
+End Function
+
+' ----------------------------------------------------------------
+'  Late-bound wrapper: EngineIsInPageRange
+' ----------------------------------------------------------------
+
+' ----------------------------------------------------------------
+'  Late-bound wrapper: EngineGetLocationString
+' ----------------------------------------------------------------
+
+' ----------------------------------------------------------------
+'  Late-bound wrapper: PleadingsEngine.IsInPageRange
+' ----------------------------------------------------------------
+Private Function EngineIsInPageRange(rng As Object) As Boolean
+    On Error Resume Next
+    EngineIsInPageRange = Application.Run("PleadingsEngine.IsInPageRange", rng)
+    If Err.Number <> 0 Then
+        EngineIsInPageRange = True
+        Err.Clear
+    End If
+    On Error GoTo 0
+End Function
+
+' ----------------------------------------------------------------
+'  Late-bound wrapper: PleadingsEngine.GetLocationString
+' ----------------------------------------------------------------
+Private Function EngineGetLocationString(rng As Object, doc As Document) As String
+    On Error Resume Next
+    EngineGetLocationString = Application.Run("PleadingsEngine.GetLocationString", rng, doc)
+    If Err.Number <> 0 Then
+        EngineGetLocationString = "unknown location"
+        Err.Clear
+    End If
+    On Error GoTo 0
 End Function

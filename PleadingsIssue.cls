@@ -18,7 +18,7 @@ Attribute VB_Exposed = False
 ' ============================================================
 Option Explicit
 
-' ── Properties ────────────────────────────────────────────────
+' -- Properties ------------------------------------------------
 Private pRuleName   As String   ' e.g. "british_spelling"
 Private pLocation   As String   ' e.g. "page 14 paragraph 2"
 Private pIssue      As String   ' e.g. "US spelling detected: 'color'"
@@ -28,7 +28,7 @@ Private pRangeStart As Long     ' character position for highlighting
 Private pRangeEnd   As Long     ' character position end
 Private pAutoFixSafe As Boolean ' whether auto-fix can be safely applied
 
-' ── RuleName ──────────────────────────────────────────────────
+' -- RuleName --------------------------------------------------
 Public Property Get RuleName() As String
     RuleName = pRuleName
 End Property
@@ -37,7 +37,7 @@ Public Property Let RuleName(ByVal value As String)
     pRuleName = value
 End Property
 
-' ── Location ──────────────────────────────────────────────────
+' -- Location --------------------------------------------------
 Public Property Get Location() As String
     Location = pLocation
 End Property
@@ -46,7 +46,7 @@ Public Property Let Location(ByVal value As String)
     pLocation = value
 End Property
 
-' ── Issue ─────────────────────────────────────────────────────
+' -- Issue -----------------------------------------------------
 Public Property Get Issue() As String
     Issue = pIssue
 End Property
@@ -55,7 +55,7 @@ Public Property Let Issue(ByVal value As String)
     pIssue = value
 End Property
 
-' ── Suggestion ────────────────────────────────────────────────
+' -- Suggestion ------------------------------------------------
 Public Property Get Suggestion() As String
     Suggestion = pSuggestion
 End Property
@@ -64,7 +64,7 @@ Public Property Let Suggestion(ByVal value As String)
     pSuggestion = value
 End Property
 
-' ── Severity ──────────────────────────────────────────────────
+' -- Severity --------------------------------------------------
 Public Property Get Severity() As String
     If pSeverity = "" Then
         Severity = "error"
@@ -77,7 +77,7 @@ Public Property Let Severity(ByVal value As String)
     pSeverity = value
 End Property
 
-' ── RangeStart ────────────────────────────────────────────────
+' -- RangeStart ------------------------------------------------
 Public Property Get RangeStart() As Long
     RangeStart = pRangeStart
 End Property
@@ -86,7 +86,7 @@ Public Property Let RangeStart(ByVal value As Long)
     pRangeStart = value
 End Property
 
-' ── RangeEnd ──────────────────────────────────────────────────
+' -- RangeEnd --------------------------------------------------
 Public Property Get RangeEnd() As Long
     RangeEnd = pRangeEnd
 End Property
@@ -95,7 +95,7 @@ Public Property Let RangeEnd(ByVal value As Long)
     pRangeEnd = value
 End Property
 
-' ── AutoFixSafe ─────────────────────────────────────────────────
+' -- AutoFixSafe -------------------------------------------------
 Public Property Get AutoFixSafe() As Boolean
     AutoFixSafe = pAutoFixSafe
 End Property
@@ -104,7 +104,7 @@ Public Property Let AutoFixSafe(ByVal value As Boolean)
     pAutoFixSafe = value
 End Property
 
-' ── Helper: initialise all properties at once ─────────────────
+' -- Helper: initialise all properties at once -----------------
 Public Sub Init(ByVal ruleName_ As String, _
                 ByVal location_ As String, _
                 ByVal issue_ As String, _
@@ -123,7 +123,7 @@ Public Sub Init(ByVal ruleName_ As String, _
     pAutoFixSafe = autoFixSafe_
 End Sub
 
-' ── Helper: format as JSON object string ──────────────────────
+' -- Helper: format as JSON object string ----------------------
 Public Function ToJSON() As String
     Dim s As String
     s = "    {" & vbCrLf
@@ -137,7 +137,7 @@ Public Function ToJSON() As String
     ToJSON = s
 End Function
 
-' ── Private: escape for JSON ──────────────────────────────────
+' -- Private: escape for JSON ----------------------------------
 Private Function EscJSON(ByVal txt As String) As String
     txt = Replace(txt, "\", "\\")
     txt = Replace(txt, """", "\""")

@@ -4,27 +4,26 @@ Attribute VB_Name = "Rule20_footnote_integrity"
 ' Proofreading rule: checks footnote and endnote integrity.
 '
 ' Checks performed:
-'   1. Sequential numbering — no gaps in index sequence
-'   2. Placement after punctuation — reference marks should
+'   1. Sequential numbering -- no gaps in index sequence
+'   2. Placement after punctuation -- reference marks should
 '      follow punctuation, not letters or spaces
-'   3. Empty footnotes — footnotes with no content
-'   4. Duplicate content — two footnotes with identical text
+'   3. Empty footnotes -- footnotes with no content
+'   4. Duplicate content -- two footnotes with identical text
 '
 ' Dependencies:
-'   - PleadingsIssue.cls
 '   - PleadingsEngine.bas (IsInPageRange, GetLocationString)
 ' ============================================================
 Option Explicit
 
 Private Const RULE_NAME As String = "footnote_integrity"
 
-' ════════════════════════════════════════════════════════════
+' ============================================================
 '  MAIN ENTRY POINT
-' ════════════════════════════════════════════════════════════
+' ============================================================
 Public Function Check_FootnoteIntegrity(doc As Document) As Collection
     Dim issues As New Collection
 
-    ' ── Check footnotes ─────────────────────────────────────
+    ' -- Check footnotes -------------------------------------
     If doc.Footnotes.Count > 0 Then
         CheckNoteSequence doc, doc.Footnotes, "Footnote", issues
         CheckNotePlacement doc, doc.Footnotes, "Footnote", issues
@@ -32,7 +31,7 @@ Public Function Check_FootnoteIntegrity(doc As Document) As Collection
         CheckDuplicateNotes doc, doc.Footnotes, "Footnote", issues
     End If
 
-    ' ── Check endnotes ──────────────────────────────────────
+    ' -- Check endnotes --------------------------------------
     If doc.Endnotes.Count > 0 Then
         CheckEndnoteSequence doc, doc.Endnotes, "Endnote", issues
         CheckEndnotePlacement doc, doc.Endnotes, "Endnote", issues
@@ -43,9 +42,9 @@ Public Function Check_FootnoteIntegrity(doc As Document) As Collection
     Set Check_FootnoteIntegrity = issues
 End Function
 
-' ════════════════════════════════════════════════════════════
+' ============================================================
 '  PRIVATE: Check sequential numbering for footnotes
-' ════════════════════════════════════════════════════════════
+' ============================================================
 Private Sub CheckNoteSequence(doc As Document, _
                                notes As Footnotes, _
                                noteType As String, _
@@ -53,7 +52,7 @@ Private Sub CheckNoteSequence(doc As Document, _
     Dim i As Long
     Dim expectedIdx As Long
     Dim fn As Footnote
-    Dim issue As PleadingsIssue
+    Dim issue As Object
     Dim locStr As String
 
     expectedIdx = 1
@@ -62,7 +61,7 @@ Private Sub CheckNoteSequence(doc As Document, _
         Set fn = notes(i)
 
         On Error Resume Next
-        If Not PleadingsEngine.IsInPageRange(fn.Reference) Then
+        If Not EngineIsInPageRange(fn.Reference) Then
             expectedIdx = expectedIdx + 1
             On Error GoTo 0
             GoTo NextFootnote
@@ -71,18 +70,11 @@ Private Sub CheckNoteSequence(doc As Document, _
 
         If fn.Index <> expectedIdx Then
             On Error Resume Next
-            locStr = PleadingsEngine.GetLocationString(fn.Reference, doc)
+            locStr = EngineGetLocationString(fn.Reference, doc)
             If Err.Number <> 0 Then locStr = "unknown location": Err.Clear
             On Error GoTo 0
 
-            Set issue = New PleadingsIssue
-            issue.Init RULE_NAME, _
-                       locStr, _
-                       noteType & " numbering gap: expected " & expectedIdx & ", found " & fn.Index, _
-                       "Renumber " & LCase(noteType) & "s sequentially", _
-                       fn.Reference.Start, _
-                       fn.Reference.End, _
-                       "error"
+            Set issue = CreateIssueDict(RULE_NAME, locStr, noteType & " numbering gap: expected " & expectedIdx & ", found " & fn.Index, "Renumber " & LCase(noteType) & "s sequentially", fn.Reference.Start, fn.Reference.End, "error")
             issues.Add issue
         End If
 
@@ -92,9 +84,9 @@ NextFootnote:
     Next i
 End Sub
 
-' ════════════════════════════════════════════════════════════
+' ============================================================
 '  PRIVATE: Check sequential numbering for endnotes
-' ════════════════════════════════════════════════════════════
+' ============================================================
 Private Sub CheckEndnoteSequence(doc As Document, _
                                   notes As Endnotes, _
                                   noteType As String, _
@@ -102,7 +94,7 @@ Private Sub CheckEndnoteSequence(doc As Document, _
     Dim i As Long
     Dim expectedIdx As Long
     Dim en As Endnote
-    Dim issue As PleadingsIssue
+    Dim issue As Object
     Dim locStr As String
 
     expectedIdx = 1
@@ -111,7 +103,7 @@ Private Sub CheckEndnoteSequence(doc As Document, _
         Set en = notes(i)
 
         On Error Resume Next
-        If Not PleadingsEngine.IsInPageRange(en.Reference) Then
+        If Not EngineIsInPageRange(en.Reference) Then
             expectedIdx = expectedIdx + 1
             On Error GoTo 0
             GoTo NextEndnoteSeq
@@ -120,18 +112,11 @@ Private Sub CheckEndnoteSequence(doc As Document, _
 
         If en.Index <> expectedIdx Then
             On Error Resume Next
-            locStr = PleadingsEngine.GetLocationString(en.Reference, doc)
+            locStr = EngineGetLocationString(en.Reference, doc)
             If Err.Number <> 0 Then locStr = "unknown location": Err.Clear
             On Error GoTo 0
 
-            Set issue = New PleadingsIssue
-            issue.Init RULE_NAME, _
-                       locStr, _
-                       noteType & " numbering gap: expected " & expectedIdx & ", found " & en.Index, _
-                       "Renumber " & LCase(noteType) & "s sequentially", _
-                       en.Reference.Start, _
-                       en.Reference.End, _
-                       "error"
+            Set issue = CreateIssueDict(RULE_NAME, locStr, noteType & " numbering gap: expected " & expectedIdx & ", found " & en.Index, "Renumber " & LCase(noteType) & "s sequentially", en.Reference.Start, en.Reference.End, "error")
             issues.Add issue
         End If
 
@@ -141,16 +126,16 @@ NextEndnoteSeq:
     Next i
 End Sub
 
-' ════════════════════════════════════════════════════════════
+' ============================================================
 '  PRIVATE: Check placement after punctuation for footnotes
-' ════════════════════════════════════════════════════════════
+' ============================================================
 Private Sub CheckNotePlacement(doc As Document, _
                                 notes As Footnotes, _
                                 noteType As String, _
                                 ByRef issues As Collection)
     Dim i As Long
     Dim fn As Footnote
-    Dim issue As PleadingsIssue
+    Dim issue As Object
     Dim locStr As String
     Dim charBefore As String
     Dim refStart As Long
@@ -159,7 +144,7 @@ Private Sub CheckNotePlacement(doc As Document, _
         Set fn = notes(i)
 
         On Error Resume Next
-        If Not PleadingsEngine.IsInPageRange(fn.Reference) Then
+        If Not EngineIsInPageRange(fn.Reference) Then
             On Error GoTo 0
             GoTo NextFnPlace
         End If
@@ -180,18 +165,11 @@ Private Sub CheckNotePlacement(doc As Document, _
 
             If Not IsPunctuation(charBefore) Then
                 On Error Resume Next
-                locStr = PleadingsEngine.GetLocationString(fn.Reference, doc)
+                locStr = EngineGetLocationString(fn.Reference, doc)
                 If Err.Number <> 0 Then locStr = "unknown location": Err.Clear
                 On Error GoTo 0
 
-                Set issue = New PleadingsIssue
-                issue.Init RULE_NAME, _
-                           locStr, _
-                           noteType & " " & fn.Index & " reference not placed after punctuation", _
-                           "Place " & LCase(noteType) & " reference after punctuation mark", _
-                           fn.Reference.Start, _
-                           fn.Reference.End, _
-                           "error"
+                Set issue = CreateIssueDict(RULE_NAME, locStr, noteType & " " & fn.Index & " reference not placed after punctuation", "Place " & LCase(noteType) & " reference after punctuation mark", fn.Reference.Start, fn.Reference.End, "error")
                 issues.Add issue
             End If
         End If
@@ -200,16 +178,16 @@ NextFnPlace:
     Next i
 End Sub
 
-' ════════════════════════════════════════════════════════════
+' ============================================================
 '  PRIVATE: Check placement after punctuation for endnotes
-' ════════════════════════════════════════════════════════════
+' ============================================================
 Private Sub CheckEndnotePlacement(doc As Document, _
                                    notes As Endnotes, _
                                    noteType As String, _
                                    ByRef issues As Collection)
     Dim i As Long
     Dim en As Endnote
-    Dim issue As PleadingsIssue
+    Dim issue As Object
     Dim locStr As String
     Dim charBefore As String
     Dim refStart As Long
@@ -218,7 +196,7 @@ Private Sub CheckEndnotePlacement(doc As Document, _
         Set en = notes(i)
 
         On Error Resume Next
-        If Not PleadingsEngine.IsInPageRange(en.Reference) Then
+        If Not EngineIsInPageRange(en.Reference) Then
             On Error GoTo 0
             GoTo NextEnPlace
         End If
@@ -238,18 +216,11 @@ Private Sub CheckEndnotePlacement(doc As Document, _
 
             If Not IsPunctuation(charBefore) Then
                 On Error Resume Next
-                locStr = PleadingsEngine.GetLocationString(en.Reference, doc)
+                locStr = EngineGetLocationString(en.Reference, doc)
                 If Err.Number <> 0 Then locStr = "unknown location": Err.Clear
                 On Error GoTo 0
 
-                Set issue = New PleadingsIssue
-                issue.Init RULE_NAME, _
-                           locStr, _
-                           noteType & " " & en.Index & " reference not placed after punctuation", _
-                           "Place " & LCase(noteType) & " reference after punctuation mark", _
-                           en.Reference.Start, _
-                           en.Reference.End, _
-                           "error"
+                Set issue = CreateIssueDict(RULE_NAME, locStr, noteType & " " & en.Index & " reference not placed after punctuation", "Place " & LCase(noteType) & " reference after punctuation mark", en.Reference.Start, en.Reference.End, "error")
                 issues.Add issue
             End If
         End If
@@ -258,16 +229,16 @@ NextEnPlace:
     Next i
 End Sub
 
-' ════════════════════════════════════════════════════════════
+' ============================================================
 '  PRIVATE: Check for empty footnotes
-' ════════════════════════════════════════════════════════════
+' ============================================================
 Private Sub CheckEmptyNotes(doc As Document, _
                              notes As Footnotes, _
                              noteType As String, _
                              ByRef issues As Collection)
     Dim i As Long
     Dim fn As Footnote
-    Dim issue As PleadingsIssue
+    Dim issue As Object
     Dim locStr As String
     Dim noteText As String
 
@@ -275,7 +246,7 @@ Private Sub CheckEmptyNotes(doc As Document, _
         Set fn = notes(i)
 
         On Error Resume Next
-        If Not PleadingsEngine.IsInPageRange(fn.Reference) Then
+        If Not EngineIsInPageRange(fn.Reference) Then
             On Error GoTo 0
             GoTo NextFnEmpty
         End If
@@ -291,18 +262,11 @@ Private Sub CheckEmptyNotes(doc As Document, _
 
         If Len(noteText) = 0 Then
             On Error Resume Next
-            locStr = PleadingsEngine.GetLocationString(fn.Reference, doc)
+            locStr = EngineGetLocationString(fn.Reference, doc)
             If Err.Number <> 0 Then locStr = "unknown location": Err.Clear
             On Error GoTo 0
 
-            Set issue = New PleadingsIssue
-            issue.Init RULE_NAME, _
-                       locStr, _
-                       noteType & " " & fn.Index & " has empty content", _
-                       "Add content or remove the empty " & LCase(noteType), _
-                       fn.Reference.Start, _
-                       fn.Reference.End, _
-                       "error"
+            Set issue = CreateIssueDict(RULE_NAME, locStr, noteType & " " & fn.Index & " has empty content", "Add content or remove the empty " & LCase(noteType), fn.Reference.Start, fn.Reference.End, "error")
             issues.Add issue
         End If
 
@@ -310,16 +274,16 @@ NextFnEmpty:
     Next i
 End Sub
 
-' ════════════════════════════════════════════════════════════
+' ============================================================
 '  PRIVATE: Check for empty endnotes
-' ════════════════════════════════════════════════════════════
+' ============================================================
 Private Sub CheckEmptyEndnotes(doc As Document, _
                                 notes As Endnotes, _
                                 noteType As String, _
                                 ByRef issues As Collection)
     Dim i As Long
     Dim en As Endnote
-    Dim issue As PleadingsIssue
+    Dim issue As Object
     Dim locStr As String
     Dim noteText As String
 
@@ -327,7 +291,7 @@ Private Sub CheckEmptyEndnotes(doc As Document, _
         Set en = notes(i)
 
         On Error Resume Next
-        If Not PleadingsEngine.IsInPageRange(en.Reference) Then
+        If Not EngineIsInPageRange(en.Reference) Then
             On Error GoTo 0
             GoTo NextEnEmpty
         End If
@@ -343,18 +307,11 @@ Private Sub CheckEmptyEndnotes(doc As Document, _
 
         If Len(noteText) = 0 Then
             On Error Resume Next
-            locStr = PleadingsEngine.GetLocationString(en.Reference, doc)
+            locStr = EngineGetLocationString(en.Reference, doc)
             If Err.Number <> 0 Then locStr = "unknown location": Err.Clear
             On Error GoTo 0
 
-            Set issue = New PleadingsIssue
-            issue.Init RULE_NAME, _
-                       locStr, _
-                       noteType & " " & en.Index & " has empty content", _
-                       "Add content or remove the empty " & LCase(noteType), _
-                       en.Reference.Start, _
-                       en.Reference.End, _
-                       "error"
+            Set issue = CreateIssueDict(RULE_NAME, locStr, noteType & " " & en.Index & " has empty content", "Add content or remove the empty " & LCase(noteType), en.Reference.Start, en.Reference.End, "error")
             issues.Add issue
         End If
 
@@ -362,9 +319,9 @@ NextEnEmpty:
     Next i
 End Sub
 
-' ════════════════════════════════════════════════════════════
+' ============================================================
 '  PRIVATE: Check for duplicate footnote content
-' ════════════════════════════════════════════════════════════
+' ============================================================
 Private Sub CheckDuplicateNotes(doc As Document, _
                                  notes As Footnotes, _
                                  noteType As String, _
@@ -374,7 +331,7 @@ Private Sub CheckDuplicateNotes(doc As Document, _
 
     Dim i As Long
     Dim fn As Footnote
-    Dim issue As PleadingsIssue
+    Dim issue As Object
     Dim locStr As String
     Dim noteText As String
     Dim cleanText As String
@@ -383,7 +340,7 @@ Private Sub CheckDuplicateNotes(doc As Document, _
         Set fn = notes(i)
 
         On Error Resume Next
-        If Not PleadingsEngine.IsInPageRange(fn.Reference) Then
+        If Not EngineIsInPageRange(fn.Reference) Then
             On Error GoTo 0
             GoTo NextFnDup
         End If
@@ -406,18 +363,11 @@ Private Sub CheckDuplicateNotes(doc As Document, _
             firstIdx = CLng(contentDict(cleanText))
 
             On Error Resume Next
-            locStr = PleadingsEngine.GetLocationString(fn.Reference, doc)
+            locStr = EngineGetLocationString(fn.Reference, doc)
             If Err.Number <> 0 Then locStr = "unknown location": Err.Clear
             On Error GoTo 0
 
-            Set issue = New PleadingsIssue
-            issue.Init RULE_NAME, _
-                       locStr, _
-                       noteType & " " & fn.Index & " has identical content to " & LCase(noteType) & " " & firstIdx, _
-                       "Remove duplicate or differentiate content", _
-                       fn.Reference.Start, _
-                       fn.Reference.End, _
-                       "possible_error"
+            Set issue = CreateIssueDict(RULE_NAME, locStr, noteType & " " & fn.Index & " has identical content to " & LCase(noteType) & " " & firstIdx, "Remove duplicate or differentiate content", fn.Reference.Start, fn.Reference.End, "possible_error")
             issues.Add issue
         Else
             contentDict.Add cleanText, fn.Index
@@ -427,9 +377,9 @@ NextFnDup:
     Next i
 End Sub
 
-' ════════════════════════════════════════════════════════════
+' ============================================================
 '  PRIVATE: Check for duplicate endnote content
-' ════════════════════════════════════════════════════════════
+' ============================================================
 Private Sub CheckDuplicateEndnotes(doc As Document, _
                                     notes As Endnotes, _
                                     noteType As String, _
@@ -439,7 +389,7 @@ Private Sub CheckDuplicateEndnotes(doc As Document, _
 
     Dim i As Long
     Dim en As Endnote
-    Dim issue As PleadingsIssue
+    Dim issue As Object
     Dim locStr As String
     Dim noteText As String
     Dim cleanText As String
@@ -448,7 +398,7 @@ Private Sub CheckDuplicateEndnotes(doc As Document, _
         Set en = notes(i)
 
         On Error Resume Next
-        If Not PleadingsEngine.IsInPageRange(en.Reference) Then
+        If Not EngineIsInPageRange(en.Reference) Then
             On Error GoTo 0
             GoTo NextEnDup
         End If
@@ -469,18 +419,11 @@ Private Sub CheckDuplicateEndnotes(doc As Document, _
             firstEnIdx = CLng(contentDict(cleanText))
 
             On Error Resume Next
-            locStr = PleadingsEngine.GetLocationString(en.Reference, doc)
+            locStr = EngineGetLocationString(en.Reference, doc)
             If Err.Number <> 0 Then locStr = "unknown location": Err.Clear
             On Error GoTo 0
 
-            Set issue = New PleadingsIssue
-            issue.Init RULE_NAME, _
-                       locStr, _
-                       noteType & " " & en.Index & " has identical content to " & LCase(noteType) & " " & firstEnIdx, _
-                       "Remove duplicate or differentiate content", _
-                       en.Reference.Start, _
-                       en.Reference.End, _
-                       "possible_error"
+            Set issue = CreateIssueDict(RULE_NAME, locStr, noteType & " " & en.Index & " has identical content to " & LCase(noteType) & " " & firstEnIdx, "Remove duplicate or differentiate content", en.Reference.Start, en.Reference.End, "possible_error")
             issues.Add issue
         Else
             contentDict.Add cleanText, en.Index
@@ -490,9 +433,9 @@ NextEnDup:
     Next i
 End Sub
 
-' ════════════════════════════════════════════════════════════
+' ============================================================
 '  PRIVATE: Check if character is punctuation
-' ════════════════════════════════════════════════════════════
+' ============================================================
 Private Function IsPunctuation(ByVal ch As String) As Boolean
     Select Case ch
         Case ".", ",", ";", ":", """", "'", ")", _
@@ -502,4 +445,62 @@ Private Function IsPunctuation(ByVal ch As String) As Boolean
         Case Else
             IsPunctuation = False
     End Select
+End Function
+
+' ----------------------------------------------------------------
+'  PRIVATE: Create a dictionary-based issue (no class dependency)
+' ----------------------------------------------------------------
+Private Function CreateIssueDict(ByVal ruleName_ As String, _
+                                 ByVal location_ As String, _
+                                 ByVal issue_ As String, _
+                                 ByVal suggestion_ As String, _
+                                 ByVal rangeStart_ As Long, _
+                                 ByVal rangeEnd_ As Long, _
+                                 Optional ByVal severity_ As String = "error", _
+                                 Optional ByVal autoFixSafe_ As Boolean = False) As Object
+    Dim d As Object
+    Set d = CreateObject("Scripting.Dictionary")
+    d("RuleName") = ruleName_
+    d("Location") = location_
+    d("Issue") = issue_
+    d("Suggestion") = suggestion_
+    d("RangeStart") = rangeStart_
+    d("RangeEnd") = rangeEnd_
+    d("Severity") = severity_
+    d("AutoFixSafe") = autoFixSafe_
+    Set CreateIssueDict = d
+End Function
+
+' ----------------------------------------------------------------
+'  Late-bound wrapper: EngineIsInPageRange
+' ----------------------------------------------------------------
+
+' ----------------------------------------------------------------
+'  Late-bound wrapper: EngineGetLocationString
+' ----------------------------------------------------------------
+
+' ----------------------------------------------------------------
+'  Late-bound wrapper: PleadingsEngine.IsInPageRange
+' ----------------------------------------------------------------
+Private Function EngineIsInPageRange(rng As Object) As Boolean
+    On Error Resume Next
+    EngineIsInPageRange = Application.Run("PleadingsEngine.IsInPageRange", rng)
+    If Err.Number <> 0 Then
+        EngineIsInPageRange = True
+        Err.Clear
+    End If
+    On Error GoTo 0
+End Function
+
+' ----------------------------------------------------------------
+'  Late-bound wrapper: PleadingsEngine.GetLocationString
+' ----------------------------------------------------------------
+Private Function EngineGetLocationString(rng As Object, doc As Document) As String
+    On Error Resume Next
+    EngineGetLocationString = Application.Run("PleadingsEngine.GetLocationString", rng, doc)
+    If Err.Number <> 0 Then
+        EngineGetLocationString = "unknown location"
+        Err.Clear
+    End If
+    On Error GoTo 0
 End Function

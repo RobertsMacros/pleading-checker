@@ -9,16 +9,15 @@ Attribute VB_Name = "Rule02_repeated_words"
 ' to prompt manual review of context.
 '
 ' Dependencies:
-'   - PleadingsIssue.cls
 '   - PleadingsEngine.bas (IsInPageRange, GetLocationString)
 ' ============================================================
 Option Explicit
 
 Private Const RULE_NAME As String = "repeated_words"
 
-' ════════════════════════════════════════════════════════════
+' ============================================================
 '  MAIN ENTRY POINT
-' ════════════════════════════════════════════════════════════
+' ============================================================
 Public Function Check_RepeatedWords(doc As Document) As Collection
     Dim issues As New Collection
     Dim para As Paragraph
@@ -36,16 +35,16 @@ Public Function Check_RepeatedWords(doc As Document) As Collection
     Dim charPos As Long
     Dim rangeStart As Long
     Dim rangeEnd As Long
-    Dim issue As PleadingsIssue
+    Dim issue As Object
     Dim paraRange As Range
 
-    ' ── Known-valid repetitions that may be intentional ───
+    ' -- Known-valid repetitions that may be intentional ---
     ' These get flagged as "possible_error" with a note
     ' to review context, rather than a hard "error".
     Dim knownValid As Variant
     knownValid = Array("that", "had", "is", "was", "can")
 
-    ' ── Iterate all paragraphs ────────────────────────────
+    ' -- Iterate all paragraphs ----------------------------
     On Error Resume Next
     For Each para In doc.Paragraphs
         Err.Clear
@@ -57,7 +56,7 @@ Public Function Check_RepeatedWords(doc As Document) As Collection
         End If
 
         ' Skip paragraphs outside the configured page range
-        If Not PleadingsEngine.IsInPageRange(paraRange) Then
+        If Not EngineIsInPageRange(paraRange) Then
             GoTo NextParagraph
         End If
 
@@ -72,7 +71,7 @@ Public Function Check_RepeatedWords(doc As Document) As Collection
             GoTo NextParagraph
         End If
 
-        ' ── Split paragraph into words ────────────────────
+        ' -- Split paragraph into words --------------------
         words = Split(paraText, " ")
         wordCount = UBound(words) - LBound(words) + 1
 
@@ -80,13 +79,13 @@ Public Function Check_RepeatedWords(doc As Document) As Collection
             GoTo NextParagraph
         End If
 
-        ' ── Clean words: strip leading/trailing punctuation ─
+        ' -- Clean words: strip leading/trailing punctuation -
         ReDim cleanWords(LBound(words) To UBound(words))
         For i = LBound(words) To UBound(words)
             cleanWords(i) = StripPunctuation(words(i))
         Next i
 
-        ' ── Compare consecutive words ─────────────────────
+        ' -- Compare consecutive words ---------------------
         prevWord = ""
         For i = LBound(cleanWords) To UBound(cleanWords)
             currWord = LCase(cleanWords(i))
@@ -100,7 +99,7 @@ Public Function Check_RepeatedWords(doc As Document) As Collection
             ' Check for repetition
             If currWord = prevWord And Len(currWord) > 0 Then
 
-                ' ── Determine severity ────────────────
+                ' -- Determine severity ----------------
                 If IsKnownValidRepetition(currWord, knownValid) Then
                     severity = "possible_error"
                     issueText = "Repeated word '" & cleanWords(i) & "' " & _
@@ -112,7 +111,7 @@ Public Function Check_RepeatedWords(doc As Document) As Collection
 
                 suggestion = "Remove the duplicate '" & cleanWords(i) & "'"
 
-                ' ── Calculate character position within paragraph ─
+                ' -- Calculate character position within paragraph -
                 ' Find the second occurrence of the repeated word
                 ' by searching after the first occurrence
                 Dim searchStart As Long
@@ -137,7 +136,7 @@ Public Function Check_RepeatedWords(doc As Document) As Collection
                     rangeEnd = paraRange.End
                 End If
 
-                ' ── Build location string ─────────────
+                ' -- Build location string -------------
                 Err.Clear
                 Dim matchRange As Range
                 Set matchRange = doc.Range(rangeStart, rangeEnd)
@@ -145,22 +144,15 @@ Public Function Check_RepeatedWords(doc As Document) As Collection
                     locStr = "unknown location"
                     Err.Clear
                 Else
-                    locStr = PleadingsEngine.GetLocationString(matchRange, doc)
+                    locStr = EngineGetLocationString(matchRange, doc)
                     If Err.Number <> 0 Then
                         locStr = "unknown location"
                         Err.Clear
                     End If
                 End If
 
-                ' ── Create the issue ──────────────────
-                Set issue = New PleadingsIssue
-                issue.Init RULE_NAME, _
-                           locStr, _
-                           issueText, _
-                           suggestion, _
-                           rangeStart, _
-                           rangeEnd, _
-                           severity
+                ' -- Create the issue ------------------
+                Set issue = CreateIssueDict(RULE_NAME, locStr, issueText, suggestion, rangeStart, rangeEnd, severity)
                 issues.Add issue
             End If
 
@@ -176,10 +168,10 @@ NextParagraph:
     Set Check_RepeatedWords = issues
 End Function
 
-' ════════════════════════════════════════════════════════════
+' ============================================================
 '  PRIVATE: Strip leading and trailing punctuation from a word
 '  Removes characters like . , ; : ! ? " ' ( ) [ ] etc.
-' ════════════════════════════════════════════════════════════
+' ============================================================
 Private Function StripPunctuation(ByVal word As String) As String
     Dim ch As String
     Dim startPos As Long
@@ -220,18 +212,18 @@ Private Function StripPunctuation(ByVal word As String) As String
     End If
 End Function
 
-' ════════════════════════════════════════════════════════════
+' ============================================================
 '  PRIVATE: Check if a character is punctuation
-' ════════════════════════════════════════════════════════════
+' ============================================================
 Private Function IsPunctuation(ByVal ch As String) As Boolean
     Const PUNCT_CHARS As String = ".,;:!?""'()[]{}/-" & Chr(8220) & Chr(8221) & _
                                    Chr(8216) & Chr(8217) & Chr(8212) & Chr(8211)
     IsPunctuation = (InStr(1, PUNCT_CHARS, ch) > 0)
 End Function
 
-' ════════════════════════════════════════════════════════════
+' ============================================================
 '  PRIVATE: Check if a word is in the known-valid list
-' ════════════════════════════════════════════════════════════
+' ============================================================
 Private Function IsKnownValidRepetition(ByVal word As String, _
                                          ByRef knownValid As Variant) As Boolean
     Dim i As Long
@@ -246,4 +238,62 @@ Private Function IsKnownValidRepetition(ByVal word As String, _
     Next i
 
     IsKnownValidRepetition = False
+End Function
+
+' ----------------------------------------------------------------
+'  PRIVATE: Create a dictionary-based issue (no class dependency)
+' ----------------------------------------------------------------
+Private Function CreateIssueDict(ByVal ruleName_ As String, _
+                                 ByVal location_ As String, _
+                                 ByVal issue_ As String, _
+                                 ByVal suggestion_ As String, _
+                                 ByVal rangeStart_ As Long, _
+                                 ByVal rangeEnd_ As Long, _
+                                 Optional ByVal severity_ As String = "error", _
+                                 Optional ByVal autoFixSafe_ As Boolean = False) As Object
+    Dim d As Object
+    Set d = CreateObject("Scripting.Dictionary")
+    d("RuleName") = ruleName_
+    d("Location") = location_
+    d("Issue") = issue_
+    d("Suggestion") = suggestion_
+    d("RangeStart") = rangeStart_
+    d("RangeEnd") = rangeEnd_
+    d("Severity") = severity_
+    d("AutoFixSafe") = autoFixSafe_
+    Set CreateIssueDict = d
+End Function
+
+' ----------------------------------------------------------------
+'  Late-bound wrapper: EngineIsInPageRange
+' ----------------------------------------------------------------
+
+' ----------------------------------------------------------------
+'  Late-bound wrapper: EngineGetLocationString
+' ----------------------------------------------------------------
+
+' ----------------------------------------------------------------
+'  Late-bound wrapper: PleadingsEngine.IsInPageRange
+' ----------------------------------------------------------------
+Private Function EngineIsInPageRange(rng As Object) As Boolean
+    On Error Resume Next
+    EngineIsInPageRange = Application.Run("PleadingsEngine.IsInPageRange", rng)
+    If Err.Number <> 0 Then
+        EngineIsInPageRange = True
+        Err.Clear
+    End If
+    On Error GoTo 0
+End Function
+
+' ----------------------------------------------------------------
+'  Late-bound wrapper: PleadingsEngine.GetLocationString
+' ----------------------------------------------------------------
+Private Function EngineGetLocationString(rng As Object, doc As Document) As String
+    On Error Resume Next
+    EngineGetLocationString = Application.Run("PleadingsEngine.GetLocationString", rng, doc)
+    If Err.Number <> 0 Then
+        EngineGetLocationString = "unknown location"
+        Err.Clear
+    End If
+    On Error GoTo 0
 End Function

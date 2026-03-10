@@ -11,16 +11,15 @@ Attribute VB_Name = "Rule27_footnote_abbreviation_dictionary"
 '   regs, r, rr, sch, s, ss, sub-s, sub-ss, trans, vol, vols
 '
 ' Dependencies:
-'   - PleadingsIssue.cls
 '   - PleadingsEngine.bas (IsInPageRange, GetLocationString)
 ' ============================================================
 Option Explicit
 
 Private Const RULE_NAME As String = "footnote_abbreviation_dictionary"
 
-' ════════════════════════════════════════════════════════════
+' ============================================================
 '  MAIN ENTRY POINT
-' ════════════════════════════════════════════════════════════
+' ============================================================
 Public Function Check_FootnoteAbbreviationDictionary(doc As Document) As Collection
     Dim issues As New Collection
     Dim approved As Object
@@ -29,22 +28,22 @@ Public Function Check_FootnoteAbbreviationDictionary(doc As Document) As Collect
     Dim fn As Footnote
     Dim i As Long
 
-    ' ── Build approved abbreviations set (case-sensitive) ────
+    ' -- Build approved abbreviations set (case-sensitive) ----
     Set approved = CreateObject("Scripting.Dictionary")
     approved.CompareMode = vbBinaryCompare
     BuildApprovedDict approved
 
-    ' ── Build approved lower-case set for dotted-form check ──
+    ' -- Build approved lower-case set for dotted-form check --
     Set approvedLC = CreateObject("Scripting.Dictionary")
     approvedLC.CompareMode = vbTextCompare
     BuildApprovedLCDict approvedLC
 
-    ' ── Build unapproved variant mapping (LCase key) ────────
+    ' -- Build unapproved variant mapping (LCase key) --------
     Set unapproved = CreateObject("Scripting.Dictionary")
     unapproved.CompareMode = vbTextCompare
     BuildUnapprovedDict unapproved
 
-    ' ── Process each footnote ────────────────────────────────
+    ' -- Process each footnote --------------------------------
     For i = 1 To doc.Footnotes.Count
         On Error Resume Next
         Set fn = doc.Footnotes(i)
@@ -55,9 +54,9 @@ Public Function Check_FootnoteAbbreviationDictionary(doc As Document) As Collect
         End If
         On Error GoTo 0
 
-        ' ── Check page range on the reference mark ───────────
+        ' -- Check page range on the reference mark -----------
         On Error Resume Next
-        If Not PleadingsEngine.IsInPageRange(fn.Reference) Then
+        If Not EngineIsInPageRange(fn.Reference) Then
             On Error GoTo 0
             GoTo NextFootnote
         End If
@@ -71,9 +70,9 @@ NextFootnote:
     Set Check_FootnoteAbbreviationDictionary = issues
 End Function
 
-' ════════════════════════════════════════════════════════════
+' ============================================================
 '  PRIVATE: Check a single footnote's text for abbreviation issues
-' ════════════════════════════════════════════════════════════
+' ============================================================
 Private Sub CheckFootnoteText(doc As Document, _
                                fn As Footnote, _
                                ByRef approved As Object, _
@@ -87,7 +86,7 @@ Private Sub CheckFootnoteText(doc As Document, _
     Dim noDots As String
     Dim lcToken As String
     Dim preferred As String
-    Dim issue As PleadingsIssue
+    Dim issue As Object
     Dim locStr As String
     Dim j As Long
     Dim issueText As String
@@ -102,7 +101,7 @@ Private Sub CheckFootnoteText(doc As Document, _
     End If
     On Error GoTo 0
 
-    ' ── Tokenize on spaces ───────────────────────────────────
+    ' -- Tokenize on spaces -----------------------------------
     tokens = Split(noteText, " ")
 
     For j = LBound(tokens) To UBound(tokens)
@@ -113,7 +112,7 @@ Private Sub CheckFootnoteText(doc As Document, _
         token = CleanTokenBoundaries(token)
         If Len(token) = 0 Then GoTo NextToken
 
-        ' ── Check 1: Unapproved variant (without trailing dot) ──
+        ' -- Check 1: Unapproved variant (without trailing dot) --
         stripped = StripTrailingDot(token)
         lcToken = LCase(stripped)
 
@@ -121,27 +120,19 @@ Private Sub CheckFootnoteText(doc As Document, _
             preferred = unapproved(lcToken)
 
             On Error Resume Next
-            locStr = PleadingsEngine.GetLocationString(fn.Reference, doc)
+            locStr = EngineGetLocationString(fn.Reference, doc)
             If Err.Number <> 0 Then locStr = "unknown location": Err.Clear
             On Error GoTo 0
 
             issueText = "Unapproved footnote abbreviation."
             suggText = "Use '" & preferred & "' instead of '" & stripped & "'."
 
-            Set issue = New PleadingsIssue
-            issue.Init RULE_NAME, _
-                       locStr, _
-                       issueText, _
-                       suggText, _
-                       fn.Range.Start, _
-                       fn.Range.End, _
-                       "warning", _
-                       False
+            Set issue = CreateIssueDict(RULE_NAME, locStr, issueText, suggText, fn.Range.Start, fn.Range.End, "warning", False)
             issues.Add issue
             GoTo NextToken
         End If
 
-        ' ── Check 2: Dotted form of approved abbreviation ───────
+        ' -- Check 2: Dotted form of approved abbreviation -------
         ' Only flag tokens that contain dots
         If InStr(1, token, ".") > 0 Then
             ' Strip trailing dot and check
@@ -153,24 +144,16 @@ Private Sub CheckFootnoteText(doc As Document, _
             If Len(noDots) > 0 Then
                 ' Check if the undotted form is an approved abbreviation
                 If approvedLC.Exists(noDots) Then
-                    ' This is a dotted form of an approved abbrev — flag it
+                    ' This is a dotted form of an approved abbrev -- flag it
                     On Error Resume Next
-                    locStr = PleadingsEngine.GetLocationString(fn.Reference, doc)
+                    locStr = EngineGetLocationString(fn.Reference, doc)
                     If Err.Number <> 0 Then locStr = "unknown location": Err.Clear
                     On Error GoTo 0
 
                     issueText = "Unapproved footnote abbreviation."
                     suggText = "Use '" & noDots & "' instead of '" & token & "'."
 
-                    Set issue = New PleadingsIssue
-                    issue.Init RULE_NAME, _
-                               locStr, _
-                               issueText, _
-                               suggText, _
-                               fn.Range.Start, _
-                               fn.Range.End, _
-                               "warning", _
-                               False
+                    Set issue = CreateIssueDict(RULE_NAME, locStr, issueText, suggText, fn.Range.Start, fn.Range.End, "warning", False)
                     issues.Add issue
                     GoTo NextToken
                 End If
@@ -181,10 +164,10 @@ NextToken:
     Next j
 End Sub
 
-' ════════════════════════════════════════════════════════════
+' ============================================================
 '  PRIVATE: Build approved abbreviations dictionary
 '  (case-sensitive binary compare)
-' ════════════════════════════════════════════════════════════
+' ============================================================
 Private Sub BuildApprovedDict(ByRef d As Object)
     d.Add "Art", True
     d.Add "art", True
@@ -235,10 +218,10 @@ Private Sub BuildApprovedDict(ByRef d As Object)
     d.Add "vols", True
 End Sub
 
-' ════════════════════════════════════════════════════════════
+' ============================================================
 '  PRIVATE: Build approved lower-case dictionary for dotted
 '  form checks (case-insensitive text compare)
-' ════════════════════════════════════════════════════════════
+' ============================================================
 Private Sub BuildApprovedLCDict(ByRef d As Object)
     Dim abbrevs As Variant
     Dim k As Long
@@ -255,9 +238,9 @@ Private Sub BuildApprovedLCDict(ByRef d As Object)
     Next k
 End Sub
 
-' ════════════════════════════════════════════════════════════
+' ============================================================
 '  PRIVATE: Build unapproved variant mapping
-' ════════════════════════════════════════════════════════════
+' ============================================================
 Private Sub BuildUnapprovedDict(ByRef d As Object)
     d.Add "pgs", "pp"
     d.Add "sec", "s"
@@ -268,9 +251,9 @@ Private Sub BuildUnapprovedDict(ByRef d As Object)
     d.Add "paras.", "paras"
 End Sub
 
-' ════════════════════════════════════════════════════════════
+' ============================================================
 '  PRIVATE: Strip a single trailing dot from a token
-' ════════════════════════════════════════════════════════════
+' ============================================================
 Private Function StripTrailingDot(ByVal s As String) As String
     If Len(s) > 0 Then
         If Right(s, 1) = "." Then
@@ -283,10 +266,10 @@ Private Function StripTrailingDot(ByVal s As String) As String
     End If
 End Function
 
-' ════════════════════════════════════════════════════════════
-'  PRIVATE: Clean token boundaries — strip leading/trailing
+' ============================================================
+'  PRIVATE: Clean token boundaries -- strip leading/trailing
 '  characters that are not letters, digits, dots, or hyphens
-' ════════════════════════════════════════════════════════════
+' ============================================================
 Private Function CleanTokenBoundaries(ByVal s As String) As String
     Dim startPos As Long
     Dim endPos As Long
@@ -322,12 +305,70 @@ Private Function CleanTokenBoundaries(ByVal s As String) As String
     End If
 End Function
 
-' ════════════════════════════════════════════════════════════
+' ============================================================
 '  PRIVATE: Check if a character code is a letter or digit
-' ════════════════════════════════════════════════════════════
+' ============================================================
 Private Function IsWordChar(ByVal code As Long) As Boolean
     ' A-Z = 65-90, a-z = 97-122, 0-9 = 48-57
     IsWordChar = (code >= 65 And code <= 90) Or _
                  (code >= 97 And code <= 122) Or _
                  (code >= 48 And code <= 57)
+End Function
+
+' ----------------------------------------------------------------
+'  PRIVATE: Create a dictionary-based issue (no class dependency)
+' ----------------------------------------------------------------
+Private Function CreateIssueDict(ByVal ruleName_ As String, _
+                                 ByVal location_ As String, _
+                                 ByVal issue_ As String, _
+                                 ByVal suggestion_ As String, _
+                                 ByVal rangeStart_ As Long, _
+                                 ByVal rangeEnd_ As Long, _
+                                 Optional ByVal severity_ As String = "error", _
+                                 Optional ByVal autoFixSafe_ As Boolean = False) As Object
+    Dim d As Object
+    Set d = CreateObject("Scripting.Dictionary")
+    d("RuleName") = ruleName_
+    d("Location") = location_
+    d("Issue") = issue_
+    d("Suggestion") = suggestion_
+    d("RangeStart") = rangeStart_
+    d("RangeEnd") = rangeEnd_
+    d("Severity") = severity_
+    d("AutoFixSafe") = autoFixSafe_
+    Set CreateIssueDict = d
+End Function
+
+' ----------------------------------------------------------------
+'  Late-bound wrapper: EngineIsInPageRange
+' ----------------------------------------------------------------
+
+' ----------------------------------------------------------------
+'  Late-bound wrapper: EngineGetLocationString
+' ----------------------------------------------------------------
+
+' ----------------------------------------------------------------
+'  Late-bound wrapper: PleadingsEngine.IsInPageRange
+' ----------------------------------------------------------------
+Private Function EngineIsInPageRange(rng As Object) As Boolean
+    On Error Resume Next
+    EngineIsInPageRange = Application.Run("PleadingsEngine.IsInPageRange", rng)
+    If Err.Number <> 0 Then
+        EngineIsInPageRange = True
+        Err.Clear
+    End If
+    On Error GoTo 0
+End Function
+
+' ----------------------------------------------------------------
+'  Late-bound wrapper: PleadingsEngine.GetLocationString
+' ----------------------------------------------------------------
+Private Function EngineGetLocationString(rng As Object, doc As Document) As String
+    On Error Resume Next
+    EngineGetLocationString = Application.Run("PleadingsEngine.GetLocationString", rng, doc)
+    If Err.Number <> 0 Then
+        EngineGetLocationString = "unknown location"
+        Err.Clear
+    End If
+    On Error GoTo 0
 End Function

@@ -6,41 +6,41 @@ Attribute VB_Name = "Rules_Numbering"
 '   - Rule08: Clause number format (Check_ClauseNumberFormat)
 '
 ' Dependencies:
-'   - PleadingsIssue.cls
 '   - PleadingsEngine.bas (IsInPageRange, GetLocationString)
-'   - Microsoft Scripting Runtime (Scripting.Dictionary)
 ' ============================================================
 Option Explicit
 
 Private Const RULE_NAME_SEQ As String = "sequential_numbering"
 Private Const RULE_NAME_FMT As String = "clause_number_format"
 
-' ════════════════════════════════════════════════════════════
-'  RULE 03 — MAIN ENTRY POINT
-' ════════════════════════════════════════════════════════════
+' ============================================================
+'  RULE 03 -- MAIN ENTRY POINT
+' ============================================================
 Public Function Check_SequentialNumbering(doc As Document) As Collection
     Dim issues As New Collection
 
-    ' ── Check Word-native numbered lists ──────────────────
+    ' -- Check Word-native numbered lists ------------------
     CheckNativeListNumbering doc, issues
 
-    ' ── Check manually typed numbering ────────────────────
+    ' -- Check manually typed numbering --------------------
     CheckManualNumbering doc, issues
 
     Set Check_SequentialNumbering = issues
 End Function
 
-' ════════════════════════════════════════════════════════════
+' ============================================================
 '  PRIVATE: Check Word-native list numbering
 '  Uses a Scripting.Dictionary keyed by list identifier to
 '  track expected next values per list and level.
 '
 '  Each top-level key maps to a Dictionary of levels, where
 '  each level stores the expected next value.
-' ════════════════════════════════════════════════════════════
+' ============================================================
 Private Sub CheckNativeListNumbering(doc As Document, _
                                       ByRef issues As Collection)
-    Dim listContexts As New Scripting.Dictionary  ' listKey -> Dictionary(level -> expectedNext)
+    Dim listContexts As Object  ' listKey -> Dictionary(level -> expectedNext)
+    Dim listContexts As Object
+    Set listContexts = CreateObject("Scripting.Dictionary")
     Dim para As Paragraph
     Dim paraRange As Range
     Dim listType As Long
@@ -48,15 +48,17 @@ Private Sub CheckNativeListNumbering(doc As Document, _
     Dim listLevel As Long
     Dim listValue As Long
     Dim expectedNext As Long
-    Dim levelDict As Scripting.Dictionary
-    Dim issue As PleadingsIssue
+    Dim levelDict As Object
+    Dim issue As Object
     Dim locStr As String
     Dim issueText As String
     Dim suggestion As String
     Dim prevLevel As Long
 
     ' Track the previous level per list to detect level changes
-    Dim prevLevelDict As New Scripting.Dictionary  ' listKey -> prevLevel
+    Dim prevLevelDict As Object  ' listKey -> prevLevel
+    Dim prevLevelDict As Object
+    Set prevLevelDict = CreateObject("Scripting.Dictionary")
 
     On Error Resume Next
 
@@ -69,7 +71,7 @@ Private Sub CheckNativeListNumbering(doc As Document, _
             GoTo NextNativePara
         End If
 
-        ' ── Skip non-list paragraphs ─────────────────────
+        ' -- Skip non-list paragraphs ---------------------
         listType = paraRange.ListFormat.listType
         If Err.Number <> 0 Then
             Err.Clear
@@ -84,12 +86,12 @@ Private Sub CheckNativeListNumbering(doc As Document, _
         ' Skip bullet lists (wdListBullet=2, wdListPictureBullet=6)
         If listType = 2 Or listType = 6 Then GoTo NextNativePara
 
-        ' ── Skip if outside configured page range ────────
-        If Not PleadingsEngine.IsInPageRange(paraRange) Then
+        ' -- Skip if outside configured page range --------
+        If Not EngineIsInPageRange(paraRange) Then
             GoTo NextNativePara
         End If
 
-        ' ── Determine list key (unique identifier) ───────
+        ' -- Determine list key (unique identifier) -------
         ' Try to use the List object's ListID first; fall back
         ' to a synthetic key built from type + position.
         listKey = ""
@@ -106,7 +108,7 @@ Private Sub CheckNativeListNumbering(doc As Document, _
         End If
         Err.Clear
 
-        ' ── Get current list value and level ─────────────
+        ' -- Get current list value and level -------------
         listValue = paraRange.ListFormat.listValue
         If Err.Number <> 0 Then
             Err.Clear
@@ -119,9 +121,10 @@ Private Sub CheckNativeListNumbering(doc As Document, _
             listLevel = 1
         End If
 
-        ' ── Initialise tracking for this list if new ─────
+        ' -- Initialise tracking for this list if new -----
         If Not listContexts.Exists(listKey) Then
-            Dim newLevelDict As New Scripting.Dictionary
+            Dim newLevelDict As Object
+            Set newLevelDict = CreateObject("Scripting.Dictionary")
             listContexts.Add listKey, newLevelDict
             prevLevelDict.Add listKey, 0
         End If
@@ -129,7 +132,7 @@ Private Sub CheckNativeListNumbering(doc As Document, _
         Set levelDict = listContexts(listKey)
         prevLevel = prevLevelDict(listKey)
 
-        ' ── Handle level changes ─────────────────────────
+        ' -- Handle level changes -------------------------
         ' When we go to a deeper level, that level starts fresh.
         ' When we return to a shallower level, reset all deeper levels.
         If listLevel <> prevLevel And prevLevel > 0 Then
@@ -150,7 +153,7 @@ Private Sub CheckNativeListNumbering(doc As Document, _
             End If
         End If
 
-        ' ── Check expected value at this level ───────────
+        ' -- Check expected value at this level -----------
         If Not levelDict.Exists(listLevel) Then
             ' First item at this level in this list; record starting value
             levelDict.Add listLevel, listValue + 1
@@ -164,7 +167,7 @@ Private Sub CheckNativeListNumbering(doc As Document, _
             ElseIf listValue = expectedNext - 1 Then
                 ' Duplicate number
                 Err.Clear
-                locStr = PleadingsEngine.GetLocationString(paraRange, doc)
+                locStr = EngineGetLocationString(paraRange, doc)
                 If Err.Number <> 0 Then
                     locStr = "unknown location"
                     Err.Clear
@@ -173,16 +176,14 @@ Private Sub CheckNativeListNumbering(doc As Document, _
                 issueText = "Duplicate number " & listValue & " at level " & listLevel
                 suggestion = "Expected " & expectedNext & "; remove or renumber the duplicate"
 
-                Set issue = New PleadingsIssue
-                issue.Init RULE_NAME_SEQ, locStr, issueText, suggestion, _
-                           paraRange.Start, paraRange.End, "error"
+                Set issue = CreateIssueDict(RULE_NAME_SEQ, locStr, issueText, suggestion, paraRange.Start, paraRange.End, "error")
                 issues.Add issue
                 ' Do not advance expectedNext for duplicates
 
             ElseIf listValue > expectedNext Then
                 ' Skipped item(s)
                 Err.Clear
-                locStr = PleadingsEngine.GetLocationString(paraRange, doc)
+                locStr = EngineGetLocationString(paraRange, doc)
                 If Err.Number <> 0 Then
                     locStr = "unknown location"
                     Err.Clear
@@ -193,9 +194,7 @@ Private Sub CheckNativeListNumbering(doc As Document, _
                 suggestion = "Check whether items " & expectedNext & " through " & _
                              (listValue - 1) & " are missing"
 
-                Set issue = New PleadingsIssue
-                issue.Init RULE_NAME_SEQ, locStr, issueText, suggestion, _
-                           paraRange.Start, paraRange.End, "error"
+                Set issue = CreateIssueDict(RULE_NAME_SEQ, locStr, issueText, suggestion, paraRange.Start, paraRange.End, "error")
                 issues.Add issue
 
                 ' Update expected to continue from current
@@ -204,7 +203,7 @@ Private Sub CheckNativeListNumbering(doc As Document, _
             ElseIf listValue < expectedNext - 1 Then
                 ' Numbering went backwards
                 Err.Clear
-                locStr = PleadingsEngine.GetLocationString(paraRange, doc)
+                locStr = EngineGetLocationString(paraRange, doc)
                 If Err.Number <> 0 Then
                     locStr = "unknown location"
                     Err.Clear
@@ -214,9 +213,7 @@ Private Sub CheckNativeListNumbering(doc As Document, _
                             " -- numbering went backwards"
                 suggestion = "Renumber this item to " & expectedNext & " or check list continuity"
 
-                Set issue = New PleadingsIssue
-                issue.Init RULE_NAME_SEQ, locStr, issueText, suggestion, _
-                           paraRange.Start, paraRange.End, "error"
+                Set issue = CreateIssueDict(RULE_NAME_SEQ, locStr, issueText, suggestion, paraRange.Start, paraRange.End, "error")
                 issues.Add issue
 
                 ' Update expected to continue from current
@@ -235,12 +232,12 @@ NextNativePara:
     On Error GoTo 0
 End Sub
 
-' ════════════════════════════════════════════════════════════
+' ============================================================
 '  PRIVATE: Check manually typed numbering
 '  Detects paragraphs that start with a number pattern
 '  (e.g. "1.", "2.", "12.3") but have no Word list formatting.
 '  Tracks these separately and checks for sequence breaks.
-' ════════════════════════════════════════════════════════════
+' ============================================================
 Private Sub CheckManualNumbering(doc As Document, _
                                   ByRef issues As Collection)
     Dim para As Paragraph
@@ -250,7 +247,7 @@ Private Sub CheckManualNumbering(doc As Document, _
     Dim manualNum As Long
     Dim expectedNext As Long
     Dim tracking As Boolean
-    Dim issue As PleadingsIssue
+    Dim issue As Object
     Dim locStr As String
     Dim issueText As String
     Dim suggestion As String
@@ -275,7 +272,7 @@ Private Sub CheckManualNumbering(doc As Document, _
             GoTo NextManualPara
         End If
 
-        ' ── Only process non-list paragraphs ─────────────
+        ' -- Only process non-list paragraphs -------------
         listType = paraRange.ListFormat.listType
         If Err.Number <> 0 Then
             Err.Clear
@@ -290,7 +287,7 @@ Private Sub CheckManualNumbering(doc As Document, _
             GoTo NextManualPara
         End If
 
-        ' ── Check if paragraph starts with a number pattern ─
+        ' -- Check if paragraph starts with a number pattern -
         ' Patterns: "N." or "N)" where N is one or more digits
         manualNum = ExtractLeadingNumber(paraText)
 
@@ -305,12 +302,12 @@ Private Sub CheckManualNumbering(doc As Document, _
             GoTo NextManualPara
         End If
 
-        ' ── Skip if outside configured page range ────────
-        If Not PleadingsEngine.IsInPageRange(paraRange) Then
+        ' -- Skip if outside configured page range --------
+        If Not EngineIsInPageRange(paraRange) Then
             GoTo NextManualPara
         End If
 
-        ' ── Start or continue tracking ───────────────────
+        ' -- Start or continue tracking -------------------
         If Not tracking Then
             ' First manually numbered paragraph in a sequence
             tracking = True
@@ -318,7 +315,7 @@ Private Sub CheckManualNumbering(doc As Document, _
             GoTo NextManualPara
         End If
 
-        ' ── Check sequence ───────────────────────────────
+        ' -- Check sequence -------------------------------
         If manualNum = expectedNext Then
             ' Correct sequence
             expectedNext = manualNum + 1
@@ -326,7 +323,7 @@ Private Sub CheckManualNumbering(doc As Document, _
         ElseIf manualNum > expectedNext Then
             ' Skipped item(s)
             Err.Clear
-            locStr = PleadingsEngine.GetLocationString(paraRange, doc)
+            locStr = EngineGetLocationString(paraRange, doc)
             If Err.Number <> 0 Then
                 locStr = "unknown location"
                 Err.Clear
@@ -337,9 +334,7 @@ Private Sub CheckManualNumbering(doc As Document, _
             suggestion = "Check whether items " & expectedNext & " through " & _
                          (manualNum - 1) & " are missing"
 
-            Set issue = New PleadingsIssue
-            issue.Init RULE_NAME_SEQ, locStr, issueText, suggestion, _
-                       paraRange.Start, paraRange.End, "error"
+            Set issue = CreateIssueDict(RULE_NAME_SEQ, locStr, issueText, suggestion, paraRange.Start, paraRange.End, "error")
             issues.Add issue
 
             expectedNext = manualNum + 1
@@ -347,7 +342,7 @@ Private Sub CheckManualNumbering(doc As Document, _
         ElseIf manualNum < expectedNext And manualNum = expectedNext - 1 Then
             ' Duplicate
             Err.Clear
-            locStr = PleadingsEngine.GetLocationString(paraRange, doc)
+            locStr = EngineGetLocationString(paraRange, doc)
             If Err.Number <> 0 Then
                 locStr = "unknown location"
                 Err.Clear
@@ -356,15 +351,13 @@ Private Sub CheckManualNumbering(doc As Document, _
             issueText = "Manual numbering: duplicate number " & manualNum
             suggestion = "Remove or renumber the duplicate item"
 
-            Set issue = New PleadingsIssue
-            issue.Init RULE_NAME_SEQ, locStr, issueText, suggestion, _
-                       paraRange.Start, paraRange.End, "error"
+            Set issue = CreateIssueDict(RULE_NAME_SEQ, locStr, issueText, suggestion, paraRange.Start, paraRange.End, "error")
             issues.Add issue
 
         ElseIf manualNum < expectedNext - 1 Then
             ' Backwards
             Err.Clear
-            locStr = PleadingsEngine.GetLocationString(paraRange, doc)
+            locStr = EngineGetLocationString(paraRange, doc)
             If Err.Number <> 0 Then
                 locStr = "unknown location"
                 Err.Clear
@@ -374,9 +367,7 @@ Private Sub CheckManualNumbering(doc As Document, _
                         " but found " & manualNum & " -- numbering went backwards"
             suggestion = "Renumber this item to " & expectedNext & " or check sequence"
 
-            Set issue = New PleadingsIssue
-            issue.Init RULE_NAME_SEQ, locStr, issueText, suggestion, _
-                       paraRange.Start, paraRange.End, "error"
+            Set issue = CreateIssueDict(RULE_NAME_SEQ, locStr, issueText, suggestion, paraRange.Start, paraRange.End, "error")
             issues.Add issue
 
             expectedNext = manualNum + 1
@@ -390,12 +381,12 @@ NextManualPara:
     On Error GoTo 0
 End Sub
 
-' ════════════════════════════════════════════════════════════
+' ============================================================
 '  PRIVATE: Extract leading number from paragraph text
 '  Returns the number if the text starts with a pattern like
 '  "1.", "12.", "3)", "42)"; returns -1 if no match.
 '  Uses the VBA Like operator for pattern matching.
-' ════════════════════════════════════════════════════════════
+' ============================================================
 Private Function ExtractLeadingNumber(ByVal txt As String) As Long
     Dim trimmed As String
     Dim numStr As String
@@ -440,11 +431,11 @@ Private Function ExtractLeadingNumber(ByVal txt As String) As Long
     End If
 End Function
 
-' ════════════════════════════════════════════════════════════
+' ============================================================
 '  PRIVATE: Extract clause number prefix from paragraph text
 '  Returns the clause number prefix or empty string if none
 '  found.
-' ════════════════════════════════════════════════════════════
+' ============================================================
 Private Function ExtractClausePrefix(ByVal txt As String) As String
     Dim cleanText As String
     cleanText = Trim$(Replace(txt, vbCr, ""))
@@ -506,10 +497,10 @@ Private Function ExtractClausePrefix(ByVal txt As String) As String
     ExtractClausePrefix = prefix
 End Function
 
-' ════════════════════════════════════════════════════════════
+' ============================================================
 '  PRIVATE: Classify the clause number format
 '  Returns a format pattern string describing the style
-' ════════════════════════════════════════════════════════════
+' ============================================================
 Private Function ClassifyClauseFormat(ByVal prefix As String) As String
     If Len(prefix) = 0 Then
         ClassifyClauseFormat = ""
@@ -529,7 +520,7 @@ Private Function ClassifyClauseFormat(ByVal prefix As String) As String
         Exit Function
     End If
 
-    ' Level 3 style A: "1.1(a)" — dotted number followed by (letter)
+    ' Level 3 style A: "1.1(a)" -- dotted number followed by (letter)
     If prefix Like "#.#(*)" Or prefix Like "##.#(*)" Or _
        prefix Like "#.##(*)" Or prefix Like "##.##(*)" Then
         ' Check if content in parens is a lowercase letter
@@ -549,7 +540,7 @@ Private Function ClassifyClauseFormat(ByVal prefix As String) As String
         End If
     End If
 
-    ' Level 3 style B: "1.1.1" — triple dotted
+    ' Level 3 style B: "1.1.1" -- triple dotted
     If prefix Like "#.#.#" Or prefix Like "##.#.#" Or _
        prefix Like "#.##.#" Or prefix Like "#.#.##" Then
         ClassifyClauseFormat = "L3_dotted_sub"
@@ -597,9 +588,9 @@ Private Function ClassifyClauseFormat(ByVal prefix As String) As String
     ClassifyClauseFormat = "other_" & prefix
 End Function
 
-' ════════════════════════════════════════════════════════════
-'  RULE 08 — MAIN ENTRY POINT
-' ════════════════════════════════════════════════════════════
+' ============================================================
+'  RULE 08 -- MAIN ENTRY POINT
+' ============================================================
 Public Function Check_ClauseNumberFormat(doc As Document) As Collection
     Dim issues As New Collection
     Dim para As Paragraph
@@ -608,7 +599,8 @@ Public Function Check_ClauseNumberFormat(doc As Document) As Collection
     On Error Resume Next
 
     ' Track format patterns: formatPattern -> Collection of Array(paraIdx, prefix, rangeStart, rangeEnd)
-    Dim formatCounts As New Scripting.Dictionary
+    Dim formatCounts As Object
+    Set formatCounts = CreateObject("Scripting.Dictionary")
     Dim clauseInfos As New Collection
 
     paraIdx = 0
@@ -620,7 +612,7 @@ Public Function Check_ClauseNumberFormat(doc As Document) As Collection
            para.OutlineLevel <= wdOutlineLevel9 Then GoTo NextClausePara
 
         ' Page range filter
-        If Not PleadingsEngine.IsInPageRange(para.Range) Then GoTo NextClausePara
+        If Not EngineIsInPageRange(para.Range) Then GoTo NextClausePara
 
         ' Extract clause number prefix
         Dim prefix As String
@@ -649,9 +641,11 @@ Public Function Check_ClauseNumberFormat(doc As Document) As Collection
 NextClausePara:
     Next para
 
-    ' ── Group by level category and detect mixed formats ────
+    ' -- Group by level category and detect mixed formats ----
     ' Level categories: L1, L2, L3, L4
-    Dim levelGroups As New Scripting.Dictionary  ' "L1" -> Dictionary(format -> count)
+    Dim levelGroups As Object  ' "L1" -> Dictionary(format -> count)
+    Dim levelGroups As Object
+    Set levelGroups = CreateObject("Scripting.Dictionary")
     Dim fk As Variant
     For Each fk In formatCounts.keys
         Dim levelCat As String
@@ -668,20 +662,22 @@ NextClausePara:
         End If
 
         If Not levelGroups.Exists(levelCat) Then
-            levelGroups.Add levelCat, New Scripting.Dictionary
+            levelGroups.Add levelCat, CreateObject("Scripting.Dictionary")
         End If
-        Dim lgDict As Scripting.Dictionary
+        Dim lgDict As Object
         Set lgDict = levelGroups(levelCat)
         lgDict.Add CStr(fk), formatCounts(fk)
     Next fk
 
-    ' ── Find dominant format per level and flag deviations ──
-    Dim dominantFormats As New Scripting.Dictionary  ' levelCat -> dominant format string
+    ' -- Find dominant format per level and flag deviations --
+    Dim dominantFormats As Object  ' levelCat -> dominant format string
+    Dim dominantFormats As Object
+    Set dominantFormats = CreateObject("Scripting.Dictionary")
     Dim lgKey As Variant
     For Each lgKey In levelGroups.keys
         Set lgDict = levelGroups(lgKey)
         If lgDict.Count > 1 Then
-            ' Mixed formats at this level — find dominant
+            ' Mixed formats at this level -- find dominant
             Dim domFmt As String
             Dim maxCnt As Long
             domFmt = ""
@@ -696,7 +692,7 @@ NextClausePara:
         End If
     Next lgKey
 
-    ' ── Flag individual clauses that deviate ────────────────
+    ' -- Flag individual clauses that deviate ----------------
     If dominantFormats.Count > 0 Then
         Dim ci As Long
         For ci = 1 To clauseInfos.Count
@@ -722,18 +718,13 @@ NextClausePara:
 
             If dominantFormats.Exists(levelCat) Then
                 If clauseFmt <> dominantFormats(levelCat) Then
-                    Dim issue As New PleadingsIssue
+                    Dim issue As Object
                     Dim rng As Range
                     Set rng = doc.Range(CLng(clauseData(2)), CLng(clauseData(3)))
                     Dim loc As String
-                    loc = PleadingsEngine.GetLocationString(rng, doc)
+                    loc = EngineGetLocationString(rng, doc)
 
-                    issue.Init RULE_NAME_FMT, loc, _
-                        "Mixed clause number format: '" & CStr(clauseData(1)) & _
-                        "' uses style " & clauseFmt & " but dominant " & _
-                        levelCat & " style is " & dominantFormats(levelCat), _
-                        "Reformat to match the dominant clause numbering style", _
-                        CLng(clauseData(2)), CLng(clauseData(3)), "error"
+                    Set issue = CreateIssueDict(RULE_NAME_FMT, loc, "Mixed clause number format:)
                     issues.Add issue
                 End If
             End If
@@ -742,4 +733,70 @@ NextClausePara:
 
     On Error GoTo 0
     Set Check_ClauseNumberFormat = issues
+End Function
+
+' ----------------------------------------------------------------
+'  PRIVATE: Late-bound wrapper for EngineIsInPageRange
+' ----------------------------------------------------------------
+
+' ----------------------------------------------------------------
+'  PRIVATE: Late-bound wrapper for EngineGetLocationString
+' ----------------------------------------------------------------
+
+' ----------------------------------------------------------------
+'  PRIVATE: Create a dictionary-based issue (no class dependency)
+' ----------------------------------------------------------------
+Private Function CreateIssueDict(ByVal ruleName_ As String, _
+                                 ByVal location_ As String, _
+                                 ByVal issue_ As String, _
+                                 ByVal suggestion_ As String, _
+                                 ByVal rangeStart_ As Long, _
+                                 ByVal rangeEnd_ As Long, _
+                                 Optional ByVal severity_ As String = "error", _
+                                 Optional ByVal autoFixSafe_ As Boolean = False) As Object
+    Dim d As Object
+    Set d = CreateObject("Scripting.Dictionary")
+    d("RuleName") = ruleName_
+    d("Location") = location_
+    d("Issue") = issue_
+    d("Suggestion") = suggestion_
+    d("RangeStart") = rangeStart_
+    d("RangeEnd") = rangeEnd_
+    d("Severity") = severity_
+    d("AutoFixSafe") = autoFixSafe_
+    Set CreateIssueDict = d
+End Function
+
+' ----------------------------------------------------------------
+'  Late-bound wrapper: EngineIsInPageRange
+' ----------------------------------------------------------------
+
+' ----------------------------------------------------------------
+'  Late-bound wrapper: EngineGetLocationString
+' ----------------------------------------------------------------
+
+' ----------------------------------------------------------------
+'  Late-bound wrapper: PleadingsEngine.IsInPageRange
+' ----------------------------------------------------------------
+Private Function EngineIsInPageRange(rng As Object) As Boolean
+    On Error Resume Next
+    EngineIsInPageRange = Application.Run("PleadingsEngine.IsInPageRange", rng)
+    If Err.Number <> 0 Then
+        EngineIsInPageRange = True
+        Err.Clear
+    End If
+    On Error GoTo 0
+End Function
+
+' ----------------------------------------------------------------
+'  Late-bound wrapper: PleadingsEngine.GetLocationString
+' ----------------------------------------------------------------
+Private Function EngineGetLocationString(rng As Object, doc As Document) As String
+    On Error Resume Next
+    EngineGetLocationString = Application.Run("PleadingsEngine.GetLocationString", rng, doc)
+    If Err.Number <> 0 Then
+        EngineGetLocationString = "unknown location"
+        Err.Clear
+    End If
+    On Error GoTo 0
 End Function

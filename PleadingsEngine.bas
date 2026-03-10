@@ -8,10 +8,8 @@ Attribute VB_Name = "PleadingsEngine"
 ' JSON reports.
 '
 ' Dependencies:
-'   - PleadingsIssue.cls   (structured result class)
 '   - PleadingsRules.bas   (individual rule implementations)
 '   - frmPleadingsChecker   (user form)
-'   - Microsoft Scripting Runtime (Tools > References)
 '
 ' Installation:
 '   1. Open the VBA Editor (Alt+F11)
@@ -24,15 +22,15 @@ Attribute VB_Name = "PleadingsEngine"
 ' ============================================================
 Option Explicit
 
-' ── Module-level state ────────────────────────────────────────
-Private ruleConfig      As Scripting.Dictionary   ' rule name (String) -> enabled (Boolean)
+' -- Module-level state ----------------------------------------
+Private ruleConfig      As Object   ' rule name (String) -> enabled (Boolean)
 Private PAGE_RANGE_START As Long                  ' 0 = no restriction
 Private PAGE_RANGE_END   As Long                  ' 0 = no restriction
-Private whitelistDict   As Scripting.Dictionary   ' custom term whitelist
+Private whitelistDict   As Object   ' custom term whitelist
 
-' ════════════════════════════════════════════════════════════
+' ============================================================
 '  ENTRY POINT
-' ════════════════════════════════════════════════════════════
+' ============================================================
 Public Sub PleadingsChecker()
     If ActiveDocument Is Nothing Then
         MsgBox "Please open a document first.", vbExclamation, "Pleadings Checker"
@@ -41,13 +39,14 @@ Public Sub PleadingsChecker()
     frmPleadingsChecker.Show
 End Sub
 
-' ════════════════════════════════════════════════════════════
+' ============================================================
 '  RULE CONFIGURATION
 '  Creates a Dictionary with all 34 rule names defaulting
 '  to True (enabled). The form can toggle individual rules.
-' ════════════════════════════════════════════════════════════
-Public Function InitRuleConfig() As Scripting.Dictionary
-    Dim cfg As New Scripting.Dictionary
+' ============================================================
+Public Function InitRuleConfig() As Object
+    Dim cfg As Object
+    Set cfg = CreateObject("Scripting.Dictionary")
 
     cfg.Add "british_spelling", True
     cfg.Add "repeated_words", True
@@ -73,7 +72,7 @@ Public Function InitRuleConfig() As Scripting.Dictionary
     cfg.Add "brand_name_enforcement", True
     cfg.Add "phrase_consistency", True
 
-    ' ── Bucket 1: Hart rules ──────────────────────────────────
+    ' -- Bucket 1: Hart rules ----------------------------------
     cfg.Add "footnotes_not_endnotes", True
     cfg.Add "footnote_terminal_full_stop", True
     cfg.Add "footnote_initial_capital", True
@@ -89,25 +88,25 @@ Public Function InitRuleConfig() As Scripting.Dictionary
     Set InitRuleConfig = cfg
 End Function
 
-' ════════════════════════════════════════════════════════════
+' ============================================================
 '  MASTER RULE RUNNER
 '  Iterates every enabled rule, calls the corresponding
 '  function from PleadingsRules, and collects all
 '  PleadingsIssue objects into a single Collection.
 '  Each rule call is wrapped in error handling so that
 '  one failure never stops the remaining rules.
-' ════════════════════════════════════════════════════════════
+' ============================================================
 Public Function RunAllPleadingsRules(doc As Document, _
-                                     config As Scripting.Dictionary) As Collection
+                                     config As Object) As Collection
     Dim allIssues As New Collection
     Dim ruleIssues As Collection
-    Dim issue As PleadingsIssue
+    Dim issue As Object
     Dim i As Long
 
     ' Store config at module level for helper access
     Set ruleConfig = config
 
-    ' ── Run whitelist rule first (populates whitelistDict) ──
+    ' -- Run whitelist rule first (populates whitelistDict) --
     If config.Exists("custom_term_whitelist") Then
         If config("custom_term_whitelist") = True Then
             On Error Resume Next: Err.Clear
@@ -123,7 +122,7 @@ Public Function RunAllPleadingsRules(doc As Document, _
         End If
     End If
 
-    ' ── Run remaining rules ─────────────────────────────────
+    ' -- Run remaining rules ---------------------------------
 
     ' british_spelling
     If IsRuleEnabled(config, "british_spelling") Then
@@ -301,7 +300,7 @@ Public Function RunAllPleadingsRules(doc As Document, _
         On Error GoTo 0
     End If
 
-    ' ── Bucket 1: Hart rules ──────────────────────────────────
+    ' -- Bucket 1: Hart rules ----------------------------------
 
     ' footnotes_not_endnotes
     If IsRuleEnabled(config, "footnotes_not_endnotes") Then
@@ -394,15 +393,15 @@ Public Function RunAllPleadingsRules(doc As Document, _
     Set RunAllPleadingsRules = allIssues
 End Function
 
-' ════════════════════════════════════════════════════════════
+' ============================================================
 '  APPLY HIGHLIGHTS AND COMMENTS
 '  Loops all issues and marks them in the document with
 '  yellow highlighting and optional review comments.
-' ════════════════════════════════════════════════════════════
+' ============================================================
 Public Sub ApplyHighlights(doc As Document, _
                            issues As Collection, _
                            Optional addComments As Boolean = True)
-    Dim issue As PleadingsIssue
+    Dim issue As Object
     Dim rng As Range
     Dim i As Long
 
@@ -410,9 +409,9 @@ Public Sub ApplyHighlights(doc As Document, _
         Set issue = issues(i)
 
         ' Skip issues without valid range positions
-        If issue.RangeStart >= 0 And issue.RangeEnd > issue.RangeStart Then
+        If GetIssueProp(issue, "RangeStart") >= 0 And GetIssueProp(issue, "RangeEnd") > GetIssueProp(issue, "RangeStart") Then
             On Error Resume Next: Err.Clear
-            Set rng = doc.Range(issue.RangeStart, issue.RangeEnd)
+            Set rng = doc.Range(GetIssueProp(issue, "RangeStart"), GetIssueProp(issue, "RangeEnd"))
             If Err.Number = 0 Then
                 ' Apply yellow highlight
                 rng.HighlightColorIndex = wdYellow
@@ -420,8 +419,8 @@ Public Sub ApplyHighlights(doc As Document, _
                 ' Add review comment if requested
                 If addComments Then
                     doc.Comments.Add Range:=rng, _
-                        Text:="[" & issue.RuleName & "] " & issue.Issue & _
-                              " " & Chr(8212) & " Suggestion: " & issue.Suggestion
+                        Text:="[" & GetIssueProp(issue, "RuleName") & "] " & GetIssueProp(issue, "Issue") & _
+                              " " & Chr(8212) & " Suggestion: " & GetIssueProp(issue, "Suggestion")
                 End If
             End If
             On Error GoTo 0
@@ -429,48 +428,49 @@ Public Sub ApplyHighlights(doc As Document, _
     Next i
 End Sub
 
-' ════════════════════════════════════════════════════════════
+' ============================================================
 '  GENERATE JSON REPORT
 '  Writes a structured JSON file with all issues, summary
 '  counts, and most-frequent-types ranking.
 '  Returns a summary string for display in the form.
-' ════════════════════════════════════════════════════════════
+' ============================================================
 Public Function GenerateReport(issues As Collection, _
                                 filePath As String) As String
     Dim fileNum As Integer
-    Dim issue As PleadingsIssue
+    Dim issue As Object
     Dim i As Long
     Dim summaryStr As String
 
     fileNum = FreeFile
     Open filePath For Output As #fileNum
 
-    ' ── Document header ─────────────────────────────────────
+    ' -- Document header -------------------------------------
     Print #fileNum, "{"
     Print #fileNum, "  ""document"": """ & EscJSON(ActiveDocument.Name) & ""","
     Print #fileNum, "  ""timestamp"": """ & Format(Now, "yyyy-mm-ddThh:nn:ss") & ""","
     Print #fileNum, "  ""total_issues"": " & issues.Count & ","
 
-    ' ── Issues array ────────────────────────────────────────
+    ' -- Issues array ----------------------------------------
     Print #fileNum, "  ""issues"": ["
     For i = 1 To issues.Count
         Set issue = issues(i)
         If i < issues.Count Then
-            Print #fileNum, issue.ToJSON() & ","
+            Print #fileNum, IssueToJSON(issue)() & ","
         Else
-            Print #fileNum, issue.ToJSON()
+            Print #fileNum, IssueToJSON(issue)()
         End If
     Next i
     Print #fileNum, "  ],"
 
-    ' ── Summary: counts per rule ────────────────────────────
-    Dim countDict As New Scripting.Dictionary
+    ' -- Summary: counts per rule ----------------------------
+    Dim countDict As Object
+    Set countDict = CreateObject("Scripting.Dictionary")
     For i = 1 To issues.Count
         Set issue = issues(i)
-        If countDict.Exists(issue.RuleName) Then
-            countDict(issue.RuleName) = countDict(issue.RuleName) + 1
+        If countDict.Exists(GetIssueProp(issue, "RuleName")) Then
+            countDict(GetIssueProp(issue, "RuleName")) = countDict(GetIssueProp(issue, "RuleName")) + 1
         Else
-            countDict.Add issue.RuleName, 1
+            countDict.Add GetIssueProp(issue, "RuleName"), 1
         End If
     Next i
 
@@ -488,7 +488,7 @@ Public Function GenerateReport(issues As Collection, _
     Next k
     Print #fileNum, "    },"
 
-    ' ── Most frequent types (sorted descending by count) ───
+    ' -- Most frequent types (sorted descending by count) ---
     Print #fileNum, "    ""most_frequent_types"": ["
 
     ' Simple selection sort on keys by count descending
@@ -543,7 +543,7 @@ Public Function GenerateReport(issues As Collection, _
 
     Close #fileNum
 
-    ' ── Build summary string for display ────────────────────
+    ' -- Build summary string for display --------------------
     summaryStr = "Report saved: " & filePath & vbCrLf
     summaryStr = summaryStr & "Total issues: " & issues.Count & vbCrLf
     If nRules > 0 Then
@@ -556,22 +556,23 @@ Public Function GenerateReport(issues As Collection, _
     GenerateReport = summaryStr
 End Function
 
-' ════════════════════════════════════════════════════════════
+' ============================================================
 '  HUMAN-READABLE ISSUE SUMMARY
 '  Builds a multi-line string with counts per rule.
-' ════════════════════════════════════════════════════════════
+' ============================================================
 Public Function GetIssueSummary(issues As Collection) As String
-    Dim countDict As New Scripting.Dictionary
-    Dim issue As PleadingsIssue
+    Dim countDict As Object
+    Set countDict = CreateObject("Scripting.Dictionary")
+    Dim issue As Object
     Dim i As Long
 
     ' Count issues per rule
     For i = 1 To issues.Count
         Set issue = issues(i)
-        If countDict.Exists(issue.RuleName) Then
-            countDict(issue.RuleName) = countDict(issue.RuleName) + 1
+        If countDict.Exists(GetIssueProp(issue, "RuleName")) Then
+            countDict(GetIssueProp(issue, "RuleName")) = countDict(GetIssueProp(issue, "RuleName")) + 1
         Else
-            countDict.Add issue.RuleName, 1
+            countDict.Add GetIssueProp(issue, "RuleName"), 1
         End If
     Next i
 
@@ -600,11 +601,11 @@ Public Function GetIssueSummary(issues As Collection) As String
     GetIssueSummary = result
 End Function
 
-' ════════════════════════════════════════════════════════════
+' ============================================================
 '  HELPER: PAGE RANGE FILTER
 '  Returns True if the range falls within the configured
 '  page restriction, or if no restriction is set (both 0).
-' ════════════════════════════════════════════════════════════
+' ============================================================
 Public Function IsInPageRange(rng As Range) As Boolean
     ' No restriction when both bounds are zero
     If PAGE_RANGE_START = 0 And PAGE_RANGE_END = 0 Then
@@ -618,10 +619,10 @@ Public Function IsInPageRange(rng As Range) As Boolean
     IsInPageRange = (pageNum >= PAGE_RANGE_START And pageNum <= PAGE_RANGE_END)
 End Function
 
-' ════════════════════════════════════════════════════════════
+' ============================================================
 '  HELPER: WHITELIST LOOKUP
 '  Case-insensitive check against the custom term whitelist.
-' ════════════════════════════════════════════════════════════
+' ============================================================
 Public Function IsWhitelistedTerm(term As String) As Boolean
     If whitelistDict Is Nothing Then
         IsWhitelistedTerm = False
@@ -631,25 +632,25 @@ Public Function IsWhitelistedTerm(term As String) As Boolean
     IsWhitelistedTerm = whitelistDict.Exists(LCase(term))
 End Function
 
-' ════════════════════════════════════════════════════════════
+' ============================================================
 '  HELPER: SET PAGE RANGE
-' ════════════════════════════════════════════════════════════
+' ============================================================
 Public Sub SetPageRange(startPage As Long, endPage As Long)
     PAGE_RANGE_START = startPage
     PAGE_RANGE_END = endPage
 End Sub
 
-' ════════════════════════════════════════════════════════════
+' ============================================================
 '  HELPER: SET WHITELIST
-' ════════════════════════════════════════════════════════════
-Public Sub SetWhitelist(terms As Scripting.Dictionary)
+' ============================================================
+Public Sub SetWhitelist(terms As Object)
     Set whitelistDict = terms
 End Sub
 
-' ════════════════════════════════════════════════════════════
+' ============================================================
 '  HELPER: LOCATION STRING
 '  Returns "page N paragraph M" for a given range.
-' ════════════════════════════════════════════════════════════
+' ============================================================
 Public Function GetLocationString(rng As Range, doc As Document) As String
     Dim pageNum As Long
     Dim paraNum As Long
@@ -679,17 +680,17 @@ Public Function GetLocationString(rng As Range, doc As Document) As String
     GetLocationString = "page " & pageNum & " paragraph " & paraNum
 End Function
 
-' ════════════════════════════════════════════════════════════
+' ============================================================
 '  APPLY SUGGESTIONS VIA TRACKED CHANGES
 '  For issues flagged as auto-fix safe, applies the suggestion
 '  text using Word's tracked changes so the user can accept
 '  or reject each change individually.
 '  For non-auto-fix issues, adds a comment with the suggestion.
-' ════════════════════════════════════════════════════════════
+' ============================================================
 Public Sub ApplySuggestionsAsTrackedChanges(doc As Document, _
                                              issues As Collection, _
                                              Optional addComments As Boolean = True)
-    Dim issue As PleadingsIssue
+    Dim issue As Object
     Dim rng As Range
     Dim i As Long
     Dim wasTrackingChanges As Boolean
@@ -701,22 +702,22 @@ Public Sub ApplySuggestionsAsTrackedChanges(doc As Document, _
         Set issue = issues(i)
 
         ' Skip issues without valid range positions
-        If issue.RangeStart >= 0 And issue.RangeEnd > issue.RangeStart Then
+        If GetIssueProp(issue, "RangeStart") >= 0 And GetIssueProp(issue, "RangeEnd") > GetIssueProp(issue, "RangeStart") Then
             On Error Resume Next: Err.Clear
-            Set rng = doc.Range(issue.RangeStart, issue.RangeEnd)
+            Set rng = doc.Range(GetIssueProp(issue, "RangeStart"), GetIssueProp(issue, "RangeEnd"))
             If Err.Number = 0 Then
-                If issue.AutoFixSafe And Len(issue.Suggestion) > 0 Then
+                If GetIssueProp(issue, "AutoFixSafe") And Len(GetIssueProp(issue, "Suggestion")) > 0 Then
                     ' Apply replacement via tracked changes
                     doc.TrackRevisions = True
-                    rng.Text = issue.Suggestion
+                    rng.Text = GetIssueProp(issue, "Suggestion")
                     doc.TrackRevisions = wasTrackingChanges
                 Else
                     ' Highlight and comment for suggest-only issues
                     rng.HighlightColorIndex = wdYellow
                     If addComments Then
                         doc.Comments.Add Range:=rng, _
-                            Text:="[" & issue.RuleName & "] " & issue.Issue & _
-                                  " " & Chr(8212) & " Suggestion: " & issue.Suggestion
+                            Text:="[" & GetIssueProp(issue, "RuleName") & "] " & GetIssueProp(issue, "Issue") & _
+                                  " " & Chr(8212) & " Suggestion: " & GetIssueProp(issue, "Suggestion")
                     End If
                 End If
             End If
@@ -728,8 +729,8 @@ Public Sub ApplySuggestionsAsTrackedChanges(doc As Document, _
                 Set rng = doc.Range(doc.Content.Start, doc.Content.Start + 1)
                 If Err.Number = 0 Then
                     doc.Comments.Add Range:=rng, _
-                        Text:="[" & issue.RuleName & "] " & issue.Issue & _
-                              " " & Chr(8212) & " Suggestion: " & issue.Suggestion
+                        Text:="[" & GetIssueProp(issue, "RuleName") & "] " & GetIssueProp(issue, "Issue") & _
+                              " " & Chr(8212) & " Suggestion: " & GetIssueProp(issue, "Suggestion")
                 End If
             End If
             On Error GoTo 0
@@ -737,13 +738,14 @@ Public Sub ApplySuggestionsAsTrackedChanges(doc As Document, _
     Next i
 End Sub
 
-' ════════════════════════════════════════════════════════════
+' ============================================================
 '  RULE METADATA
 '  Returns a Dictionary mapping rule_name -> display label
 '  for use by the form's dynamic rule list.
-' ════════════════════════════════════════════════════════════
-Public Function GetRuleDisplayNames() As Scripting.Dictionary
-    Dim d As New Scripting.Dictionary
+' ============================================================
+Public Function GetRuleDisplayNames() As Object
+    Dim d As Object
+    Set d = CreateObject("Scripting.Dictionary")
 
     d.Add "british_spelling", "British Spelling Enforcement"
     d.Add "repeated_words", "Repeated Word Detection"
@@ -783,12 +785,12 @@ Public Function GetRuleDisplayNames() As Scripting.Dictionary
     Set GetRuleDisplayNames = d
 End Function
 
-' ════════════════════════════════════════════════════════════
+' ============================================================
 '  PRIVATE HELPERS
-' ════════════════════════════════════════════════════════════
+' ============================================================
 
 ' Checks if a rule is enabled in the config dictionary
-Private Function IsRuleEnabled(config As Scripting.Dictionary, _
+Private Function IsRuleEnabled(config As Object, _
                                 ruleName As String) As Boolean
     If config.Exists(ruleName) Then
         IsRuleEnabled = CBool(config(ruleName))
@@ -808,6 +810,85 @@ Private Sub AddIssuesToCollection(master As Collection, _
 End Sub
 
 ' Escapes special characters for safe JSON string output
+Private Function EscJSON(ByVal txt As String) As String
+    txt = Replace(txt, "\", "\\")
+    txt = Replace(txt, """", "\""")
+    txt = Replace(txt, vbCr, "\r")
+    txt = Replace(txt, vbLf, "\n")
+    txt = Replace(txt, vbTab, "\t")
+    EscJSON = txt
+End Function
+
+' ================================================================
+'  PUBLIC: Factory function to create a dictionary-based issue
+'  Called by rule modules via Application.Run
+' ================================================================
+Public Function CreateIssue(ByVal ruleName_ As String, _
+                            ByVal location_ As String, _
+                            ByVal issue_ As String, _
+                            ByVal suggestion_ As String, _
+                            ByVal rangeStart_ As Long, _
+                            ByVal rangeEnd_ As Long, _
+                            Optional ByVal severity_ As String = "error", _
+                            Optional ByVal autoFixSafe_ As Boolean = False) As Object
+    Dim d As Object
+    Set d = CreateObject("Scripting.Dictionary")
+    d("RuleName") = ruleName_
+    d("Location") = location_
+    d("Issue") = issue_
+    d("Suggestion") = suggestion_
+    d("RangeStart") = rangeStart_
+    d("RangeEnd") = rangeEnd_
+    d("Severity") = severity_
+    d("AutoFixSafe") = autoFixSafe_
+    Set CreateIssue = d
+End Function
+
+' ================================================================
+'  PRIVATE: Read a property from an issue (supports both
+'  PleadingsIssue class and Dictionary-based issues)
+' ================================================================
+Private Function GetIssueProp(issue As Object, ByVal propName As String) As Variant
+    On Error Resume Next
+    ' Try dictionary access first
+    If TypeName(issue) = "Dictionary" Then
+        GetIssueProp = issue(propName)
+    Else
+        ' Fall back to object property access
+        Select Case propName
+            Case "RuleName":    GetIssueProp = GetIssueProp(issue, "RuleName")
+            Case "Location":    GetIssueProp = GetIssueProp(issue, "Location")
+            Case "Issue":       GetIssueProp = GetIssueProp(issue, "Issue")
+            Case "Suggestion":  GetIssueProp = GetIssueProp(issue, "Suggestion")
+            Case "Severity":    GetIssueProp = GetIssueProp(issue, "Severity")
+            Case "RangeStart":  GetIssueProp = GetIssueProp(issue, "RangeStart")
+            Case "RangeEnd":    GetIssueProp = GetIssueProp(issue, "RangeEnd")
+            Case "AutoFixSafe": GetIssueProp = GetIssueProp(issue, "AutoFixSafe")
+        End Select
+    End If
+    If Err.Number <> 0 Then
+        GetIssueProp = ""
+        Err.Clear
+    End If
+    On Error GoTo 0
+End Function
+
+' ================================================================
+'  PRIVATE: Format an issue as JSON (supports both types)
+' ================================================================
+Private Function IssueToJSON(issue As Object) As String
+    Dim s As String
+    s = "    {" & vbCrLf
+    s = s & "      ""rule"": """ & EscJSON(CStr(GetIssueProp(issue, "RuleName"))) & """," & vbCrLf
+    s = s & "      ""location"": """ & EscJSON(CStr(GetIssueProp(issue, "Location"))) & """," & vbCrLf
+    s = s & "      ""severity"": """ & EscJSON(CStr(GetIssueProp(issue, "Severity"))) & """," & vbCrLf
+    s = s & "      ""issue"": """ & EscJSON(CStr(GetIssueProp(issue, "Issue"))) & """," & vbCrLf
+    s = s & "      ""suggestion"": """ & EscJSON(CStr(GetIssueProp(issue, "Suggestion"))) & """," & vbCrLf
+    s = s & "      ""auto_fix_safe"": " & IIf(CBool(GetIssueProp(issue, "AutoFixSafe")), "true", "false") & vbCrLf
+    s = s & "    }"
+    IssueToJSON = s
+End Function
+
 Private Function EscJSON(ByVal txt As String) As String
     txt = Replace(txt, "\", "\\")
     txt = Replace(txt, """", "\""")

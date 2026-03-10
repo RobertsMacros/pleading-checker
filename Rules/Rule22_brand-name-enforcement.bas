@@ -11,21 +11,19 @@ Attribute VB_Name = "Rule22_brand_name_enforcement"
 ' for user-customised brand lists.
 '
 ' Dependencies:
-'   - PleadingsIssue.cls
 '   - PleadingsEngine.bas (IsInPageRange, GetLocationString)
-'   - Microsoft Scripting Runtime (Scripting.Dictionary)
 ' ============================================================
 Option Explicit
 
 Private Const RULE_NAME As String = "brand_name_enforcement"
 
-' ── Module-level brand rules dictionary ─────────────────────
+' -- Module-level brand rules dictionary ---------------------
 ' Key = correct form (String), Value = comma-separated incorrect variants (String)
-Private brandRules As Scripting.Dictionary
+Private brandRules As Object
 
-' ════════════════════════════════════════════════════════════
+' ============================================================
 '  MAIN ENTRY POINT
-' ════════════════════════════════════════════════════════════
+' ============================================================
 Public Function Check_BrandNameEnforcement(doc As Document) As Collection
     Dim issues As New Collection
 
@@ -60,16 +58,16 @@ NextVariant:
     Set Check_BrandNameEnforcement = issues
 End Function
 
-' ════════════════════════════════════════════════════════════
+' ============================================================
 '  PRIVATE: Search for an incorrect variant and flag matches
-' ════════════════════════════════════════════════════════════
+' ============================================================
 Private Sub SearchAndFlag(doc As Document, _
                            variant As String, _
                            correctForm As String, _
                            ByRef issues As Collection)
     Dim rng As Range
     Dim found As Boolean
-    Dim issue As PleadingsIssue
+    Dim issue As Object
     Dim locStr As String
 
     Set rng = doc.Content.Duplicate
@@ -91,20 +89,13 @@ Private Sub SearchAndFlag(doc As Document, _
 
         If Not found Then Exit Do
 
-        If PleadingsEngine.IsInPageRange(rng) Then
+        If EngineIsInPageRange(rng) Then
             On Error Resume Next
-            locStr = PleadingsEngine.GetLocationString(rng, doc)
+            locStr = EngineGetLocationString(rng, doc)
             If Err.Number <> 0 Then locStr = "unknown location": Err.Clear
             On Error GoTo 0
 
-            Set issue = New PleadingsIssue
-            issue.Init RULE_NAME, _
-                       locStr, _
-                       "Incorrect brand name: '" & rng.Text & "'", _
-                       "Use '" & correctForm & "'", _
-                       rng.Start, _
-                       rng.End, _
-                       "error"
+            Set issue = CreateIssueDict(RULE_NAME, locStr, "Incorrect brand name: '" & rng.Text & "'", "Use '" & correctForm & "'", rng.Start, rng.End, "error")
             issues.Add issue
         End If
 
@@ -115,11 +106,11 @@ Private Sub SearchAndFlag(doc As Document, _
     Loop
 End Sub
 
-' ════════════════════════════════════════════════════════════
+' ============================================================
 '  PRIVATE: Populate default brand rules
-' ════════════════════════════════════════════════════════════
+' ============================================================
 Private Sub InitDefaultBrands()
-    Set brandRules = New Scripting.Dictionary
+    Set brandRules = CreateObject("Scripting.Dictionary")
 
     brandRules.Add "PwC", "PWC,Pwc,pwc"
     brandRules.Add "Deloitte", "deloitte,DELOITTE"
@@ -129,9 +120,9 @@ Private Sub InitDefaultBrands()
     brandRules.Add "KPMG", "kpmg,Kpmg"
 End Sub
 
-' ════════════════════════════════════════════════════════════
+' ============================================================
 '  PUBLIC: Add or update a brand rule
-' ════════════════════════════════════════════════════════════
+' ============================================================
 Public Sub AddBrandRule(correct As String, incorrectVariants As String)
     If brandRules Is Nothing Then
         InitDefaultBrands
@@ -144,9 +135,9 @@ Public Sub AddBrandRule(correct As String, incorrectVariants As String)
     End If
 End Sub
 
-' ════════════════════════════════════════════════════════════
+' ============================================================
 '  PUBLIC: Remove a brand rule
-' ════════════════════════════════════════════════════════════
+' ============================================================
 Public Sub RemoveBrandRule(correct As String)
     If brandRules Is Nothing Then Exit Sub
 
@@ -155,10 +146,10 @@ Public Sub RemoveBrandRule(correct As String)
     End If
 End Sub
 
-' ════════════════════════════════════════════════════════════
+' ============================================================
 '  PUBLIC: Get current brand rules dictionary
-' ════════════════════════════════════════════════════════════
-Public Function GetBrandRules() As Scripting.Dictionary
+' ============================================================
+Public Function GetBrandRules() As Object
     If brandRules Is Nothing Then
         InitDefaultBrands
     End If
@@ -166,10 +157,10 @@ Public Function GetBrandRules() As Scripting.Dictionary
     Set GetBrandRules = brandRules
 End Function
 
-' ════════════════════════════════════════════════════════════
+' ============================================================
 '  PUBLIC: Save brand rules to a text file
-'  Format: one line per rule — "CorrectForm=variant1,variant2"
-' ════════════════════════════════════════════════════════════
+'  Format: one line per rule -- "CorrectForm=variant1,variant2"
+' ============================================================
 Public Sub SaveBrandRules(filePath As String)
     If brandRules Is Nothing Then Exit Sub
 
@@ -195,11 +186,11 @@ SaveError:
     On Error GoTo 0
 End Sub
 
-' ════════════════════════════════════════════════════════════
+' ============================================================
 '  PUBLIC: Load brand rules from a text file
 '  Replaces existing rules with contents of the file.
-'  Format: one line per rule — "CorrectForm=variant1,variant2"
-' ════════════════════════════════════════════════════════════
+'  Format: one line per rule -- "CorrectForm=variant1,variant2"
+' ============================================================
 Public Sub LoadBrandRules(filePath As String)
     Dim fileNum As Integer
     Dim lineText As String
@@ -207,7 +198,7 @@ Public Sub LoadBrandRules(filePath As String)
     Dim correct As String
     Dim variants As String
 
-    Set brandRules = New Scripting.Dictionary
+    Set brandRules = CreateObject("Scripting.Dictionary")
 
     fileNum = FreeFile
     On Error GoTo LoadError
@@ -250,3 +241,61 @@ LoadError:
         InitDefaultBrands
     End If
 End Sub
+
+' ----------------------------------------------------------------
+'  PRIVATE: Create a dictionary-based issue (no class dependency)
+' ----------------------------------------------------------------
+Private Function CreateIssueDict(ByVal ruleName_ As String, _
+                                 ByVal location_ As String, _
+                                 ByVal issue_ As String, _
+                                 ByVal suggestion_ As String, _
+                                 ByVal rangeStart_ As Long, _
+                                 ByVal rangeEnd_ As Long, _
+                                 Optional ByVal severity_ As String = "error", _
+                                 Optional ByVal autoFixSafe_ As Boolean = False) As Object
+    Dim d As Object
+    Set d = CreateObject("Scripting.Dictionary")
+    d("RuleName") = ruleName_
+    d("Location") = location_
+    d("Issue") = issue_
+    d("Suggestion") = suggestion_
+    d("RangeStart") = rangeStart_
+    d("RangeEnd") = rangeEnd_
+    d("Severity") = severity_
+    d("AutoFixSafe") = autoFixSafe_
+    Set CreateIssueDict = d
+End Function
+
+' ----------------------------------------------------------------
+'  Late-bound wrapper: EngineIsInPageRange
+' ----------------------------------------------------------------
+
+' ----------------------------------------------------------------
+'  Late-bound wrapper: EngineGetLocationString
+' ----------------------------------------------------------------
+
+' ----------------------------------------------------------------
+'  Late-bound wrapper: PleadingsEngine.IsInPageRange
+' ----------------------------------------------------------------
+Private Function EngineIsInPageRange(rng As Object) As Boolean
+    On Error Resume Next
+    EngineIsInPageRange = Application.Run("PleadingsEngine.IsInPageRange", rng)
+    If Err.Number <> 0 Then
+        EngineIsInPageRange = True
+        Err.Clear
+    End If
+    On Error GoTo 0
+End Function
+
+' ----------------------------------------------------------------
+'  Late-bound wrapper: PleadingsEngine.GetLocationString
+' ----------------------------------------------------------------
+Private Function EngineGetLocationString(rng As Object, doc As Document) As String
+    On Error Resume Next
+    EngineGetLocationString = Application.Run("PleadingsEngine.GetLocationString", rng, doc)
+    If Err.Number <> 0 Then
+        EngineGetLocationString = "unknown location"
+        Err.Clear
+    End If
+    On Error GoTo 0
+End Function

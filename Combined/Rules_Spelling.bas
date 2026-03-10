@@ -3,7 +3,7 @@ Attribute VB_Name = "Rules_Spelling"
 ' Rules_Spelling.bas
 ' Combined proofreading rules for UK/US English spelling.
 '
-' Rule 1 — British/US Spelling:
+' Rule 1 -- British/US Spelling:
 '   Detects ~95 spelling differences between US and UK English,
 '   with a configurable direction (UK or US mode).
 '   Categories: -or/-our, -ize/-ise, -ization/-isation,
@@ -12,7 +12,7 @@ Attribute VB_Name = "Rules_Spelling"
 '   Text in italics or inside quotation marks is NOT auto-fixed
 '   but is flagged as a "possible_error" for manual review.
 '
-' Rule 12 — Licence/License:
+' Rule 12 -- Licence/License:
 '   Checks correct UK usage of licence (noun) vs license (verb).
 '   Also handles compounds and derivatives.
 '   UK convention:
@@ -20,17 +20,15 @@ Attribute VB_Name = "Rules_Spelling"
 '     license = verb ("to license", "shall license")
 '     licensed, licensing = always -s- (verb derivatives)
 '
-' Rule 13 — Colour Formatting:
+' Rule 13 -- Colour Formatting:
 '   Detects non-standard font colours in the document body.
 '   Identifies the dominant text colour and flags any runs
 '   using a different colour (excluding hyperlinks and
 '   heading-styled paragraphs).
 '
 ' Dependencies:
-'   - PleadingsIssue.cls
 '   - PleadingsEngine.bas (IsInPageRange, IsWhitelistedTerm,
 '                          GetLocationString, GetSpellingMode)
-'   - Microsoft Scripting Runtime (Scripting.Dictionary)
 ' ============================================================
 Option Explicit
 
@@ -38,9 +36,9 @@ Private Const RULE_NAME As String = "spelling"
 Private Const RULE_NAME_LICENCE As String = "licence_license"
 Private Const RULE_NAME_COLOUR As String = "colour_formatting"
 
-' ════════════════════════════════════════════════════════════
+' ============================================================
 '  MAIN ENTRY POINT
-' ════════════════════════════════════════════════════════════
+' ============================================================
 Public Function Check_Spelling(doc As Document) As Collection
     Dim issues As New Collection
     Dim usWords() As String
@@ -51,11 +49,11 @@ Public Function Check_Spelling(doc As Document) As Collection
     Dim spellingMode As String
     Dim direction As String
 
-    ' ── Build the US ↔ UK mapping arrays ────────────────
+    ' -- Build the US <-> UK mapping arrays ----------------
     BuildSpellingArrays usWords, ukWords
 
-    ' ── Determine spelling mode ─────────────────────────
-    spellingMode = PleadingsEngine.GetSpellingMode()
+    ' -- Determine spelling mode -------------------------
+    spellingMode = EngineGetSpellingMode()
 
     If spellingMode = "US" Then
         ' Search for UK words, suggest US replacements
@@ -66,7 +64,7 @@ Public Function Check_Spelling(doc As Document) As Collection
         ' In US mode, no special legal exceptions
         exceptions = Split("program,practice", ",")
     Else
-        ' Default: "UK" — search for US words, suggest UK replacements
+        ' Default: "UK" -- search for US words, suggest UK replacements
         searchWords = usWords
         targetWords = ukWords
         direction = "UK"
@@ -76,10 +74,10 @@ Public Function Check_Spelling(doc As Document) As Collection
         exceptions = Split("program,judgment,practice", ",")
     End If
 
-    ' ── Search main document body ───────────────────────
+    ' -- Search main document body -----------------------
     SearchRangeForSpellingIssues doc.Content, doc, searchWords, targetWords, exceptions, direction, issues
 
-    ' ── Search footnotes ────────────────────────────────
+    ' -- Search footnotes --------------------------------
     On Error Resume Next
     Dim fn As Footnote
     For Each fn In doc.Footnotes
@@ -89,7 +87,7 @@ Public Function Check_Spelling(doc As Document) As Collection
     Next fn
     On Error GoTo 0
 
-    ' ── Search endnotes ─────────────────────────────────
+    ' -- Search endnotes ---------------------------------
     On Error Resume Next
     Dim en As Endnote
     For Each en In doc.Endnotes
@@ -102,16 +100,16 @@ Public Function Check_Spelling(doc As Document) As Collection
     Set Check_Spelling = issues
 End Function
 
-' ════════════════════════════════════════════════════════════
+' ============================================================
 '  PRIVATE: Search a Range for spelling issues
 '  Iterates every search/target pair, uses Word's Find to
 '  locate whole-word, case-insensitive matches, then filters
 '  by page range and whitelist before creating issues.
 '
-'  direction = "UK" or "US" — controls the issue text:
-'    "UK" → "US spelling detected: '...'"
-'    "US" → "UK spelling detected: '...'"
-' ════════════════════════════════════════════════════════════
+'  direction = "UK" or "US" -- controls the issue text:
+'    "UK" -> "US spelling detected: '...'"
+'    "US" -> "UK spelling detected: '...'"
+' ============================================================
 Private Sub SearchRangeForSpellingIssues(searchRange As Range, _
                                          doc As Document, _
                                          ByRef searchWords() As String, _
@@ -122,7 +120,7 @@ Private Sub SearchRangeForSpellingIssues(searchRange As Range, _
     Dim i As Long
     Dim rng As Range
     Dim foundText As String
-    Dim issue As PleadingsIssue
+    Dim issue As Object
     Dim locStr As String
     Dim issueText As String
     Dim sourceLabel As String
@@ -172,24 +170,24 @@ Private Sub SearchRangeForSpellingIssues(searchRange As Range, _
 
             foundText = rng.Text
 
-            ' ── Skip exceptions ───────────────────────
+            ' -- Skip exceptions -----------------------
             If IsException(foundText, exceptions) Then
                 GoTo ContinueSearch
             End If
 
-            ' ── Skip whitelisted terms ────────────────
-            If PleadingsEngine.IsWhitelistedTerm(foundText) Then
+            ' -- Skip whitelisted terms ----------------
+            If EngineIsWhitelistedTerm(foundText) Then
                 GoTo ContinueSearch
             End If
 
-            ' ── Skip if outside configured page range ─
-            If Not PleadingsEngine.IsInPageRange(rng) Then
+            ' -- Skip if outside configured page range -
+            If Not EngineIsInPageRange(rng) Then
                 GoTo ContinueSearch
             End If
 
-            ' ── Create the issue ──────────────────────
+            ' -- Create the issue ----------------------
             On Error Resume Next
-            locStr = PleadingsEngine.GetLocationString(rng, doc)
+            locStr = EngineGetLocationString(rng, doc)
             If Err.Number <> 0 Then
                 locStr = "unknown location"
                 Err.Clear
@@ -198,7 +196,7 @@ Private Sub SearchRangeForSpellingIssues(searchRange As Range, _
 
             issueText = sourceLabel & " spelling detected: '" & foundText & "'"
 
-            ' ── Downgrade italic / quoted text ───────
+            ' -- Downgrade italic / quoted text -------
             Dim severity As String
             Dim suggestion As String
             severity = "error"
@@ -214,14 +212,7 @@ Private Sub SearchRangeForSpellingIssues(searchRange As Range, _
                 issueText = issueText & " (in quoted text " & Chr(8212) & " review manually)"
             End If
 
-            Set issue = New PleadingsIssue
-            issue.Init RULE_NAME, _
-                       locStr, _
-                       issueText, _
-                       suggestion, _
-                       rng.Start, _
-                       rng.End, _
-                       severity
+            Set issue = CreateIssueDict(RULE_NAME, locStr, issueText, suggestion, rng.Start, rng.End, severity)
             issues.Add issue
 
 ContinueSearch:
@@ -240,9 +231,9 @@ NextWord:
     Next i
 End Sub
 
-' ════════════════════════════════════════════════════════════
+' ============================================================
 '  PRIVATE: Check if a found term is in the exceptions list
-' ════════════════════════════════════════════════════════════
+' ============================================================
 Private Function IsException(ByVal term As String, _
                               ByRef exceptions() As String) As Boolean
     Dim i As Long
@@ -261,10 +252,10 @@ Private Function IsException(ByVal term As String, _
     IsException = False
 End Function
 
-' ════════════════════════════════════════════════════════════
+' ============================================================
 '  PRIVATE: Build the parallel US/UK spelling arrays
 '  ~95 pairs across all categories.
-' ════════════════════════════════════════════════════════════
+' ============================================================
 Private Sub BuildSpellingArrays(ByRef usWords() As String, _
                                  ByRef ukWords() As String)
     Const PAIR_COUNT As Long = 95
@@ -275,7 +266,7 @@ Private Sub BuildSpellingArrays(ByRef usWords() As String, _
     Dim idx As Long
     idx = 0
 
-    ' ── -or → -our (25 pairs) ────────────────────────────
+    ' -- -or -> -our (25 pairs) ----------------------------
     usWords(idx) = "color":       ukWords(idx) = "colour":       idx = idx + 1
     usWords(idx) = "favor":       ukWords(idx) = "favour":       idx = idx + 1
     usWords(idx) = "honor":       ukWords(idx) = "honour":       idx = idx + 1
@@ -302,7 +293,7 @@ Private Sub BuildSpellingArrays(ByRef usWords() As String, _
     usWords(idx) = "armor":       ukWords(idx) = "armour":       idx = idx + 1
     usWords(idx) = "flavor":      ukWords(idx) = "flavour":      idx = idx + 1
 
-    ' ── -ize → -ise (20 pairs) ───────────────────────────
+    ' -- -ize -> -ise (20 pairs) ---------------------------
     usWords(idx) = "organize":      ukWords(idx) = "organise":      idx = idx + 1
     usWords(idx) = "realize":       ukWords(idx) = "realise":       idx = idx + 1
     usWords(idx) = "recognize":     ukWords(idx) = "recognise":     idx = idx + 1
@@ -324,7 +315,7 @@ Private Sub BuildSpellingArrays(ByRef usWords() As String, _
     usWords(idx) = "capitalize":    ukWords(idx) = "capitalise":    idx = idx + 1
     usWords(idx) = "criticize":     ukWords(idx) = "criticise":     idx = idx + 1
 
-    ' ── -ization → -isation (10 pairs) ───────────────────
+    ' -- -ization -> -isation (10 pairs) -------------------
     usWords(idx) = "organization":     ukWords(idx) = "organisation":     idx = idx + 1
     usWords(idx) = "authorization":    ukWords(idx) = "authorisation":    idx = idx + 1
     usWords(idx) = "characterization": ukWords(idx) = "characterisation": idx = idx + 1
@@ -336,7 +327,7 @@ Private Sub BuildSpellingArrays(ByRef usWords() As String, _
     usWords(idx) = "specialization":   ukWords(idx) = "specialisation":   idx = idx + 1
     usWords(idx) = "globalization":    ukWords(idx) = "globalisation":    idx = idx + 1
 
-    ' ── -er → -re (10 pairs) ─────────────────────────────
+    ' -- -er -> -re (10 pairs) -----------------------------
     usWords(idx) = "center":   ukWords(idx) = "centre":   idx = idx + 1
     usWords(idx) = "fiber":    ukWords(idx) = "fibre":    idx = idx + 1
     usWords(idx) = "liter":    ukWords(idx) = "litre":    idx = idx + 1
@@ -348,12 +339,12 @@ Private Sub BuildSpellingArrays(ByRef usWords() As String, _
     usWords(idx) = "specter":  ukWords(idx) = "spectre":  idx = idx + 1
     usWords(idx) = "meager":   ukWords(idx) = "meagre":   idx = idx + 1
 
-    ' ── -se → -ce (3 pairs) ──────────────────────────────
+    ' -- -se -> -ce (3 pairs) ------------------------------
     usWords(idx) = "defense":   ukWords(idx) = "defence":   idx = idx + 1
     usWords(idx) = "offense":   ukWords(idx) = "offence":   idx = idx + 1
     usWords(idx) = "pretense":  ukWords(idx) = "pretence":  idx = idx + 1
 
-    ' ── -og → -ogue (6 pairs) ────────────────────────────
+    ' -- -og -> -ogue (6 pairs) ----------------------------
     usWords(idx) = "analog":   ukWords(idx) = "analogue":   idx = idx + 1
     usWords(idx) = "catalog":  ukWords(idx) = "catalogue":  idx = idx + 1
     usWords(idx) = "dialog":   ukWords(idx) = "dialogue":   idx = idx + 1
@@ -361,14 +352,14 @@ Private Sub BuildSpellingArrays(ByRef usWords() As String, _
     usWords(idx) = "prolog":   ukWords(idx) = "prologue":   idx = idx + 1
     usWords(idx) = "epilog":   ukWords(idx) = "epilogue":   idx = idx + 1
 
-    ' ── -ment variants (5 pairs) ─────────────────────────
+    ' -- -ment variants (5 pairs) -------------------------
     usWords(idx) = "judgment":        ukWords(idx) = "judgement":        idx = idx + 1
     usWords(idx) = "acknowledgment":  ukWords(idx) = "acknowledgement":  idx = idx + 1
     usWords(idx) = "fulfillment":     ukWords(idx) = "fulfilment":       idx = idx + 1
     usWords(idx) = "enrollment":      ukWords(idx) = "enrolment":        idx = idx + 1
     usWords(idx) = "installment":     ukWords(idx) = "instalment":       idx = idx + 1
 
-    ' ── Other / miscellaneous (16 pairs) ─────────────────
+    ' -- Other / miscellaneous (16 pairs) -----------------
     usWords(idx) = "gray":        ukWords(idx) = "grey":        idx = idx + 1
     usWords(idx) = "plow":        ukWords(idx) = "plough":      idx = idx + 1
     usWords(idx) = "tire":        ukWords(idx) = "tyre":        idx = idx + 1
@@ -389,9 +380,9 @@ Private Sub BuildSpellingArrays(ByRef usWords() As String, _
     ' idx should now equal PAIR_COUNT (95)
 End Sub
 
-' ════════════════════════════════════════════════════════════
+' ============================================================
 '  PRIVATE: Check if a range is italic
-' ════════════════════════════════════════════════════════════
+' ============================================================
 Private Function IsRangeItalic(rng As Range) As Boolean
     On Error Resume Next
     Dim italicVal As Long
@@ -408,11 +399,11 @@ Private Function IsRangeItalic(rng As Range) As Boolean
     IsRangeItalic = (italicVal = -1)
 End Function
 
-' ════════════════════════════════════════════════════════════
+' ============================================================
 '  PRIVATE: Check if a range is inside quotation marks
 '  Looks at the character immediately before and after the
 '  range for smart quotes, straight quotes, or single quotes.
-' ════════════════════════════════════════════════════════════
+' ============================================================
 Private Function IsInsideQuotes(rng As Range, doc As Document) As Boolean
     Dim charBefore As String
     Dim charAfter As String
@@ -482,9 +473,9 @@ Private Function IsInsideQuotes(rng As Range, doc As Document) As Boolean
     IsInsideQuotes = (openCount > closeCount)
 End Function
 
-' ════════════════════════════════════════════════════════════
+' ============================================================
 '  PRIVATE: Check if a character is an opening quote
-' ════════════════════════════════════════════════════════════
+' ============================================================
 Private Function IsOpeningQuote(ByVal ch As String) As Boolean
     If Len(ch) <> 1 Then
         IsOpeningQuote = False
@@ -500,9 +491,9 @@ Private Function IsOpeningQuote(ByVal ch As String) As Boolean
     End Select
 End Function
 
-' ════════════════════════════════════════════════════════════
+' ============================================================
 '  PRIVATE: Check if a character is a closing quote
-' ════════════════════════════════════════════════════════════
+' ============================================================
 Private Function IsClosingQuote(ByVal ch As String) As Boolean
     If Len(ch) <> 1 Then
         IsClosingQuote = False
@@ -520,13 +511,13 @@ End Function
 
 ' ================================================================
 ' ================================================================
-'  RULE 12 — LICENCE / LICENSE
+'  RULE 12 -- LICENCE / LICENSE
 ' ================================================================
 ' ================================================================
 
-' ════════════════════════════════════════════════════════════
-'  MAIN ENTRY POINT — Licence/License
-' ════════════════════════════════════════════════════════════
+' ============================================================
+'  MAIN ENTRY POINT -- Licence/License
+' ============================================================
 Public Function Check_LicenceLicense(doc As Document) As Collection
     Dim issues As New Collection
 
@@ -556,9 +547,9 @@ Public Function Check_LicenceLicense(doc As Document) As Collection
     Set Check_LicenceLicense = issues
 End Function
 
-' ════════════════════════════════════════════════════════════
+' ============================================================
 '  PRIVATE: Search a range for licence/license issues
-' ════════════════════════════════════════════════════════════
+' ============================================================
 Private Sub SearchForLicenceIssues(searchRange As Range, _
                                     doc As Document, _
                                     ByRef issues As Collection)
@@ -574,17 +565,17 @@ Private Sub SearchForLicenceIssues(searchRange As Range, _
     Next t
 End Sub
 
-' ════════════════════════════════════════════════════════════
+' ============================================================
 '  PRIVATE: Search for a single licence/license term and
 '  analyse context
-' ════════════════════════════════════════════════════════════
+' ============================================================
 Private Sub SearchSingleLicenceTerm(ByVal term As String, _
                               searchRange As Range, _
                               doc As Document, _
                               ByRef issues As Collection)
     Dim rng As Range
     Dim found As Boolean
-    Dim issue As PleadingsIssue
+    Dim issue As Object
     Dim locStr As String
     Dim contextBefore As String
     Dim contextAfter As String
@@ -628,61 +619,47 @@ Private Sub SearchSingleLicenceTerm(ByVal term As String, _
         If Not found Then Exit Do
 
         ' Skip if outside page range
-        If Not PleadingsEngine.IsInPageRange(rng) Then
+        If Not EngineIsInPageRange(rng) Then
             GoTo ContinueLicenceSearch
         End If
 
         ' Determine if the found word uses -s- or -c-
         usesS = (InStr(1, LCase(rng.Text), "license") > 0)
 
-        ' Skip "licensed" and "licensing" — always correct with -s-
+        ' Skip "licensed" and "licensing" -- always correct with -s-
         Dim foundLower As String
         foundLower = LCase(Trim(rng.Text))
         If foundLower = "licensed" Or foundLower = "licensing" Then
             GoTo ContinueLicenceSearch
         End If
 
-        ' ── Downgrade italic / quoted text ──────────────────
+        ' -- Downgrade italic / quoted text ------------------
         Dim licSeverity As String
         licSeverity = "possible_error"
 
         If IsRangeItalic(rng) Then
             On Error Resume Next
-            locStr = PleadingsEngine.GetLocationString(rng, doc)
+            locStr = EngineGetLocationString(rng, doc)
             If Err.Number <> 0 Then locStr = "unknown location": Err.Clear
             On Error GoTo 0
 
-            Set issue = New PleadingsIssue
-            issue.Init RULE_NAME_LICENCE, _
-                       locStr, _
-                       "'" & rng.Text & "' " & Chr(8212) & " in italic text, review manually", _
-                       "", _
-                       rng.Start, _
-                       rng.End, _
-                       "possible_error"
+            Set issue = CreateIssueDict(RULE_NAME_LICENCE, locStr, ")
             issues.Add issue
             GoTo ContinueLicenceSearch
         End If
 
         If IsInsideQuotes(rng, doc) Then
             On Error Resume Next
-            locStr = PleadingsEngine.GetLocationString(rng, doc)
+            locStr = EngineGetLocationString(rng, doc)
             If Err.Number <> 0 Then locStr = "unknown location": Err.Clear
             On Error GoTo 0
 
-            Set issue = New PleadingsIssue
-            issue.Init RULE_NAME_LICENCE, _
-                       locStr, _
-                       "'" & rng.Text & "' " & Chr(8212) & " in quoted text, review manually", _
-                       "", _
-                       rng.Start, _
-                       rng.End, _
-                       "possible_error"
+            Set issue = CreateIssueDict(RULE_NAME_LICENCE, locStr, ")
             issues.Add issue
             GoTo ContinueLicenceSearch
         End If
 
-        ' ── Get surrounding context ──────────────────────────
+        ' -- Get surrounding context --------------------------
         contextBefore = GetLicenceContextBefore(rng, doc, 50)
         contextAfter = GetLicenceContextAfter(rng, doc, 50)
 
@@ -692,21 +669,21 @@ Private Sub SearchSingleLicenceTerm(ByVal term As String, _
         ' Extract the first word after the match
         wordAfter = GetFirstWordFromContext(contextAfter)
 
-        ' ── Determine noun or verb context ───────────────────
+        ' -- Determine noun or verb context -------------------
         baseIsVerb = IsVerbIndicator(wordBefore)
         baseIsNoun = IsNounIndicator(wordBefore) Or IsNounFollower(wordAfter)
 
-        ' ── Decide if there is an issue ──────────────────────
+        ' -- Decide if there is an issue ----------------------
         issueText = ""
         suggestion = ""
 
         If usesS And baseIsNoun And Not baseIsVerb Then
-            ' "license" used in noun context — should be "licence"
+            ' "license" used in noun context -- should be "licence"
             issueText = "'" & rng.Text & "' appears in a noun context; " & _
                         "UK convention uses 'licence' for the noun"
             suggestion = ReplaceSWithC(rng.Text)
         ElseIf Not usesS And baseIsVerb And Not baseIsNoun Then
-            ' "licence" used in verb context — should be "license"
+            ' "licence" used in verb context -- should be "license"
             issueText = "'" & rng.Text & "' appears in a verb context; " & _
                         "UK convention uses 'license' for the verb"
             suggestion = ReplaceCWithS(rng.Text)
@@ -717,12 +694,12 @@ Private Sub SearchSingleLicenceTerm(ByVal term As String, _
                         "review context to ensure correct UK spelling"
             suggestion = "Review context: 'licence' = noun, 'license' = verb"
         ElseIf usesS And baseIsVerb And baseIsNoun Then
-            ' Both indicators present — ambiguous
+            ' Both indicators present -- ambiguous
             issueText = "'" & rng.Text & "' " & Chr(8212) & " conflicting noun/verb indicators; " & _
                         "review context"
             suggestion = "Review context: 'licence' = noun, 'license' = verb"
         ElseIf Not usesS And baseIsVerb And baseIsNoun Then
-            ' Both indicators present — ambiguous
+            ' Both indicators present -- ambiguous
             issueText = "'" & rng.Text & "' " & Chr(8212) & " conflicting noun/verb indicators; " & _
                         "review context"
             suggestion = "Review context: 'licence' = noun, 'license' = verb"
@@ -731,21 +708,14 @@ Private Sub SearchSingleLicenceTerm(ByVal term As String, _
         ' Only create issue if we found something to flag
         If Len(issueText) > 0 Then
             On Error Resume Next
-            locStr = PleadingsEngine.GetLocationString(rng, doc)
+            locStr = EngineGetLocationString(rng, doc)
             If Err.Number <> 0 Then
                 locStr = "unknown location"
                 Err.Clear
             End If
             On Error GoTo 0
 
-            Set issue = New PleadingsIssue
-            issue.Init RULE_NAME_LICENCE, _
-                       locStr, _
-                       issueText, _
-                       suggestion, _
-                       rng.Start, _
-                       rng.End, _
-                       "possible_error"
+            Set issue = CreateIssueDict(RULE_NAME_LICENCE, locStr, issueText, suggestion, rng.Start, rng.End, "possible_error")
             issues.Add issue
         End If
 
@@ -761,9 +731,9 @@ ContinueLicenceSearch:
     Loop
 End Sub
 
-' ════════════════════════════════════════════════════════════
+' ============================================================
 '  PRIVATE: Get text before the match range (up to N chars)
-' ════════════════════════════════════════════════════════════
+' ============================================================
 Private Function GetLicenceContextBefore(rng As Range, doc As Document, _
                                    ByVal charCount As Long) As String
     Dim startPos As Long
@@ -785,9 +755,9 @@ Private Function GetLicenceContextBefore(rng As Range, doc As Document, _
     GetLicenceContextBefore = contextRng.Text
 End Function
 
-' ════════════════════════════════════════════════════════════
+' ============================================================
 '  PRIVATE: Get text after the match range (up to N chars)
-' ════════════════════════════════════════════════════════════
+' ============================================================
 Private Function GetLicenceContextAfter(rng As Range, doc As Document, _
                                   ByVal charCount As Long) As String
     Dim endPos As Long
@@ -811,9 +781,9 @@ Private Function GetLicenceContextAfter(rng As Range, doc As Document, _
     GetLicenceContextAfter = contextRng.Text
 End Function
 
-' ════════════════════════════════════════════════════════════
+' ============================================================
 '  PRIVATE: Extract the last word from a context string
-' ════════════════════════════════════════════════════════════
+' ============================================================
 Private Function GetLastWordFromContext(ByVal text As String) As String
     Dim trimmed As String
     Dim i As Long
@@ -837,9 +807,9 @@ Private Function GetLastWordFromContext(ByVal text As String) As String
     GetLastWordFromContext = LCase(trimmed)
 End Function
 
-' ════════════════════════════════════════════════════════════
+' ============================================================
 '  PRIVATE: Extract the first word from a context string
-' ════════════════════════════════════════════════════════════
+' ============================================================
 Private Function GetFirstWordFromContext(ByVal text As String) As String
     Dim trimmed As String
     Dim spacePos As Long
@@ -869,9 +839,9 @@ Private Function GetFirstWordFromContext(ByVal text As String) As String
     GetFirstWordFromContext = result
 End Function
 
-' ════════════════════════════════════════════════════════════
+' ============================================================
 '  PRIVATE: Check if a word is a verb indicator
-' ════════════════════════════════════════════════════════════
+' ============================================================
 Private Function IsVerbIndicator(ByVal word As String) As Boolean
     Dim indicators As Variant
     Dim i As Long
@@ -890,9 +860,9 @@ Private Function IsVerbIndicator(ByVal word As String) As Boolean
     IsVerbIndicator = False
 End Function
 
-' ════════════════════════════════════════════════════════════
+' ============================================================
 '  PRIVATE: Check if a word is a noun indicator
-' ════════════════════════════════════════════════════════════
+' ============================================================
 Private Function IsNounIndicator(ByVal word As String) As Boolean
     Dim indicators As Variant
     Dim i As Long
@@ -911,9 +881,9 @@ Private Function IsNounIndicator(ByVal word As String) As Boolean
     IsNounIndicator = False
 End Function
 
-' ════════════════════════════════════════════════════════════
+' ============================================================
 '  PRIVATE: Check if the word after indicates noun usage
-' ════════════════════════════════════════════════════════════
+' ============================================================
 Private Function IsNounFollower(ByVal word As String) As Boolean
     Dim followers As Variant
     Dim i As Long
@@ -932,17 +902,17 @@ Private Function IsNounFollower(ByVal word As String) As Boolean
     IsNounFollower = False
 End Function
 
-' ════════════════════════════════════════════════════════════
+' ============================================================
 '  PRIVATE: Replace -s- with -c- in licence/license words
-' ════════════════════════════════════════════════════════════
+' ============================================================
 Private Function ReplaceSWithC(ByVal word As String) As String
     ReplaceSWithC = Replace(word, "license", "licence", , , vbTextCompare)
     ReplaceSWithC = Replace(ReplaceSWithC, "License", "Licence", , , vbBinaryCompare)
 End Function
 
-' ════════════════════════════════════════════════════════════
+' ============================================================
 '  PRIVATE: Replace -c- with -s- in licence/license words
-' ════════════════════════════════════════════════════════════
+' ============================================================
 Private Function ReplaceCWithS(ByVal word As String) As String
     ReplaceCWithS = Replace(word, "licence", "license", , , vbTextCompare)
     ReplaceCWithS = Replace(ReplaceCWithS, "Licence", "License", , , vbBinaryCompare)
@@ -950,13 +920,13 @@ End Function
 
 ' ================================================================
 ' ================================================================
-'  RULE 13 — COLOUR FORMATTING
+'  RULE 13 -- COLOUR FORMATTING
 ' ================================================================
 ' ================================================================
 
-' ════════════════════════════════════════════════════════════
-'  MAIN ENTRY POINT — Colour Formatting
-' ════════════════════════════════════════════════════════════
+' ============================================================
+'  MAIN ENTRY POINT -- Colour Formatting
+' ============================================================
 Public Function Check_ColourFormatting(doc As Document) As Collection
     Dim issues As New Collection
     Dim colourCounts As Object ' Scripting.Dictionary
@@ -967,7 +937,7 @@ Public Function Check_ColourFormatting(doc As Document) As Collection
     Dim maxCount As Long
     Dim runText As String
 
-    ' ── First pass: count colour usage per run ───────────────
+    ' -- First pass: count colour usage per run ---------------
     Set colourCounts = CreateObject("Scripting.Dictionary")
 
     On Error Resume Next
@@ -982,7 +952,7 @@ Public Function Check_ColourFormatting(doc As Document) As Collection
         End If
 
         ' Skip paragraphs outside page range
-        If Not PleadingsEngine.IsInPageRange(paraRange) Then
+        If Not EngineIsInPageRange(paraRange) Then
             GoTo NextParaPass1
         End If
 
@@ -1021,7 +991,7 @@ NextParaPass1:
     Next para
     On Error GoTo 0
 
-    ' ── Determine dominant colour ────────────────────────────
+    ' -- Determine dominant colour ----------------------------
     If colourCounts.Count = 0 Then
         Set Check_ColourFormatting = issues
         Exit Function
@@ -1037,7 +1007,7 @@ NextParaPass1:
         End If
     Next colourKey
 
-    ' ── Second pass: flag non-dominant, non-automatic colours ─
+    ' -- Second pass: flag non-dominant, non-automatic colours -
     Const WD_COLOR_AUTOMATIC As Long = -16777216
 
     ' Tracking for grouping consecutive same-colour runs
@@ -1060,7 +1030,7 @@ NextParaPass1:
         End If
 
         ' Skip paragraphs outside page range
-        If Not PleadingsEngine.IsInPageRange(paraRange) Then
+        If Not EngineIsInPageRange(paraRange) Then
             ' Flush any active group before skipping
             If groupActive Then
                 FlushColourGroup doc, issues, groupStartPos, groupEndPos, groupColour
@@ -1125,7 +1095,7 @@ NextParaPass1:
                 GoTo NextRunPass2
             End If
 
-            ' ── This run has a non-standard colour ───────────
+            ' -- This run has a non-standard colour -----------
             If groupActive And runColor = groupColour And _
                rn.Start = groupEndPos Then
                 ' Extend existing group
@@ -1157,15 +1127,15 @@ NextParaPass2:
     Set Check_ColourFormatting = issues
 End Function
 
-' ════════════════════════════════════════════════════════════
+' ============================================================
 '  PRIVATE: Flush a grouped colour issue
-' ════════════════════════════════════════════════════════════
+' ============================================================
 Private Sub FlushColourGroup(doc As Document, _
                               ByRef issues As Collection, _
                               ByVal startPos As Long, _
                               ByVal endPos As Long, _
                               ByVal fontColor As Long)
-    Dim issue As PleadingsIssue
+    Dim issue As Object
     Dim locStr As String
     Dim hexStr As String
     Dim rng As Range
@@ -1180,7 +1150,7 @@ Private Sub FlushColourGroup(doc As Document, _
         Exit Sub
     End If
 
-    locStr = PleadingsEngine.GetLocationString(rng, doc)
+    locStr = EngineGetLocationString(rng, doc)
     If Err.Number <> 0 Then
         locStr = "unknown location"
         Err.Clear
@@ -1196,21 +1166,13 @@ Private Sub FlushColourGroup(doc As Document, _
     End If
     On Error GoTo 0
 
-    Set issue = New PleadingsIssue
-    issue.Init RULE_NAME_COLOUR, _
-               locStr, _
-               "Non-standard font colour " & hexStr & " detected: '" & _
-               previewText & "'", _
-               "Change font colour to match document default", _
-               startPos, _
-               endPos, _
-               "possible_error"
+    Set issue = CreateIssueDict(RULE_NAME_COLOUR, locStr, "Non-standard font colour " & hexStr & " detected:)
     issues.Add issue
 End Sub
 
-' ════════════════════════════════════════════════════════════
+' ============================================================
 '  PRIVATE: Convert a Long colour value to hex string
-' ════════════════════════════════════════════════════════════
+' ============================================================
 Private Function ColourToHex(ByVal colorVal As Long) As String
     Dim cR As Long
     Dim cG As Long
@@ -1226,9 +1188,9 @@ Private Function ColourToHex(ByVal colorVal As Long) As String
                         Right("0" & Hex(cB), 2)
 End Function
 
-' ════════════════════════════════════════════════════════════
+' ============================================================
 '  PRIVATE: Check if a run is inside a hyperlink
-' ════════════════════════════════════════════════════════════
+' ============================================================
 Private Function IsRunInsideHyperlink(rn As Range, doc As Document) As Boolean
     Dim hl As Hyperlink
 
@@ -1246,4 +1208,112 @@ Private Function IsRunInsideHyperlink(rn As Range, doc As Document) As Boolean
     On Error GoTo 0
 
     IsRunInsideHyperlink = False
+End Function
+
+' ----------------------------------------------------------------
+'  PRIVATE: Late-bound wrapper for EngineIsInPageRange
+' ----------------------------------------------------------------
+
+' ----------------------------------------------------------------
+'  PRIVATE: Late-bound wrapper for EngineGetLocationString
+' ----------------------------------------------------------------
+
+' ----------------------------------------------------------------
+'  PRIVATE: Late-bound wrapper for PleadingsEngine.IsWhitelistedTerm
+' ----------------------------------------------------------------
+
+' ----------------------------------------------------------------
+'  PRIVATE: Late-bound wrapper for PleadingsEngine.GetSpellingMode
+' ----------------------------------------------------------------
+
+' ----------------------------------------------------------------
+'  PRIVATE: Create a dictionary-based issue (no class dependency)
+' ----------------------------------------------------------------
+Private Function CreateIssueDict(ByVal ruleName_ As String, _
+                                 ByVal location_ As String, _
+                                 ByVal issue_ As String, _
+                                 ByVal suggestion_ As String, _
+                                 ByVal rangeStart_ As Long, _
+                                 ByVal rangeEnd_ As Long, _
+                                 Optional ByVal severity_ As String = "error", _
+                                 Optional ByVal autoFixSafe_ As Boolean = False) As Object
+    Dim d As Object
+    Set d = CreateObject("Scripting.Dictionary")
+    d("RuleName") = ruleName_
+    d("Location") = location_
+    d("Issue") = issue_
+    d("Suggestion") = suggestion_
+    d("RangeStart") = rangeStart_
+    d("RangeEnd") = rangeEnd_
+    d("Severity") = severity_
+    d("AutoFixSafe") = autoFixSafe_
+    Set CreateIssueDict = d
+End Function
+
+' ----------------------------------------------------------------
+'  Late-bound wrapper: EngineIsInPageRange
+' ----------------------------------------------------------------
+
+' ----------------------------------------------------------------
+'  Late-bound wrapper: EngineGetLocationString
+' ----------------------------------------------------------------
+
+' ----------------------------------------------------------------
+'  Late-bound wrapper: PleadingsEngine.IsWhitelistedTerm
+' ----------------------------------------------------------------
+
+' ----------------------------------------------------------------
+'  Late-bound wrapper: PleadingsEngine.GetSpellingMode
+' ----------------------------------------------------------------
+
+' ----------------------------------------------------------------
+'  Late-bound wrapper: PleadingsEngine.IsInPageRange
+' ----------------------------------------------------------------
+Private Function EngineIsInPageRange(rng As Object) As Boolean
+    On Error Resume Next
+    EngineIsInPageRange = Application.Run("PleadingsEngine.IsInPageRange", rng)
+    If Err.Number <> 0 Then
+        EngineIsInPageRange = True
+        Err.Clear
+    End If
+    On Error GoTo 0
+End Function
+
+' ----------------------------------------------------------------
+'  Late-bound wrapper: PleadingsEngine.GetLocationString
+' ----------------------------------------------------------------
+Private Function EngineGetLocationString(rng As Object, doc As Document) As String
+    On Error Resume Next
+    EngineGetLocationString = Application.Run("PleadingsEngine.GetLocationString", rng, doc)
+    If Err.Number <> 0 Then
+        EngineGetLocationString = "unknown location"
+        Err.Clear
+    End If
+    On Error GoTo 0
+End Function
+
+' ----------------------------------------------------------------
+'  Late-bound wrapper: PleadingsEngine.IsWhitelistedTerm
+' ----------------------------------------------------------------
+Private Function EngineIsWhitelistedTerm(ByVal term As String) As Boolean
+    On Error Resume Next
+    EngineIsWhitelistedTerm = Application.Run("PleadingsEngine.IsWhitelistedTerm", term)
+    If Err.Number <> 0 Then
+        EngineIsWhitelistedTerm = False
+        Err.Clear
+    End If
+    On Error GoTo 0
+End Function
+
+' ----------------------------------------------------------------
+'  Late-bound wrapper: PleadingsEngine.GetSpellingMode
+' ----------------------------------------------------------------
+Private Function EngineGetSpellingMode() As String
+    On Error Resume Next
+    EngineGetSpellingMode = Application.Run("PleadingsEngine.GetSpellingMode")
+    If Err.Number <> 0 Then
+        EngineGetSpellingMode = "UK"
+        Err.Clear
+    End If
+    On Error GoTo 0
 End Function

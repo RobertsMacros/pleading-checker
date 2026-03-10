@@ -11,12 +11,12 @@ Option Explicit
 
 Private Const RULE_NAME As String = "defined_terms"
 
-' ── Helper: remove hyphens from a term ──────────────────────
+' -- Helper: remove hyphens from a term ----------------------
 Private Function RemoveHyphens(ByVal term As String) As String
     RemoveHyphens = Replace(term, "-", "")
 End Function
 
-' ── Helper: count occurrences of a term in document text ────
+' -- Helper: count occurrences of a term in document text ----
 Private Function CountTermInDoc(doc As Document, ByVal searchTerm As String) As Long
     Dim rng As Range
     Dim cnt As Long
@@ -41,7 +41,7 @@ Private Function CountTermInDoc(doc As Document, ByVal searchTerm As String) As 
     CountTermInDoc = cnt
 End Function
 
-' ── Helper: find first occurrence of a term and return range ─
+' -- Helper: find first occurrence of a term and return range -
 Private Function FindTermRange(doc As Document, ByVal searchTerm As String, _
                                 matchCase As Boolean) As Range
     Dim rng As Range
@@ -64,26 +64,27 @@ Private Function FindTermRange(doc As Document, ByVal searchTerm As String, _
     End If
 End Function
 
-' ════════════════════════════════════════════════════════════
+' ============================================================
 '  MAIN RULE FUNCTION
-' ════════════════════════════════════════════════════════════
+' ============================================================
 Public Function Check_DefinedTerms(doc As Document) As Collection
     Dim issues As New Collection
 
     On Error Resume Next
 
     ' Dictionary: term (String) -> Array(definitionParaIdx, rangeStart, rangeEnd)
-    Dim definedTerms As New Scripting.Dictionary
+    Dim definedTerms As Object
+    Set definedTerms = CreateObject("Scripting.Dictionary")
     Dim rng As Range
     Dim para As Paragraph
     Dim paraIdx As Long
     Dim paraText As String
 
-    ' ══════════════════════════════════════════════════════════
+    ' ==========================================================
     '  PASS 1: Scan for defined terms
-    ' ══════════════════════════════════════════════════════════
+    ' ==========================================================
 
-    ' ── Pattern A: Curly-quoted defined terms ────────────────
+    ' -- Pattern A: Curly-quoted defined terms ----------------
     ' Look for opening curly quote followed by uppercase letter
     Dim leftCurly As String
     Dim rightCurly As String
@@ -101,7 +102,7 @@ Public Function Check_DefinedTerms(doc As Document) As Collection
     End With
 
     Do While rng.Find.Execute
-        If Not PleadingsEngine.IsInPageRange(rng) Then
+        If Not EngineIsInPageRange(rng) Then
             rng.Collapse wdCollapseEnd
             GoTo NextCurlyFind
         End If
@@ -139,11 +140,11 @@ Public Function Check_DefinedTerms(doc As Document) As Collection
 NextCurlyFind:
     Loop
 
-    ' ── Pattern B: "X means " or "X has the meaning " ───────
+    ' -- Pattern B: "X means " or "X has the meaning " -------
     paraIdx = 0
     For Each para In doc.Paragraphs
         paraIdx = paraIdx + 1
-        If Not PleadingsEngine.IsInPageRange(para.Range) Then GoTo NextParaMeans
+        If Not EngineIsInPageRange(para.Range) Then GoTo NextParaMeans
 
         paraText = para.Range.Text
         Dim meansPos As Long
@@ -204,7 +205,7 @@ NextCurlyFind:
 NextParaMeans:
     Next para
 
-    ' ── Pattern C: Parenthetical definitions (the "Term") ───
+    ' -- Pattern C: Parenthetical definitions (the "Term") ---
     Set rng = doc.Content.Duplicate
     With rng.Find
         .ClearFormatting
@@ -216,7 +217,7 @@ NextParaMeans:
     End With
 
     Do While rng.Find.Execute
-        If Not PleadingsEngine.IsInPageRange(rng) Then
+        If Not EngineIsInPageRange(rng) Then
             rng.Collapse wdCollapseEnd
             GoTo NextParenFind
         End If
@@ -250,9 +251,9 @@ NextParaMeans:
 NextParenFind:
     Loop
 
-    ' ══════════════════════════════════════════════════════════
+    ' ==========================================================
     '  PASS 2: Validate each defined term
-    ' ══════════════════════════════════════════════════════════
+    ' ==========================================================
     Dim termKey As Variant
     For Each termKey In definedTerms.keys
         Dim term As String
@@ -260,71 +261,117 @@ NextParenFind:
         Dim tInfo As Variant
         tInfo = definedTerms(termKey)
 
-        ' ── Check A: Lowercase variant (inconsistent capitalisation) ──
+        ' -- Check A: Lowercase variant (inconsistent capitalisation) --
         Dim lcTerm As String
         lcTerm = LCase(Left$(term, 1)) & Mid$(term, 2)
         If lcTerm <> term Then
             Dim lcRng As Range
             Set lcRng = FindTermRange(doc, lcTerm, True)
             If Not lcRng Is Nothing Then
-                If PleadingsEngine.IsInPageRange(lcRng) Then
-                    Dim issueLC As New PleadingsIssue
+                If EngineIsInPageRange(lcRng) Then
+                    Dim issueLC As Object
                     Dim locLC As String
-                    locLC = PleadingsEngine.GetLocationString(lcRng, doc)
-                    issueLC.Init RULE_NAME, locLC, _
-                        "Inconsistent capitalisation: '" & lcTerm & _
-                        "' found but '" & term & "' is the defined term", _
-                        "Use '" & term & "' consistently", _
-                        lcRng.Start, lcRng.End, "error"
+                    locLC = EngineGetLocationString(lcRng, doc)
+                    Set issueLC = CreateIssueDict(RULE_NAME, locLC, "Inconsistent capitalisation: '" & lcTerm & "' found but '" & term & "' is the defined term", "Use '" & term & "' consistently", lcRng.Start, lcRng.End, "error")
                     issues.Add issueLC
                 End If
             End If
         End If
 
-        ' ── Check B: Hyphenated/unhyphenated variant ──────────
+        ' -- Check B: Hyphenated/unhyphenated variant ----------
         If InStr(1, term, "-") > 0 Then
             Dim noHyphen As String
             noHyphen = RemoveHyphens(term)
             Dim nhRng As Range
             Set nhRng = FindTermRange(doc, noHyphen, False)
             If Not nhRng Is Nothing Then
-                If PleadingsEngine.IsInPageRange(nhRng) Then
-                    Dim issueH As New PleadingsIssue
+                If EngineIsInPageRange(nhRng) Then
+                    Dim issueH As Object
                     Dim locH As String
-                    locH = PleadingsEngine.GetLocationString(nhRng, doc)
-                    issueH.Init RULE_NAME, locH, _
-                        "Hyphenation variant: '" & noHyphen & _
-                        "' found but defined term uses hyphen: '" & term & "'", _
-                        "Use the defined form: '" & term & "'", _
-                        nhRng.Start, nhRng.End, "error"
+                    locH = EngineGetLocationString(nhRng, doc)
+                    Set issueH = CreateIssueDict(RULE_NAME, locH, "Hyphenation variant: '" & noHyphen & "' found but defined term uses hyphen: '" & term & "'", "Use the defined form: '" & term & "'", nhRng.Start, nhRng.End, "error")
                     issues.Add issueH
                 End If
             End If
         Else
-            ' Term has no hyphen — check if hyphenated variant exists
+            ' Term has no hyphen -- check if hyphenated variant exists
             ' Try common hyphenation points (before common prefixes)
             ' This is a best-effort check
         End If
 
-        ' ── Check C: Defined term never referenced ────────────
+        ' -- Check C: Defined term never referenced ------------
         Dim totalCount As Long
         totalCount = CountTermInDoc(doc, term)
         If totalCount <= 1 Then
             ' Only appears at the definition site
-            Dim issueUnused As New PleadingsIssue
+            Dim issueUnused As Object
             Dim unusedRng As Range
             Set unusedRng = doc.Range(CLng(tInfo(1)), CLng(tInfo(2)))
             Dim locUnused As String
-            locUnused = PleadingsEngine.GetLocationString(unusedRng, doc)
-            issueUnused.Init RULE_NAME, locUnused, _
-                "Defined term never referenced: '" & term & _
-                "' is defined but not used elsewhere in the document", _
-                "Remove the definition or use the term in the document", _
-                CLng(tInfo(1)), CLng(tInfo(2)), "possible_error"
+            locUnused = EngineGetLocationString(unusedRng, doc)
+            Set issueUnused = CreateIssueDict(RULE_NAME, locUnused, "Defined term never referenced: '" & term & "' is defined but not used elsewhere in the document", "Remove the definition or use the term in the document", CLng(tInfo(1)), CLng(tInfo(2)), "possible_error")
             issues.Add issueUnused
         End If
     Next termKey
 
     On Error GoTo 0
     Set Check_DefinedTerms = issues
+End Function
+
+' ----------------------------------------------------------------
+'  PRIVATE: Create a dictionary-based issue (no class dependency)
+' ----------------------------------------------------------------
+Private Function CreateIssueDict(ByVal ruleName_ As String, _
+                                 ByVal location_ As String, _
+                                 ByVal issue_ As String, _
+                                 ByVal suggestion_ As String, _
+                                 ByVal rangeStart_ As Long, _
+                                 ByVal rangeEnd_ As Long, _
+                                 Optional ByVal severity_ As String = "error", _
+                                 Optional ByVal autoFixSafe_ As Boolean = False) As Object
+    Dim d As Object
+    Set d = CreateObject("Scripting.Dictionary")
+    d("RuleName") = ruleName_
+    d("Location") = location_
+    d("Issue") = issue_
+    d("Suggestion") = suggestion_
+    d("RangeStart") = rangeStart_
+    d("RangeEnd") = rangeEnd_
+    d("Severity") = severity_
+    d("AutoFixSafe") = autoFixSafe_
+    Set CreateIssueDict = d
+End Function
+
+' ----------------------------------------------------------------
+'  Late-bound wrapper: EngineIsInPageRange
+' ----------------------------------------------------------------
+
+' ----------------------------------------------------------------
+'  Late-bound wrapper: EngineGetLocationString
+' ----------------------------------------------------------------
+
+' ----------------------------------------------------------------
+'  Late-bound wrapper: PleadingsEngine.IsInPageRange
+' ----------------------------------------------------------------
+Private Function EngineIsInPageRange(rng As Object) As Boolean
+    On Error Resume Next
+    EngineIsInPageRange = Application.Run("PleadingsEngine.IsInPageRange", rng)
+    If Err.Number <> 0 Then
+        EngineIsInPageRange = True
+        Err.Clear
+    End If
+    On Error GoTo 0
+End Function
+
+' ----------------------------------------------------------------
+'  Late-bound wrapper: PleadingsEngine.GetLocationString
+' ----------------------------------------------------------------
+Private Function EngineGetLocationString(rng As Object, doc As Document) As String
+    On Error Resume Next
+    EngineGetLocationString = Application.Run("PleadingsEngine.GetLocationString", rng, doc)
+    If Err.Number <> 0 Then
+        EngineGetLocationString = "unknown location"
+        Err.Clear
+    End If
+    On Error GoTo 0
 End Function

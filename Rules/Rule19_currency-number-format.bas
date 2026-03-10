@@ -13,22 +13,21 @@ Attribute VB_Name = "Rule19_currency_number_format"
 '   iso_prefix   - e.g. "GBP 1,500"
 '
 ' Dependencies:
-'   - PleadingsIssue.cls
 '   - PleadingsEngine.bas (IsInPageRange, GetLocationString)
 ' ============================================================
 Option Explicit
 
 Private Const RULE_NAME As String = "currency_number_format"
 
-' ── Format category constants ───────────────────────────────
+' -- Format category constants -------------------------------
 Private Const FMT_WORDS As String = "words"
 Private Const FMT_ABBREVIATED As String = "abbreviated"
 Private Const FMT_FULL_NUMERIC As String = "full_numeric"
 Private Const FMT_ISO_PREFIX As String = "iso_prefix"
 
-' ════════════════════════════════════════════════════════════
+' ============================================================
 '  MAIN ENTRY POINT
-' ════════════════════════════════════════════════════════════
+' ============================================================
 Public Function Check_CurrencyNumberFormat(doc As Document) As Collection
     Dim issues As New Collection
     Dim symbols As Variant
@@ -39,12 +38,12 @@ Public Function Check_CurrencyNumberFormat(doc As Document) As Collection
     symbols = Array(ChrW(163), "$", ChrW(8364))   ' GBP, USD, EUR
     symLabels = Array("GBP", "USD", "EUR")
 
-    ' ── Check each symbol for format consistency ────────────
+    ' -- Check each symbol for format consistency ------------
     For i = LBound(symbols) To UBound(symbols)
         CheckSymbolConsistency doc, CStr(symbols(i)), CStr(symLabels(i)), issues
     Next i
 
-    ' ── Check ISO code prefixed amounts ─────────────────────
+    ' -- Check ISO code prefixed amounts ---------------------
     Dim isoCodes As Variant
     isoCodes = Array("GBP", "USD", "EUR", "JPY", "AUD", "CAD", "CHF", _
                      "BTC", "ETH", "USDT", "USDC", "BNB", "XRP", "SOL", "ADA", "DOGE")
@@ -56,11 +55,11 @@ Public Function Check_CurrencyNumberFormat(doc As Document) As Collection
     Set Check_CurrencyNumberFormat = issues
 End Function
 
-' ════════════════════════════════════════════════════════════
+' ============================================================
 '  PRIVATE: Check format consistency for a single symbol
 '  Searches for words, abbreviated, and full_numeric formats,
 '  determines the dominant format, and flags minorities.
-' ════════════════════════════════════════════════════════════
+' ============================================================
 Private Sub CheckSymbolConsistency(doc As Document, _
                                     sym As String, _
                                     symLabel As String, _
@@ -76,8 +75,8 @@ Private Sub CheckSymbolConsistency(doc As Document, _
     Set abbrRanges = New Collection
     Set numericRanges = New Collection
 
-    ' ── Search for "words" format: symbol + digits + space + word ──
-    ' Pattern: e.g. £[0-9.]@ [a-z]@  (wildcard)
+    ' -- Search for "words" format: symbol + digits + space + word --
+    ' Pattern: e.g. ?[0-9.]@ [a-z]@  (wildcard)
     Dim rng As Range
     Dim wordPattern As String
     wordPattern = sym & "[0-9.]@" & " [a-z]@"
@@ -110,7 +109,7 @@ Private Sub CheckSymbolConsistency(doc As Document, _
         Dim matchText As String
         matchText = LCase(rng.Text)
         If IsMagnitudeWord(matchText) Then
-            If PleadingsEngine.IsInPageRange(rng) Then
+            If EngineIsInPageRange(rng) Then
                 wordsCount = wordsCount + 1
                 wordsRanges.Add doc.Range(rng.Start, rng.End)
             End If
@@ -122,7 +121,7 @@ Private Sub CheckSymbolConsistency(doc As Document, _
         On Error GoTo 0
     Loop
 
-    ' ── Search for "abbreviated" format: symbol + digits + m/bn/k ──
+    ' -- Search for "abbreviated" format: symbol + digits + m/bn/k --
     Dim abbrPattern As String
     abbrPattern = sym & "[0-9.]@[mbk]"
 
@@ -145,7 +144,7 @@ Private Sub CheckSymbolConsistency(doc As Document, _
 
         If Not found Then Exit Do
 
-        If PleadingsEngine.IsInPageRange(rng) Then
+        If EngineIsInPageRange(rng) Then
             abbrCount = abbrCount + 1
             abbrRanges.Add doc.Range(rng.Start, rng.End)
         End If
@@ -156,7 +155,7 @@ Private Sub CheckSymbolConsistency(doc As Document, _
         On Error GoTo 0
     Loop
 
-    ' ── Search for "full_numeric" format: symbol + digits with commas ──
+    ' -- Search for "full_numeric" format: symbol + digits with commas --
     Dim numPattern As String
     numPattern = sym & "[0-9,.]@"
 
@@ -183,7 +182,7 @@ Private Sub CheckSymbolConsistency(doc As Document, _
         Dim numText As String
         numText = rng.Text
         If InStr(numText, ",") > 0 And Len(numText) >= 5 Then
-            If PleadingsEngine.IsInPageRange(rng) Then
+            If EngineIsInPageRange(rng) Then
                 numericCount = numericCount + 1
                 numericRanges.Add doc.Range(rng.Start, rng.End)
             End If
@@ -195,7 +194,7 @@ Private Sub CheckSymbolConsistency(doc As Document, _
         On Error GoTo 0
     Loop
 
-    ' ── Determine dominant format and flag minorities ──────
+    ' -- Determine dominant format and flag minorities ------
     Dim totalFormats As Long
     totalFormats = 0
     If wordsCount > 0 Then totalFormats = totalFormats + 1
@@ -228,16 +227,16 @@ Private Sub CheckSymbolConsistency(doc As Document, _
     End If
 End Sub
 
-' ════════════════════════════════════════════════════════════
+' ============================================================
 '  PRIVATE: Check ISO code prefixed amounts
 '  Searches for patterns like "GBP 1,500" or "USD 25.00"
-' ════════════════════════════════════════════════════════════
+' ============================================================
 Private Sub CheckISOCodeFormat(doc As Document, _
                                 isoCode As String, _
                                 ByRef issues As Collection)
     Dim rng As Range
     Dim isoPattern As String
-    Dim issue As PleadingsIssue
+    Dim issue As Object
     Dim locStr As String
 
     ' Search for ISO code followed by space and number
@@ -266,24 +265,17 @@ Private Sub CheckISOCodeFormat(doc As Document, _
 
         If Not found Then Exit Do
 
-        If PleadingsEngine.IsInPageRange(rng) Then
+        If EngineIsInPageRange(rng) Then
             isoCount = isoCount + 1
 
             ' Flag ISO prefix usage as informational (possible_error)
             ' since mixing ISO codes with symbol notation is inconsistent
             On Error Resume Next
-            locStr = PleadingsEngine.GetLocationString(rng, doc)
+            locStr = EngineGetLocationString(rng, doc)
             If Err.Number <> 0 Then locStr = "unknown location": Err.Clear
             On Error GoTo 0
 
-            Set issue = New PleadingsIssue
-            issue.Init RULE_NAME, _
-                       locStr, _
-                       "ISO code format used: '" & rng.Text & "'", _
-                       "Consider using symbol notation for consistency", _
-                       rng.Start, _
-                       rng.End, _
-                       "possible_error"
+            Set issue = CreateIssueDict(RULE_NAME, locStr, "ISO code format used: '" & rng.Text & "'", "Consider using symbol notation for consistency", rng.Start, rng.End, "possible_error")
             issues.Add issue
         End If
 
@@ -294,9 +286,9 @@ Private Sub CheckISOCodeFormat(doc As Document, _
     Loop
 End Sub
 
-' ════════════════════════════════════════════════════════════
+' ============================================================
 '  PRIVATE: Flag all ranges in a minority format collection
-' ════════════════════════════════════════════════════════════
+' ============================================================
 Private Sub FlagMinorityRanges(doc As Document, _
                                 ranges As Collection, _
                                 symLabel As String, _
@@ -305,32 +297,25 @@ Private Sub FlagMinorityRanges(doc As Document, _
                                 ByRef issues As Collection)
     Dim i As Long
     Dim rng As Range
-    Dim issue As PleadingsIssue
+    Dim issue As Object
     Dim locStr As String
 
     For i = 1 To ranges.Count
         Set rng = ranges(i)
 
         On Error Resume Next
-        locStr = PleadingsEngine.GetLocationString(rng, doc)
+        locStr = EngineGetLocationString(rng, doc)
         If Err.Number <> 0 Then locStr = "unknown location": Err.Clear
         On Error GoTo 0
 
-        Set issue = New PleadingsIssue
-        issue.Init RULE_NAME, _
-                   locStr, _
-                   symLabel & " amount uses '" & minorityFmt & "' format: '" & rng.Text & "'", _
-                   "Use '" & dominantFmt & "' format for consistency (dominant style)", _
-                   rng.Start, _
-                   rng.End, _
-                   "error"
+        Set issue = CreateIssueDict(RULE_NAME, locStr, symLabel & " amount uses '" & minorityFmt & "' format: '" & rng.Text & "'", "Use '" & dominantFmt & "' format for consistency (dominant style)", rng.Start, rng.End, "error")
         issues.Add issue
     Next i
 End Sub
 
-' ════════════════════════════════════════════════════════════
+' ============================================================
 '  PRIVATE: Check if matched text contains a magnitude word
-' ════════════════════════════════════════════════════════════
+' ============================================================
 Private Function IsMagnitudeWord(ByVal txt As String) As Boolean
     Dim lTxt As String
     lTxt = LCase(txt)
@@ -340,4 +325,62 @@ Private Function IsMagnitudeWord(ByVal txt As String) As Boolean
                       (InStr(lTxt, "thousand") > 0) Or _
                       (InStr(lTxt, "hundred") > 0) Or _
                       (InStr(lTxt, "trillion") > 0)
+End Function
+
+' ----------------------------------------------------------------
+'  PRIVATE: Create a dictionary-based issue (no class dependency)
+' ----------------------------------------------------------------
+Private Function CreateIssueDict(ByVal ruleName_ As String, _
+                                 ByVal location_ As String, _
+                                 ByVal issue_ As String, _
+                                 ByVal suggestion_ As String, _
+                                 ByVal rangeStart_ As Long, _
+                                 ByVal rangeEnd_ As Long, _
+                                 Optional ByVal severity_ As String = "error", _
+                                 Optional ByVal autoFixSafe_ As Boolean = False) As Object
+    Dim d As Object
+    Set d = CreateObject("Scripting.Dictionary")
+    d("RuleName") = ruleName_
+    d("Location") = location_
+    d("Issue") = issue_
+    d("Suggestion") = suggestion_
+    d("RangeStart") = rangeStart_
+    d("RangeEnd") = rangeEnd_
+    d("Severity") = severity_
+    d("AutoFixSafe") = autoFixSafe_
+    Set CreateIssueDict = d
+End Function
+
+' ----------------------------------------------------------------
+'  Late-bound wrapper: EngineIsInPageRange
+' ----------------------------------------------------------------
+
+' ----------------------------------------------------------------
+'  Late-bound wrapper: EngineGetLocationString
+' ----------------------------------------------------------------
+
+' ----------------------------------------------------------------
+'  Late-bound wrapper: PleadingsEngine.IsInPageRange
+' ----------------------------------------------------------------
+Private Function EngineIsInPageRange(rng As Object) As Boolean
+    On Error Resume Next
+    EngineIsInPageRange = Application.Run("PleadingsEngine.IsInPageRange", rng)
+    If Err.Number <> 0 Then
+        EngineIsInPageRange = True
+        Err.Clear
+    End If
+    On Error GoTo 0
+End Function
+
+' ----------------------------------------------------------------
+'  Late-bound wrapper: PleadingsEngine.GetLocationString
+' ----------------------------------------------------------------
+Private Function EngineGetLocationString(rng As Object, doc As Document) As String
+    On Error Resume Next
+    EngineGetLocationString = Application.Run("PleadingsEngine.GetLocationString", rng, doc)
+    If Err.Number <> 0 Then
+        EngineGetLocationString = "unknown location"
+        Err.Clear
+    End If
+    On Error GoTo 0
 End Function

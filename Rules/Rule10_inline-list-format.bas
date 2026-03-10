@@ -10,12 +10,12 @@ Option Explicit
 
 Private Const RULE_NAME As String = "inline_list_format"
 
-' ── Marker pattern types ────────────────────────────────────
+' -- Marker pattern types ------------------------------------
 Private Const MARKER_LETTER As String = "letter"   ' (a), (b), (c)
 Private Const MARKER_ROMAN As String = "roman"     ' (i), (ii), (iii)
 Private Const MARKER_NUMBER As String = "number"   ' (1), (2), (3)
 
-' ── Helper: detect marker type from content between parens ──
+' -- Helper: detect marker type from content between parens --
 Private Function GetMarkerType(ByVal content As String) As String
     If Len(content) = 0 Then
         GetMarkerType = ""
@@ -52,7 +52,7 @@ Private Function GetMarkerType(ByVal content As String) As String
     GetMarkerType = ""
 End Function
 
-' ── Helper: find all inline list markers in a paragraph ─────
+' -- Helper: find all inline list markers in a paragraph -----
 ' Returns Collection of Array(markerPos, markerText, markerContent, markerType)
 Private Function FindMarkersInPara(ByVal paraText As String) As Collection
     Dim markers As New Collection
@@ -94,7 +94,7 @@ ContinueSearch:
     Set FindMarkersInPara = markers
 End Function
 
-' ── Helper: detect separator before a marker ────────────────
+' -- Helper: detect separator before a marker ----------------
 ' Looks at text between previous marker's end and current marker's start
 Private Function DetectSeparator(ByVal textBetween As String) As String
     Dim trimmed As String
@@ -115,7 +115,7 @@ Private Function DetectSeparator(ByVal textBetween As String) As String
     DetectSeparator = "none"
 End Function
 
-' ── Helper: check if conjunction precedes final marker ──────
+' -- Helper: check if conjunction precedes final marker ------
 Private Function DetectConjunction(ByVal textBefore As String) As String
     Dim trimmed As String
     trimmed = LCase(Trim$(textBefore))
@@ -140,16 +140,17 @@ Private Function DetectConjunction(ByVal textBefore As String) As String
     DetectConjunction = "none"
 End Function
 
-' ════════════════════════════════════════════════════════════
+' ============================================================
 '  MAIN RULE FUNCTION
-' ════════════════════════════════════════════════════════════
+' ============================================================
 Public Function Check_InlineListFormat(doc As Document) As Collection
     Dim issues As New Collection
 
     On Error Resume Next
 
     ' Track list styles: "separator|conjunction|ending" -> count
-    Dim styleCounts As New Scripting.Dictionary
+    Dim styleCounts As Object
+    Set styleCounts = CreateObject("Scripting.Dictionary")
     ' Store list details for flagging: Collection of Array(styleKey, paraIdx, rangeStart, rangeEnd, paraText)
     Dim listDetails As New Collection
 
@@ -161,7 +162,7 @@ Public Function Check_InlineListFormat(doc As Document) As Collection
         paraIdx = paraIdx + 1
 
         ' Page range filter
-        If Not PleadingsEngine.IsInPageRange(para.Range) Then GoTo NextPara
+        If Not EngineIsInPageRange(para.Range) Then GoTo NextPara
 
         Dim paraText As String
         paraText = para.Range.Text
@@ -191,7 +192,7 @@ Public Function Check_InlineListFormat(doc As Document) As Collection
         Next mi
         If Not sameType Then GoTo NextPara
 
-        ' ── Analyse separator style ────────────────────────
+        ' -- Analyse separator style ------------------------
         Dim separators As New Collection
         For mi = 2 To markers.Count
             Dim prevMk As Variant
@@ -234,7 +235,7 @@ Public Function Check_InlineListFormat(doc As Document) As Collection
             listSep = "none"
         End If
 
-        ' ── Check conjunction before final marker ──────────
+        ' -- Check conjunction before final marker ----------
         Dim lastMk As Variant
         lastMk = markers(markers.Count)
         Dim lastMkStart As Long
@@ -254,7 +255,7 @@ Public Function Check_InlineListFormat(doc As Document) As Collection
         Dim conjunction As String
         conjunction = DetectConjunction(conjText)
 
-        ' ── Check ending punctuation ───────────────────────
+        ' -- Check ending punctuation -----------------------
         Dim lastMkEnd As Long
         lastMkEnd = CLng(lastMk(0)) + Len(CStr(lastMk(1)))
         Dim afterLast As String
@@ -282,7 +283,7 @@ Public Function Check_InlineListFormat(doc As Document) As Collection
             ending = "none"
         End If
 
-        ' ── Build style key and track ──────────────────────
+        ' -- Build style key and track ----------------------
         Dim styleKey As String
         styleKey = listSep & "|" & conjunction & "|" & ending
 
@@ -304,7 +305,7 @@ Public Function Check_InlineListFormat(doc As Document) As Collection
 NextPara:
     Next para
 
-    ' ── Determine dominant list style ──────────────────────
+    ' -- Determine dominant list style ----------------------
     If styleCounts.Count > 1 And listDetails.Count > 1 Then
         Dim domStyle As String
         Dim maxCnt As Long
@@ -318,17 +319,17 @@ NextPara:
             End If
         Next sk
 
-        ' ── Flag deviations ────────────────────────────────
+        ' -- Flag deviations --------------------------------
         Dim li As Long
         For li = 1 To listDetails.Count
             Dim ld As Variant
             ld = listDetails(li)
             If CStr(ld(0)) <> domStyle Then
-                Dim issue As New PleadingsIssue
+                Dim issue As Object
                 Dim rng As Range
                 Set rng = doc.Range(CLng(ld(2)), CLng(ld(3)))
                 Dim loc As String
-                loc = PleadingsEngine.GetLocationString(rng, doc)
+                loc = EngineGetLocationString(rng, doc)
 
                 ' Parse dominant style for suggestion
                 Dim domParts() As String
@@ -339,9 +340,7 @@ NextPara:
                 If UBound(domParts) >= 1 Then suggStr = suggStr & ", '" & domParts(1) & "' conjunction"
                 If UBound(domParts) >= 2 Then suggStr = suggStr & ", " & domParts(2) & " ending"
 
-                issue.Init RULE_NAME, loc, _
-                    "Inline list format inconsistency near: '" & CStr(ld(4)) & "...'", _
-                    suggStr, CLng(ld(2)), CLng(ld(3)), "possible_error"
+                Set issue = CreateIssueDict(RULE_NAME, loc, "Inline list format inconsistency near: '" & CStr(ld(4)) & "...'", suggStr, CLng(ld(2)), CLng(ld(3)), "possible_error")
                 issues.Add issue
             End If
         Next li
@@ -349,4 +348,62 @@ NextPara:
 
     On Error GoTo 0
     Set Check_InlineListFormat = issues
+End Function
+
+' ----------------------------------------------------------------
+'  PRIVATE: Create a dictionary-based issue (no class dependency)
+' ----------------------------------------------------------------
+Private Function CreateIssueDict(ByVal ruleName_ As String, _
+                                 ByVal location_ As String, _
+                                 ByVal issue_ As String, _
+                                 ByVal suggestion_ As String, _
+                                 ByVal rangeStart_ As Long, _
+                                 ByVal rangeEnd_ As Long, _
+                                 Optional ByVal severity_ As String = "error", _
+                                 Optional ByVal autoFixSafe_ As Boolean = False) As Object
+    Dim d As Object
+    Set d = CreateObject("Scripting.Dictionary")
+    d("RuleName") = ruleName_
+    d("Location") = location_
+    d("Issue") = issue_
+    d("Suggestion") = suggestion_
+    d("RangeStart") = rangeStart_
+    d("RangeEnd") = rangeEnd_
+    d("Severity") = severity_
+    d("AutoFixSafe") = autoFixSafe_
+    Set CreateIssueDict = d
+End Function
+
+' ----------------------------------------------------------------
+'  Late-bound wrapper: EngineIsInPageRange
+' ----------------------------------------------------------------
+
+' ----------------------------------------------------------------
+'  Late-bound wrapper: EngineGetLocationString
+' ----------------------------------------------------------------
+
+' ----------------------------------------------------------------
+'  Late-bound wrapper: PleadingsEngine.IsInPageRange
+' ----------------------------------------------------------------
+Private Function EngineIsInPageRange(rng As Object) As Boolean
+    On Error Resume Next
+    EngineIsInPageRange = Application.Run("PleadingsEngine.IsInPageRange", rng)
+    If Err.Number <> 0 Then
+        EngineIsInPageRange = True
+        Err.Clear
+    End If
+    On Error GoTo 0
+End Function
+
+' ----------------------------------------------------------------
+'  Late-bound wrapper: PleadingsEngine.GetLocationString
+' ----------------------------------------------------------------
+Private Function EngineGetLocationString(rng As Object, doc As Document) As String
+    On Error Resume Next
+    EngineGetLocationString = Application.Run("PleadingsEngine.GetLocationString", rng, doc)
+    If Err.Number <> 0 Then
+        EngineGetLocationString = "unknown location"
+        Err.Clear
+    End If
+    On Error GoTo 0
 End Function

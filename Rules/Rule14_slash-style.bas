@@ -6,20 +6,19 @@ Attribute VB_Name = "Rule14_slash_style"
 ' backslashes that are not file paths or code.
 '
 ' Dependencies:
-'   - PleadingsIssue.cls
 '   - PleadingsEngine.bas (IsInPageRange, GetLocationString)
 ' ============================================================
 Option Explicit
 
 Private Const RULE_NAME As String = "slash_style"
 
-' ════════════════════════════════════════════════════════════
+' ============================================================
 '  MAIN ENTRY POINT
-' ════════════════════════════════════════════════════════════
+' ============================================================
 Public Function Check_SlashStyle(doc As Document) As Collection
     Dim issues As New Collection
 
-    ' ── Forward slashes: determine dominant style ────────────
+    ' -- Forward slashes: determine dominant style ------------
     Dim tightCount As Long
     Dim spacedCount As Long
 
@@ -41,15 +40,15 @@ Public Function Check_SlashStyle(doc As Document) As Collection
         FlagTightSlashes doc, issues
     End If
 
-    ' ── Backslashes ──────────────────────────────────────────
+    ' -- Backslashes ------------------------------------------
     FlagBackslashes doc, issues
 
     Set Check_SlashStyle = issues
 End Function
 
-' ════════════════════════════════════════════════════════════
+' ============================================================
 '  PRIVATE: Count tight slashes using wildcard search
-' ════════════════════════════════════════════════════════════
+' ============================================================
 Private Function CountTightSlashes(doc As Document) As Long
     Dim rng As Range
     Dim cnt As Long
@@ -88,9 +87,9 @@ Private Function CountTightSlashes(doc As Document) As Long
     CountTightSlashes = cnt
 End Function
 
-' ════════════════════════════════════════════════════════════
+' ============================================================
 '  PRIVATE: Count spaced slashes using literal search
-' ════════════════════════════════════════════════════════════
+' ============================================================
 Private Function CountSpacedSlashes(doc As Document) As Long
     Dim rng As Range
     Dim cnt As Long
@@ -129,13 +128,13 @@ Private Function CountSpacedSlashes(doc As Document) As Long
     CountSpacedSlashes = cnt
 End Function
 
-' ════════════════════════════════════════════════════════════
+' ============================================================
 '  PRIVATE: Flag spaced slashes (minority when tight is dominant)
-' ════════════════════════════════════════════════════════════
+' ============================================================
 Private Sub FlagSpacedSlashes(doc As Document, ByRef issues As Collection)
     Dim rng As Range
     Dim found As Boolean
-    Dim issue As PleadingsIssue
+    Dim issue As Object
     Dim locStr As String
 
     Set rng = doc.Content.Duplicate
@@ -157,23 +156,16 @@ Private Sub FlagSpacedSlashes(doc As Document, ByRef issues As Collection)
         If Err.Number <> 0 Then Exit Do
         If Not found Then Exit Do
 
-        If Not PleadingsEngine.IsInPageRange(rng) Then GoTo ContinueSpaced
+        If Not EngineIsInPageRange(rng) Then GoTo ContinueSpaced
         If IsURLContext(rng, doc) Then GoTo ContinueSpaced
 
-        locStr = PleadingsEngine.GetLocationString(rng, doc)
+        locStr = EngineGetLocationString(rng, doc)
         If Err.Number <> 0 Then
             locStr = "unknown location"
             Err.Clear
         End If
 
-        Set issue = New PleadingsIssue
-        issue.Init RULE_NAME, _
-                   locStr, _
-                   "Spaced slash '" & rng.Text & "' differs from dominant tight style", _
-                   "Remove spaces around slash for consistency", _
-                   rng.Start, _
-                   rng.End, _
-                   "possible_error"
+        Set issue = CreateIssueDict(RULE_NAME, locStr, "Spaced slash '" & rng.Text & "' differs from dominant tight style", "Remove spaces around slash for consistency", rng.Start, rng.End, "possible_error")
         issues.Add issue
 
 ContinueSpaced:
@@ -183,13 +175,13 @@ ContinueSpaced:
     On Error GoTo 0
 End Sub
 
-' ════════════════════════════════════════════════════════════
+' ============================================================
 '  PRIVATE: Flag tight slashes (minority when spaced is dominant)
-' ════════════════════════════════════════════════════════════
+' ============================================================
 Private Sub FlagTightSlashes(doc As Document, ByRef issues As Collection)
     Dim rng As Range
     Dim found As Boolean
-    Dim issue As PleadingsIssue
+    Dim issue As Object
     Dim locStr As String
 
     Set rng = doc.Content.Duplicate
@@ -211,24 +203,17 @@ Private Sub FlagTightSlashes(doc As Document, ByRef issues As Collection)
         If Err.Number <> 0 Then Exit Do
         If Not found Then Exit Do
 
-        If Not PleadingsEngine.IsInPageRange(rng) Then GoTo ContinueTight
+        If Not EngineIsInPageRange(rng) Then GoTo ContinueTight
         If IsURLContext(rng, doc) Then GoTo ContinueTight
         If IsDateSlash(rng) Then GoTo ContinueTight
 
-        locStr = PleadingsEngine.GetLocationString(rng, doc)
+        locStr = EngineGetLocationString(rng, doc)
         If Err.Number <> 0 Then
             locStr = "unknown location"
             Err.Clear
         End If
 
-        Set issue = New PleadingsIssue
-        issue.Init RULE_NAME, _
-                   locStr, _
-                   "Tight slash '" & rng.Text & "' differs from dominant spaced style", _
-                   "Add spaces around slash for consistency", _
-                   rng.Start, _
-                   rng.End, _
-                   "possible_error"
+        Set issue = CreateIssueDict(RULE_NAME, locStr, "Tight slash '" & rng.Text & "' differs from dominant spaced style", "Add spaces around slash for consistency", rng.Start, rng.End, "possible_error")
         issues.Add issue
 
 ContinueTight:
@@ -238,13 +223,13 @@ ContinueTight:
     On Error GoTo 0
 End Sub
 
-' ════════════════════════════════════════════════════════════
+' ============================================================
 '  PRIVATE: Flag unexpected backslashes
-' ════════════════════════════════════════════════════════════
+' ============================================================
 Private Sub FlagBackslashes(doc As Document, ByRef issues As Collection)
     Dim rng As Range
     Dim found As Boolean
-    Dim issue As PleadingsIssue
+    Dim issue As Object
     Dim locStr As String
     Dim context As String
     Dim fontName As String
@@ -268,7 +253,7 @@ Private Sub FlagBackslashes(doc As Document, ByRef issues As Collection)
         If Err.Number <> 0 Then Exit Do
         If Not found Then Exit Do
 
-        If Not PleadingsEngine.IsInPageRange(rng) Then GoTo ContinueBackslash
+        If Not EngineIsInPageRange(rng) Then GoTo ContinueBackslash
 
         ' Get surrounding context for skip checks
         Dim contextStart As Long
@@ -310,20 +295,13 @@ Private Sub FlagBackslashes(doc As Document, ByRef issues As Collection)
         End If
 
         ' Flag the backslash
-        locStr = PleadingsEngine.GetLocationString(rng, doc)
+        locStr = EngineGetLocationString(rng, doc)
         If Err.Number <> 0 Then
             locStr = "unknown location"
             Err.Clear
         End If
 
-        Set issue = New PleadingsIssue
-        issue.Init RULE_NAME, _
-                   locStr, _
-                   "Unexpected backslash — did you mean forward slash?", _
-                   "Replace '\' with '/'", _
-                   rng.Start, _
-                   rng.End, _
-                   "possible_error"
+        Set issue = CreateIssueDict(RULE_NAME, locStr, "Unexpected backslash -- did you mean forward slash?", "Replace '\' with '/'", rng.Start, rng.End, "possible_error")
         issues.Add issue
 
 ContinueBackslash:
@@ -333,9 +311,9 @@ ContinueBackslash:
     On Error GoTo 0
 End Sub
 
-' ════════════════════════════════════════════════════════════
+' ============================================================
 '  PRIVATE: Check if context suggests a URL
-' ════════════════════════════════════════════════════════════
+' ============================================================
 Private Function IsURLContext(rng As Range, doc As Document) As Boolean
     Dim contextStart As Long
     Dim contextEnd As Long
@@ -364,9 +342,9 @@ Private Function IsURLContext(rng As Range, doc As Document) As Boolean
                    (InStr(1, context, "www") > 0)
 End Function
 
-' ════════════════════════════════════════════════════════════
+' ============================================================
 '  PRIVATE: Check if slash is part of a date (digits only)
-' ════════════════════════════════════════════════════════════
+' ============================================================
 Private Function IsDateSlash(rng As Range) As Boolean
     Dim matchText As String
     Dim i As Long
@@ -394,9 +372,9 @@ Private Function IsDateSlash(rng As Range) As Boolean
     IsDateSlash = hasSlash
 End Function
 
-' ════════════════════════════════════════════════════════════
+' ============================================================
 '  PRIVATE: Check for drive letter path pattern (e.g. C:\)
-' ════════════════════════════════════════════════════════════
+' ============================================================
 Private Function IsDriveLetterPath(ByVal context As String) As Boolean
     Dim i As Long
     Dim ch As String
@@ -415,9 +393,67 @@ Private Function IsDriveLetterPath(ByVal context As String) As Boolean
     IsDriveLetterPath = False
 End Function
 
-' ════════════════════════════════════════════════════════════
+' ============================================================
 '  PRIVATE: Check for UNC path pattern (\\server)
-' ════════════════════════════════════════════════════════════
+' ============================================================
 Private Function IsUNCPath(ByVal context As String) As Boolean
     IsUNCPath = (InStr(1, context, "\\") > 0)
+End Function
+
+' ----------------------------------------------------------------
+'  PRIVATE: Create a dictionary-based issue (no class dependency)
+' ----------------------------------------------------------------
+Private Function CreateIssueDict(ByVal ruleName_ As String, _
+                                 ByVal location_ As String, _
+                                 ByVal issue_ As String, _
+                                 ByVal suggestion_ As String, _
+                                 ByVal rangeStart_ As Long, _
+                                 ByVal rangeEnd_ As Long, _
+                                 Optional ByVal severity_ As String = "error", _
+                                 Optional ByVal autoFixSafe_ As Boolean = False) As Object
+    Dim d As Object
+    Set d = CreateObject("Scripting.Dictionary")
+    d("RuleName") = ruleName_
+    d("Location") = location_
+    d("Issue") = issue_
+    d("Suggestion") = suggestion_
+    d("RangeStart") = rangeStart_
+    d("RangeEnd") = rangeEnd_
+    d("Severity") = severity_
+    d("AutoFixSafe") = autoFixSafe_
+    Set CreateIssueDict = d
+End Function
+
+' ----------------------------------------------------------------
+'  Late-bound wrapper: EngineIsInPageRange
+' ----------------------------------------------------------------
+
+' ----------------------------------------------------------------
+'  Late-bound wrapper: EngineGetLocationString
+' ----------------------------------------------------------------
+
+' ----------------------------------------------------------------
+'  Late-bound wrapper: PleadingsEngine.IsInPageRange
+' ----------------------------------------------------------------
+Private Function EngineIsInPageRange(rng As Object) As Boolean
+    On Error Resume Next
+    EngineIsInPageRange = Application.Run("PleadingsEngine.IsInPageRange", rng)
+    If Err.Number <> 0 Then
+        EngineIsInPageRange = True
+        Err.Clear
+    End If
+    On Error GoTo 0
+End Function
+
+' ----------------------------------------------------------------
+'  Late-bound wrapper: PleadingsEngine.GetLocationString
+' ----------------------------------------------------------------
+Private Function EngineGetLocationString(rng As Object, doc As Document) As String
+    On Error Resume Next
+    EngineGetLocationString = Application.Run("PleadingsEngine.GetLocationString", rng, doc)
+    If Err.Number <> 0 Then
+        EngineGetLocationString = "unknown location"
+        Err.Clear
+    End If
+    On Error GoTo 0
 End Function

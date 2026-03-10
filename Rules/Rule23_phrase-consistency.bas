@@ -13,20 +13,19 @@ Attribute VB_Name = "Rule23_phrase_consistency"
 '   etc.
 '
 ' Dependencies:
-'   - PleadingsIssue.cls
 '   - PleadingsEngine.bas (IsInPageRange, GetLocationString)
 ' ============================================================
 Option Explicit
 
 Private Const RULE_NAME As String = "phrase_consistency"
 
-' ════════════════════════════════════════════════════════════
+' ============================================================
 '  MAIN ENTRY POINT
-' ════════════════════════════════════════════════════════════
+' ============================================================
 Public Function Check_PhraseConsistency(doc As Document) As Collection
     Dim issues As New Collection
 
-    ' ── Define phrase groups ─────────────────────────────────
+    ' -- Define phrase groups ---------------------------------
     ' Each group is an array of synonymous phrases
     Dim groups(0 To 9) As Variant
 
@@ -41,7 +40,7 @@ Public Function Check_PhraseConsistency(doc As Document) As Collection
     groups(8) = Array("forthwith", "immediately", "without delay")
     groups(9) = Array("hereby", "by this")
 
-    ' ── Process each group ───────────────────────────────────
+    ' -- Process each group -----------------------------------
     Dim g As Long
     For g = 0 To 9
         CheckPhraseGroup doc, groups(g), issues
@@ -50,10 +49,10 @@ Public Function Check_PhraseConsistency(doc As Document) As Collection
     Set Check_PhraseConsistency = issues
 End Function
 
-' ════════════════════════════════════════════════════════════
+' ============================================================
 '  PRIVATE: Check a single phrase group for consistency
 '  Counts each phrase, determines dominant, flags minorities.
-' ════════════════════════════════════════════════════════════
+' ============================================================
 Private Sub CheckPhraseGroup(doc As Document, _
                               phrases As Variant, _
                               ByRef issues As Collection)
@@ -67,12 +66,12 @@ Private Sub CheckPhraseGroup(doc As Document, _
     phraseCount = UBound(phrases) - LBound(phrases) + 1
     ReDim counts(LBound(phrases) To UBound(phrases))
 
-    ' ── Count occurrences of each phrase ─────────────────────
+    ' -- Count occurrences of each phrase ---------------------
     For p = LBound(phrases) To UBound(phrases)
         counts(p) = CountPhrase(doc, CStr(phrases(p)))
     Next p
 
-    ' ── Determine how many phrases in this group are used ────
+    ' -- Determine how many phrases in this group are used ----
     usedCount = 0
     dominantIdx = LBound(phrases)
     dominantCount = counts(LBound(phrases))
@@ -88,7 +87,7 @@ Private Sub CheckPhraseGroup(doc As Document, _
     ' Only flag if more than one phrase in the group is used
     If usedCount < 2 Then Exit Sub
 
-    ' ── Flag all minority phrase occurrences ─────────────────
+    ' -- Flag all minority phrase occurrences -----------------
     For p = LBound(phrases) To UBound(phrases)
         If counts(p) > 0 And p <> dominantIdx Then
             FlagPhraseOccurrences doc, CStr(phrases(p)), CStr(phrases(dominantIdx)), issues
@@ -96,11 +95,11 @@ Private Sub CheckPhraseGroup(doc As Document, _
     Next p
 End Sub
 
-' ════════════════════════════════════════════════════════════
+' ============================================================
 '  PRIVATE: Count occurrences of a phrase in the document
 '  Uses Find with MatchWildcards=False, MatchWholeWord=False
 '  (necessary for multi-word phrases).
-' ════════════════════════════════════════════════════════════
+' ============================================================
 Private Function CountPhrase(doc As Document, phrase As String) As Long
     Dim rng As Range
     Dim cnt As Long
@@ -127,7 +126,7 @@ Private Function CountPhrase(doc As Document, phrase As String) As Long
 
         If Not found Then Exit Do
 
-        If PleadingsEngine.IsInPageRange(rng) Then
+        If EngineIsInPageRange(rng) Then
             cnt = cnt + 1
         End If
 
@@ -140,16 +139,16 @@ Private Function CountPhrase(doc As Document, phrase As String) As Long
     CountPhrase = cnt
 End Function
 
-' ════════════════════════════════════════════════════════════
+' ============================================================
 '  PRIVATE: Flag all occurrences of a minority phrase
-' ════════════════════════════════════════════════════════════
+' ============================================================
 Private Sub FlagPhraseOccurrences(doc As Document, _
                                    minorityPhrase As String, _
                                    dominantPhrase As String, _
                                    ByRef issues As Collection)
     Dim rng As Range
     Dim found As Boolean
-    Dim issue As PleadingsIssue
+    Dim issue As Object
     Dim locStr As String
 
     Set rng = doc.Content.Duplicate
@@ -171,20 +170,13 @@ Private Sub FlagPhraseOccurrences(doc As Document, _
 
         If Not found Then Exit Do
 
-        If PleadingsEngine.IsInPageRange(rng) Then
+        If EngineIsInPageRange(rng) Then
             On Error Resume Next
-            locStr = PleadingsEngine.GetLocationString(rng, doc)
+            locStr = EngineGetLocationString(rng, doc)
             If Err.Number <> 0 Then locStr = "unknown location": Err.Clear
             On Error GoTo 0
 
-            Set issue = New PleadingsIssue
-            issue.Init RULE_NAME, _
-                       locStr, _
-                       "Inconsistent phrase: '" & rng.Text & "' used", _
-                       "Use '" & dominantPhrase & "' for consistency (dominant style)", _
-                       rng.Start, _
-                       rng.End, _
-                       "error"
+            Set issue = CreateIssueDict(RULE_NAME, locStr, "Inconsistent phrase: '" & rng.Text & "' used", "Use '" & dominantPhrase & "' for consistency (dominant style)", rng.Start, rng.End, "error")
             issues.Add issue
         End If
 
@@ -194,3 +186,61 @@ Private Sub FlagPhraseOccurrences(doc As Document, _
         On Error GoTo 0
     Loop
 End Sub
+
+' ----------------------------------------------------------------
+'  PRIVATE: Create a dictionary-based issue (no class dependency)
+' ----------------------------------------------------------------
+Private Function CreateIssueDict(ByVal ruleName_ As String, _
+                                 ByVal location_ As String, _
+                                 ByVal issue_ As String, _
+                                 ByVal suggestion_ As String, _
+                                 ByVal rangeStart_ As Long, _
+                                 ByVal rangeEnd_ As Long, _
+                                 Optional ByVal severity_ As String = "error", _
+                                 Optional ByVal autoFixSafe_ As Boolean = False) As Object
+    Dim d As Object
+    Set d = CreateObject("Scripting.Dictionary")
+    d("RuleName") = ruleName_
+    d("Location") = location_
+    d("Issue") = issue_
+    d("Suggestion") = suggestion_
+    d("RangeStart") = rangeStart_
+    d("RangeEnd") = rangeEnd_
+    d("Severity") = severity_
+    d("AutoFixSafe") = autoFixSafe_
+    Set CreateIssueDict = d
+End Function
+
+' ----------------------------------------------------------------
+'  Late-bound wrapper: EngineIsInPageRange
+' ----------------------------------------------------------------
+
+' ----------------------------------------------------------------
+'  Late-bound wrapper: EngineGetLocationString
+' ----------------------------------------------------------------
+
+' ----------------------------------------------------------------
+'  Late-bound wrapper: PleadingsEngine.IsInPageRange
+' ----------------------------------------------------------------
+Private Function EngineIsInPageRange(rng As Object) As Boolean
+    On Error Resume Next
+    EngineIsInPageRange = Application.Run("PleadingsEngine.IsInPageRange", rng)
+    If Err.Number <> 0 Then
+        EngineIsInPageRange = True
+        Err.Clear
+    End If
+    On Error GoTo 0
+End Function
+
+' ----------------------------------------------------------------
+'  Late-bound wrapper: PleadingsEngine.GetLocationString
+' ----------------------------------------------------------------
+Private Function EngineGetLocationString(rng As Object, doc As Document) As String
+    On Error Resume Next
+    EngineGetLocationString = Application.Run("PleadingsEngine.GetLocationString", rng, doc)
+    If Err.Number <> 0 Then
+        EngineGetLocationString = "unknown location"
+        Err.Clear
+    End If
+    On Error GoTo 0
+End Function

@@ -12,7 +12,6 @@ Attribute VB_Name = "Rule33_smart_quote_consistency"
 ' style and flags straight quotes as the minority.
 '
 ' Dependencies:
-'   - PleadingsIssue.cls
 '   - PleadingsEngine.bas (IsInPageRange, GetLocationString)
 ' ============================================================
 Option Explicit
@@ -27,9 +26,9 @@ Private Const STRAIGHT_SINGLE As Long = 39         ' Chr(39)
 Private Const CURLY_SINGLE_OPEN As Long = 8216     ' ChrW(8216)
 Private Const CURLY_SINGLE_CLOSE As Long = 8217    ' ChrW(8217)
 
-' ════════════════════════════════════════════════════════════
+' ============================================================
 '  MAIN ENTRY POINT
-' ════════════════════════════════════════════════════════════
+' ============================================================
 Public Function Check_SmartQuoteConsistency(doc As Document) As Collection
     Dim issues As New Collection
     Dim para As Paragraph
@@ -45,7 +44,7 @@ Public Function Check_SmartQuoteConsistency(doc As Document) As Collection
     straightCount = 0
     curlyCount = 0
 
-    ' ── First pass: count straight vs curly quotes ─────────
+    ' -- First pass: count straight vs curly quotes ---------
     On Error Resume Next
     For Each para In doc.Paragraphs
         Err.Clear
@@ -57,7 +56,7 @@ Public Function Check_SmartQuoteConsistency(doc As Document) As Collection
         End If
 
         ' Skip paragraphs outside the configured page range
-        If Not PleadingsEngine.IsInPageRange(paraRange) Then
+        If Not EngineIsInPageRange(paraRange) Then
             GoTo NextParaPass1
         End If
 
@@ -101,7 +100,7 @@ NextParaPass1:
     Next para
     On Error GoTo 0
 
-    ' ── Determine if there is a mix ────────────────────────
+    ' -- Determine if there is a mix ------------------------
     ' If only one style or no quotes at all, no issue
     If straightCount = 0 Or curlyCount = 0 Then
         Set Check_SmartQuoteConsistency = issues
@@ -110,21 +109,11 @@ NextParaPass1:
 
     ' Per spec: prefer curly as dominant when both exist
     ' Emit document-level summary issue
-    Dim summaryIssue As PleadingsIssue
-    Set summaryIssue = New PleadingsIssue
-    summaryIssue.Init RULE_NAME, _
-                       "Document", _
-                       "Quotation mark style is inconsistent. Found " & _
-                       straightCount & " straight and " & curlyCount & _
-                       " curly quotation marks.", _
-                       "Use curly quotation marks consistently throughout the document.", _
-                       0, _
-                       0, _
-                       "warning", _
-                       False
+    Dim summaryIssue As Object
+    Set summaryIssue = CreateIssueDict(RULE_NAME, "Document", "Quotation mark style is inconsistent. Found " & straightCount & " straight and " & curlyCount & " curly quotation marks.", "Use curly quotation marks consistently throughout the document.", 0, 0, "warning", False)
     issues.Add summaryIssue
 
-    ' ── Second pass: flag each straight quote occurrence ───
+    ' -- Second pass: flag each straight quote occurrence ---
     On Error Resume Next
     For Each para In doc.Paragraphs
         Err.Clear
@@ -136,7 +125,7 @@ NextParaPass1:
         End If
 
         ' Skip paragraphs outside the configured page range
-        If Not PleadingsEngine.IsInPageRange(paraRange) Then
+        If Not EngineIsInPageRange(paraRange) Then
             GoTo NextParaPass2
         End If
 
@@ -171,7 +160,7 @@ NextParaPass1:
                 Dim rangeEnd As Long
                 Dim locStr As String
                 Dim charRange As Range
-                Dim issue As PleadingsIssue
+                Dim issue As Object
 
                 rangeStart = paraRange.Start + i - 1
                 rangeEnd = rangeStart + 1
@@ -182,22 +171,14 @@ NextParaPass1:
                     locStr = "unknown location"
                     Err.Clear
                 Else
-                    locStr = PleadingsEngine.GetLocationString(charRange, doc)
+                    locStr = EngineGetLocationString(charRange, doc)
                     If Err.Number <> 0 Then
                         locStr = "unknown location"
                         Err.Clear
                     End If
                 End If
 
-                Set issue = New PleadingsIssue
-                issue.Init RULE_NAME, _
-                           locStr, _
-                           "Straight quotation mark found in otherwise curly-quoted document.", _
-                           "Replace with curly quotation mark.", _
-                           rangeStart, _
-                           rangeEnd, _
-                           "warning", _
-                           False
+                Set issue = CreateIssueDict(RULE_NAME, locStr, "Straight quotation mark found in otherwise curly-quoted document.", "Replace with curly quotation mark.", rangeStart, rangeEnd, "warning", False)
                 issues.Add issue
             End If
         Next i
@@ -209,10 +190,10 @@ NextParaPass2:
     Set Check_SmartQuoteConsistency = issues
 End Function
 
-' ════════════════════════════════════════════════════════════
+' ============================================================
 '  PRIVATE: Check if a character at position is an apostrophe
 '  (preceded AND followed by a letter = mid-word)
-' ════════════════════════════════════════════════════════════
+' ============================================================
 Private Function IsApostrophe(ByRef txt As String, _
                                ByVal pos As Long, _
                                ByVal textLen As Long) As Boolean
@@ -235,14 +216,72 @@ Private Function IsApostrophe(ByRef txt As String, _
     IsApostrophe = True
 End Function
 
-' ════════════════════════════════════════════════════════════
+' ============================================================
 '  PRIVATE: Check if a character is a letter (A-Z, a-z,
 '  extended Latin)
-' ════════════════════════════════════════════════════════════
+' ============================================================
 Private Function IsLetterChar(ByVal ch As String) As Boolean
     Dim code As Long
     code = AscW(ch)
     IsLetterChar = (code >= 65 And code <= 90) Or _
                    (code >= 97 And code <= 122) Or _
                    (code >= 192 And code <= 687) ' Extended Latin
+End Function
+
+' ----------------------------------------------------------------
+'  PRIVATE: Create a dictionary-based issue (no class dependency)
+' ----------------------------------------------------------------
+Private Function CreateIssueDict(ByVal ruleName_ As String, _
+                                 ByVal location_ As String, _
+                                 ByVal issue_ As String, _
+                                 ByVal suggestion_ As String, _
+                                 ByVal rangeStart_ As Long, _
+                                 ByVal rangeEnd_ As Long, _
+                                 Optional ByVal severity_ As String = "error", _
+                                 Optional ByVal autoFixSafe_ As Boolean = False) As Object
+    Dim d As Object
+    Set d = CreateObject("Scripting.Dictionary")
+    d("RuleName") = ruleName_
+    d("Location") = location_
+    d("Issue") = issue_
+    d("Suggestion") = suggestion_
+    d("RangeStart") = rangeStart_
+    d("RangeEnd") = rangeEnd_
+    d("Severity") = severity_
+    d("AutoFixSafe") = autoFixSafe_
+    Set CreateIssueDict = d
+End Function
+
+' ----------------------------------------------------------------
+'  Late-bound wrapper: EngineIsInPageRange
+' ----------------------------------------------------------------
+
+' ----------------------------------------------------------------
+'  Late-bound wrapper: EngineGetLocationString
+' ----------------------------------------------------------------
+
+' ----------------------------------------------------------------
+'  Late-bound wrapper: PleadingsEngine.IsInPageRange
+' ----------------------------------------------------------------
+Private Function EngineIsInPageRange(rng As Object) As Boolean
+    On Error Resume Next
+    EngineIsInPageRange = Application.Run("PleadingsEngine.IsInPageRange", rng)
+    If Err.Number <> 0 Then
+        EngineIsInPageRange = True
+        Err.Clear
+    End If
+    On Error GoTo 0
+End Function
+
+' ----------------------------------------------------------------
+'  Late-bound wrapper: PleadingsEngine.GetLocationString
+' ----------------------------------------------------------------
+Private Function EngineGetLocationString(rng As Object, doc As Document) As String
+    On Error Resume Next
+    EngineGetLocationString = Application.Run("PleadingsEngine.GetLocationString", rng, doc)
+    If Err.Number <> 0 Then
+        EngineGetLocationString = "unknown location"
+        Err.Clear
+    End If
+    On Error GoTo 0
 End Function
