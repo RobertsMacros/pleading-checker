@@ -51,6 +51,8 @@ Private txtBrandCorrect As MSForms.TextBox
 Private txtBrandIncorrect As MSForms.TextBox
 Private chkAddComments  As MSForms.CheckBox
 Private chkTrackedChanges As MSForms.CheckBox
+Private optSpellingUK   As MSForms.OptionButton
+Private optSpellingUS   As MSForms.OptionButton
 Private lblStatus       As MSForms.Label
 
 Private lastResults     As Collection
@@ -196,6 +198,30 @@ Private Sub UserForm_Initialize()
         .Caption = "Apply suggestions as tracked changes"
         .Left = colRight: .Top = yPos: .Width = 280: .Height = CHK_H
         .Value = True
+    End With
+    yPos = yPos + CHK_H + ITEM_GAP
+
+    ' -- Spelling mode toggle (UK / US) --
+    Set lbl = Me.Controls.Add("Forms.Label.1", "lblSpellingMode")
+    With lbl
+        .Caption = "Spelling mode:"
+        .Left = colRight: .Top = yPos + 2: .Width = 80: .Height = LBL_H
+    End With
+
+    Set optSpellingUK = Me.Controls.Add("Forms.OptionButton.1", "optSpellingUK")
+    With optSpellingUK
+        .Caption = "UK"
+        .Left = colRight + 82: .Top = yPos: .Width = 50: .Height = CHK_H
+        .Value = True
+        .GroupName = "SpellingMode"
+    End With
+
+    Set optSpellingUS = Me.Controls.Add("Forms.OptionButton.1", "optSpellingUS")
+    With optSpellingUS
+        .Caption = "US"
+        .Left = colRight + 134: .Top = yPos: .Width = 50: .Height = CHK_H
+        .Value = False
+        .GroupName = "SpellingMode"
     End With
 
     yPos = yPos + CHK_H + SEC_GAP
@@ -412,6 +438,13 @@ Private Sub btnRun_Click()
         endPg = CLng(txtEndPage.Text)
     End If
     PleadingsEngine.SetPageRange startPg, endPg
+
+    ' Set spelling mode from toggle
+    If optSpellingUS.Value Then
+        PleadingsEngine.SetSpellingMode "US"
+    Else
+        PleadingsEngine.SetSpellingMode "UK"
+    End If
 
     ' Run checks
     lblStatus.Caption = "Running checks..."
