@@ -720,17 +720,8 @@ Private Function GetIssueProp(finding As Object, ByVal propName As String) As Va
     If TypeName(finding) = "Dictionary" Then
         GetIssueProp = finding(propName)
     Else
-        ' Fall back to object property access
-        Select Case propName
-            Case "RuleName":    GetIssueProp = GetIssueProp(finding, "RuleName")
-            Case "Location":    GetIssueProp = GetIssueProp(finding, "Location")
-            Case "Issue":       GetIssueProp = GetIssueProp(finding, "Issue")
-            Case "Suggestion":  GetIssueProp = GetIssueProp(finding, "Suggestion")
-            Case "Severity":    GetIssueProp = GetIssueProp(finding, "Severity")
-            Case "RangeStart":  GetIssueProp = GetIssueProp(finding, "RangeStart")
-            Case "RangeEnd":    GetIssueProp = GetIssueProp(finding, "RangeEnd")
-            Case "AutoFixSafe": GetIssueProp = GetIssueProp(finding, "AutoFixSafe")
-        End Select
+        ' Fall back to object property access via CallByName
+        GetIssueProp = CallByName(finding, propName, VbGet)
     End If
     If Err.Number <> 0 Then
         GetIssueProp = ""

@@ -308,7 +308,7 @@ Private Sub FlagBackslashes(doc As Document, ByRef issues As Collection)
             Err.Clear
         End If
 
-        Set finding = CreateIssueDict(RULE_NAME_SLASH, locStr, "Unexpected backslash — did you mean forward slash?", "Replace '\' with '/'", rng.Start, rng.End, "possible_error")
+        Set finding = CreateIssueDict(RULE_NAME_SLASH, locStr, "Unexpected backslash " & Chr(8212) & " did you mean forward slash?", "Replace '\' with '/'", rng.Start, rng.End, "possible_error")
         issues.Add finding
 
 ContinueBackslash:

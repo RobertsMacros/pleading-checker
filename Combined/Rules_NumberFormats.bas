@@ -54,6 +54,7 @@ End Function
 Private Sub FindWithWildcard(doc As Document, ByVal pattern As String, _
                               results As Collection, ByVal formatType As String)
     Dim rng As Range
+    Dim info() As Variant
     Set rng = doc.Content.Duplicate
 
     With rng.Find
@@ -67,7 +68,7 @@ Private Sub FindWithWildcard(doc As Document, ByVal pattern As String, _
 
     Do While rng.Find.Execute
         If EngineIsInPageRange(rng) Then
-            Dim info(0 To 3) As Variant
+            ReDim info(0 To 3)
             info(0) = formatType
             info(1) = rng.Text
             info(2) = rng.Start

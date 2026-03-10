@@ -321,6 +321,7 @@ Public Function Check_HeadingCapitalisation(doc As Document) As Collection
     Dim para As Paragraph
     Dim paraIdx As Long
     Dim lvl As Long
+    Dim info() As Variant
 
     On Error Resume Next
 
@@ -369,7 +370,7 @@ Public Function Check_HeadingCapitalisation(doc As Document) As Collection
             If Not levelHeadings.Exists(lvl) Then
                 levelHeadings.Add lvl, New Collection
             End If
-            Dim info(0 To 4) As Variant
+            ReDim info(0 To 4)
             info(0) = paraIdx
             info(1) = headingText
             info(2) = pattern

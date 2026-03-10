@@ -97,6 +97,7 @@ Public Function Check_ParagraphBreakConsistency(doc As Document) As Collection
     Dim para As Paragraph
     Dim paraIdx As Long
     Dim lvl As Long
+    Dim info() As Variant
 
     On Error Resume Next
 
@@ -157,7 +158,7 @@ Public Function Check_ParagraphBreakConsistency(doc As Document) As Collection
         If Not headingInfos.Exists(lvl) Then
             headingInfos.Add lvl, New Collection
         End If
-        Dim info(0 To 5) As Variant
+        ReDim info(0 To 5)
         info(0) = paraIdx
         info(1) = aftPat
         info(2) = befPat

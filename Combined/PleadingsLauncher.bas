@@ -41,7 +41,7 @@ End Sub
 ' ============================================================
 Private Sub RunChecks()
     Dim cfg As Object
-    Set cfg = PleadingsEngine.InitRuleConfig()
+    Set cfg = Application.Run("PleadingsEngine.InitRuleConfig")
 
     ' -- Page range prompt --
     Dim pgInput As String
@@ -50,7 +50,7 @@ Private Sub RunChecks()
     If Len(Trim(pgInput)) > 0 Then
         ParsePageRange pgInput
     Else
-        PleadingsEngine.SetPageRange 0, 0
+        Application.Run "PleadingsEngine.SetPageRange", 0, 0
     End If
 
     ' -- Spelling mode prompt --
@@ -60,9 +60,9 @@ Private Sub RunChecks()
                     "No = US spelling", _
                     vbYesNo + vbQuestion, "Spelling Mode")
     If spMode = vbNo Then
-        PleadingsEngine.SetSpellingMode "US"
+        Application.Run "PleadingsEngine.SetSpellingMode", "US"
     Else
-        PleadingsEngine.SetSpellingMode "UK"
+        Application.Run "PleadingsEngine.SetSpellingMode", "UK"
     End If
 
     ' -- Run --
@@ -70,7 +70,7 @@ Private Sub RunChecks()
     DoEvents
 
     Dim issues As Collection
-    Set issues = PleadingsEngine.RunAllPleadingsRules(ActiveDocument, cfg)
+    Set issues = Application.Run("PleadingsEngine.RunAllPleadingsRules", ActiveDocument, cfg)
 
     Application.StatusBar = ""
 
@@ -82,7 +82,7 @@ Private Sub RunChecks()
     End If
 
     Dim summary As String
-    summary = PleadingsEngine.GetIssueSummary(issues)
+    summary = Application.Run("PleadingsEngine.GetIssueSummary", issues)
 
     Dim applyChoice As Long
     applyChoice = MsgBox(summary & vbCrLf & vbCrLf & _
@@ -96,11 +96,11 @@ Private Sub RunChecks()
 
     Select Case applyChoice
         Case vbYes
-            PleadingsEngine.ApplySuggestionsAsTrackedChanges ActiveDocument, issues, True
+            Application.Run "PleadingsEngine.ApplySuggestionsAsTrackedChanges", ActiveDocument, issues, True
             MsgBox issues.Count & " issue(s) applied as tracked changes.", _
                    vbInformation, "Pleadings Checker"
         Case vbNo
-            PleadingsEngine.ApplyHighlights ActiveDocument, issues, True
+            Application.Run "PleadingsEngine.ApplyHighlights", ActiveDocument, issues, True
             MsgBox issues.Count & " issue(s) highlighted with comments.", _
                    vbInformation, "Pleadings Checker"
         Case vbCancel
@@ -214,7 +214,7 @@ Private Sub ExportReport(issues As Collection)
     End If
 
     Dim summary As String
-    summary = PleadingsEngine.GenerateReport(issues, reportPath)
+    summary = Application.Run("PleadingsEngine.GenerateReport", issues, reportPath)
 
     MsgBox "Report saved to:" & vbCrLf & reportPath, _
            vbInformation, "Pleadings Checker"
@@ -223,28 +223,28 @@ End Sub
 ' ============================================================
 '  PARSE PAGE RANGE INPUT (e.g. "1-10" or "5")
 ' ============================================================
-Private Sub ParsePageRange(ByVal input As String)
+Private Sub ParsePageRange(ByVal pageInput As String)
     Dim parts() As String
     Dim startPg As Long
     Dim endPg As Long
 
-    input = Trim(input)
-    If InStr(1, input, "-") > 0 Then
-        parts = Split(input, "-")
+    pageInput = Trim(pageInput)
+    If InStr(1, pageInput, "-") > 0 Then
+        parts = Split(pageInput, "-")
         If UBound(parts) >= 1 Then
             If IsNumeric(Trim(parts(0))) And IsNumeric(Trim(parts(1))) Then
                 startPg = CLng(Trim(parts(0)))
                 endPg = CLng(Trim(parts(1)))
-                PleadingsEngine.SetPageRange startPg, endPg
+                Application.Run "PleadingsEngine.SetPageRange", startPg, endPg
                 Exit Sub
             End If
         End If
-    ElseIf IsNumeric(input) Then
-        startPg = CLng(input)
-        PleadingsEngine.SetPageRange startPg, startPg
+    ElseIf IsNumeric(pageInput) Then
+        startPg = CLng(pageInput)
+        Application.Run "PleadingsEngine.SetPageRange", startPg, startPg
         Exit Sub
     End If
 
     ' Invalid input -- use all pages
-    PleadingsEngine.SetPageRange 0, 0
+    Application.Run "PleadingsEngine.SetPageRange", 0, 0
 End Sub

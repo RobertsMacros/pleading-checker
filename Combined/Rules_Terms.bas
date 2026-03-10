@@ -261,6 +261,10 @@ Public Function Check_DefinedTerms(doc As Document) As Collection
     ' Dictionary: term (String) -> Array(definitionParaIdx, rangeStart, rangeEnd)
     Dim definedTerms As Object
     Set definedTerms = CreateObject("Scripting.Dictionary")
+    Dim defInfo() As Variant
+    Dim mInfo() As Variant
+    Dim hInfo() As Variant
+    Dim pInfo() As Variant
     Dim rng As Range
     Dim para As Paragraph
     Dim paraIdx As Long
@@ -314,7 +318,7 @@ Public Function Check_DefinedTerms(doc As Document) As Collection
             ' Extract between quotes (skip the opening quote)
             termText = Mid$(fullText, 2, closePos - 2)
             If Len(Trim$(termText)) > 0 And Not definedTerms.Exists(termText) Then
-                Dim defInfo(0 To 2) As Variant
+                ReDim defInfo(0 To 2)
                 defInfo(0) = 0 ' paragraph index (approximate)
                 defInfo(1) = startPos + 1  ' range start of term
                 defInfo(2) = startPos + CLng(closePos) - 1  ' range end of term
@@ -353,7 +357,7 @@ NextCurlyFind:
                     Dim meansTerm As String
                     meansTerm = Left$(afterQuote, endQuote - 1)
                     If Len(meansTerm) > 0 And Not definedTerms.Exists(meansTerm) Then
-                        Dim mInfo(0 To 2) As Variant
+                        ReDim mInfo(0 To 2)
                         mInfo(0) = paraIdx
                         mInfo(1) = para.Range.Start
                         mInfo(2) = para.Range.Start + meansPos
@@ -379,7 +383,7 @@ NextCurlyFind:
                     Dim htmTerm As String
                     htmTerm = Left$(afterQuote, endQuote - 1)
                     If Len(htmTerm) > 0 And Not definedTerms.Exists(htmTerm) Then
-                        Dim hInfo(0 To 2) As Variant
+                        ReDim hInfo(0 To 2)
                         hInfo(0) = paraIdx
                         hInfo(1) = para.Range.Start
                         hInfo(2) = para.Range.Start + htmPos
@@ -424,7 +428,7 @@ NextParaMeans:
                 Dim parenTerm As String
                 parenTerm = Mid$(fullText, pOpenQ + 1, closePos - pOpenQ - 1)
                 If Len(parenTerm) > 0 And Not definedTerms.Exists(parenTerm) Then
-                    Dim pInfo(0 To 2) As Variant
+                    ReDim pInfo(0 To 2)
                     pInfo(0) = 0
                     pInfo(1) = startPos + pOpenQ
                     pInfo(2) = startPos + CLng(closePos)

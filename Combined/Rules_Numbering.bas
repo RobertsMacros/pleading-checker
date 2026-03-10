@@ -600,6 +600,7 @@ Public Function Check_ClauseNumberFormat(doc As Document) As Collection
     Dim formatCounts As Object
     Set formatCounts = CreateObject("Scripting.Dictionary")
     Dim clauseInfos As New Collection
+    Dim cInfo() As Variant
 
     paraIdx = 0
     For Each para In doc.Paragraphs
@@ -630,7 +631,7 @@ Public Function Check_ClauseNumberFormat(doc As Document) As Collection
         End If
 
         ' Store clause info
-        Dim cInfo(0 To 3) As Variant
+        ReDim cInfo(0 To 3)
         cInfo(0) = paraIdx
         cInfo(1) = prefix
         cInfo(2) = para.Range.Start

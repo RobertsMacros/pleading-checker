@@ -71,6 +71,7 @@ Private Function FindMarkersInPara(ByVal paraText As String) As Collection
     Dim openParen As Long
     Dim closeParen As Long
     Dim content As String
+    Dim info() As Variant
     Dim mType As String
 
     pos = 1
@@ -90,7 +91,7 @@ Private Function FindMarkersInPara(ByVal paraText As String) As Collection
         mType = GetMarkerType(content)
 
         If Len(mType) > 0 Then
-            Dim info(0 To 3) As Variant
+            ReDim info(0 To 3)
             info(0) = openParen         ' position in paragraph text
             info(1) = Mid$(paraText, openParen, closeParen - openParen + 1) ' full marker text
             info(2) = content           ' content between parens
@@ -167,6 +168,7 @@ Public Function Check_InlineListFormat(doc As Document) As Collection
 
     Dim para As Paragraph
     Dim paraIdx As Long
+    Dim lDetail() As Variant
 
     paraIdx = 0
     For Each para In doc.Paragraphs
@@ -304,7 +306,7 @@ Public Function Check_InlineListFormat(doc As Document) As Collection
             styleCounts.Add styleKey, 1
         End If
 
-        Dim lDetail(0 To 4) As Variant
+        ReDim lDetail(0 To 4)
         lDetail(0) = styleKey
         lDetail(1) = paraIdx
         lDetail(2) = para.Range.Start
