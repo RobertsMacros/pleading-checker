@@ -36,7 +36,7 @@ Public Function Check_RepeatedWords(doc As Document) As Collection
     Dim charPos As Long
     Dim rangeStart As Long
     Dim rangeEnd As Long
-    Dim issue As Object
+    Dim finding As Object
     Dim paraRange As Range
 
     ' -- Known-valid repetitions that may be intentional ---
@@ -152,9 +152,9 @@ Public Function Check_RepeatedWords(doc As Document) As Collection
                     End If
                 End If
 
-                ' -- Create the issue ------------------
-                Set issue = CreateIssueDict(RULE_NAME_REPEATED, locStr, issueText, suggestion, rangeStart, rangeEnd, severity)
-                issues.Add issue
+                ' -- Create the finding ------------------
+                Set finding = CreateIssueDict(RULE_NAME_REPEATED, locStr, issueText, suggestion, rangeStart, rangeEnd, severity)
+                issues.Add finding
             End If
 
             prevWord = currWord
@@ -183,7 +183,7 @@ Public Function Check_SpellOutUnderTen(doc As Document) As Collection
     Dim i As Long
     Dim ch As String
     Dim digitVal As Long
-    Dim issue As Object
+    Dim finding As Object
     Dim locStr As String
     Dim charRange As Range
     Dim textLen As Long
@@ -291,8 +291,8 @@ Public Function Check_SpellOutUnderTen(doc As Document) As Collection
                     End If
                 End If
 
-                Set issue = CreateIssueDict(RULE_NAME_SPELL_OUT, locStr, "Number under 10 is given as a figure in running prose.", "Write)
-                issues.Add issue
+                Set finding = CreateIssueDict(RULE_NAME_SPELL_OUT, locStr, "Number under 10 is given as a figure in running prose.", "Write)
+                issues.Add finding
             End If
 
 NextChar:
@@ -669,7 +669,7 @@ End Function
 ' ----------------------------------------------------------------
 
 ' ----------------------------------------------------------------
-'  PRIVATE: Create a dictionary-based issue (no class dependency)
+'  PRIVATE: Create a dictionary-based finding (no class dependency)
 ' ----------------------------------------------------------------
 Private Function CreateIssueDict(ByVal ruleName_ As String, _
                                  ByVal location_ As String, _

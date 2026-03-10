@@ -31,7 +31,6 @@ Attribute VB_Name = "PleadingsEngine"
 '   1. Open the VBA Editor (Alt+F11)
 '   2. Tools > References > check "Microsoft Scripting Runtime"
 '   3. File > Import File > PleadingsEngine.bas
-'   4. File > Import File > PleadingsIssue.cls
 '   5. File > Import File > PleadingsLauncher.bas
 '   6. Import whichever Rules_*.bas modules you need
 '   7. Run the macro "PleadingsChecker"
@@ -150,7 +149,7 @@ End Function
 ' ============================================================
 '  APPLICATION.RUN DISPATCHER
 '  Calls a public function by string name. Returns a
-'  Collection of PleadingsIssue, or an empty Collection if
+'  Collection of issue dictionary, or an empty Collection if
 '  the module/function is not available.
 ' ============================================================
 Private Function TryRunRule(ByVal funcName As String, _
@@ -379,21 +378,21 @@ End Function
 Public Sub ApplyHighlights(doc As Document, _
                            issues As Collection, _
                            Optional addComments As Boolean = True)
-    Dim issue As Object
+    Dim finding As Object
     Dim rng As Range
     Dim i As Long
 
     For i = 1 To issues.Count
-        Set issue = issues(i)
-        If GetIssueProp(issue, "RangeStart") >= 0 And GetIssueProp(issue, "RangeEnd") > GetIssueProp(issue, "RangeStart") Then
+        Set finding = issues(i)
+        If GetIssueProp(finding, "RangeStart") >= 0 And GetIssueProp(finding, "RangeEnd") > GetIssueProp(finding, "RangeStart") Then
             On Error Resume Next: Err.Clear
-            Set rng = doc.Range(GetIssueProp(issue, "RangeStart"), GetIssueProp(issue, "RangeEnd"))
+            Set rng = doc.Range(GetIssueProp(finding, "RangeStart"), GetIssueProp(finding, "RangeEnd"))
             If Err.Number = 0 Then
                 rng.HighlightColorIndex = wdYellow
                 If addComments Then
                     doc.Comments.Add Range:=rng, _
-                        Text:="[" & GetIssueProp(issue, "RuleName") & "] " & GetIssueProp(issue, "Issue") & _
-                              " " & Chr(8212) & " Suggestion: " & GetIssueProp(issue, "Suggestion")
+                        Text:="[" & GetIssueProp(finding, "RuleName") & "] " & GetIssueProp(finding, "Issue") & _
+                              " " & Chr(8212) & " Suggestion: " & GetIssueProp(finding, "Suggestion")
                 End If
             End If
             On Error GoTo 0
@@ -407,28 +406,28 @@ End Sub
 Public Sub ApplySuggestionsAsTrackedChanges(doc As Document, _
                                              issues As Collection, _
                                              Optional addComments As Boolean = True)
-    Dim issue As Object
+    Dim finding As Object
     Dim rng As Range
     Dim i As Long
     Dim wasTrackingChanges As Boolean
     wasTrackingChanges = doc.TrackRevisions
 
     For i = 1 To issues.Count
-        Set issue = issues(i)
-        If GetIssueProp(issue, "RangeStart") >= 0 And GetIssueProp(issue, "RangeEnd") > GetIssueProp(issue, "RangeStart") Then
+        Set finding = issues(i)
+        If GetIssueProp(finding, "RangeStart") >= 0 And GetIssueProp(finding, "RangeEnd") > GetIssueProp(finding, "RangeStart") Then
             On Error Resume Next: Err.Clear
-            Set rng = doc.Range(GetIssueProp(issue, "RangeStart"), GetIssueProp(issue, "RangeEnd"))
+            Set rng = doc.Range(GetIssueProp(finding, "RangeStart"), GetIssueProp(finding, "RangeEnd"))
             If Err.Number = 0 Then
-                If GetIssueProp(issue, "AutoFixSafe") And Len(GetIssueProp(issue, "Suggestion")) > 0 Then
+                If GetIssueProp(finding, "AutoFixSafe") And Len(GetIssueProp(finding, "Suggestion")) > 0 Then
                     doc.TrackRevisions = True
-                    rng.Text = GetIssueProp(issue, "Suggestion")
+                    rng.Text = GetIssueProp(finding, "Suggestion")
                     doc.TrackRevisions = wasTrackingChanges
                 Else
                     rng.HighlightColorIndex = wdYellow
                     If addComments Then
                         doc.Comments.Add Range:=rng, _
-                            Text:="[" & GetIssueProp(issue, "RuleName") & "] " & GetIssueProp(issue, "Issue") & _
-                                  " " & Chr(8212) & " Suggestion: " & GetIssueProp(issue, "Suggestion")
+                            Text:="[" & GetIssueProp(finding, "RuleName") & "] " & GetIssueProp(finding, "Issue") & _
+                                  " " & Chr(8212) & " Suggestion: " & GetIssueProp(finding, "Suggestion")
                     End If
                 End If
             End If
@@ -439,8 +438,8 @@ Public Sub ApplySuggestionsAsTrackedChanges(doc As Document, _
                 Set rng = doc.Range(doc.Content.Start, doc.Content.Start + 1)
                 If Err.Number = 0 Then
                     doc.Comments.Add Range:=rng, _
-                        Text:="[" & GetIssueProp(issue, "RuleName") & "] " & GetIssueProp(issue, "Issue") & _
-                              " " & Chr(8212) & " Suggestion: " & GetIssueProp(issue, "Suggestion")
+                        Text:="[" & GetIssueProp(finding, "RuleName") & "] " & GetIssueProp(finding, "Issue") & _
+                              " " & Chr(8212) & " Suggestion: " & GetIssueProp(finding, "Suggestion")
                 End If
             End If
             On Error GoTo 0
@@ -454,7 +453,7 @@ End Sub
 Public Function GenerateReport(issues As Collection, _
                                 filePath As String) As String
     Dim fileNum As Integer
-    Dim issue As Object
+    Dim finding As Object
     Dim i As Long
 
     fileNum = FreeFile
@@ -467,11 +466,11 @@ Public Function GenerateReport(issues As Collection, _
 
     Print #fileNum, "  ""issues"": ["
     For i = 1 To issues.Count
-        Set issue = issues(i)
+        Set finding = issues(i)
         If i < issues.Count Then
-            Print #fileNum, IssueToJSON(issue)() & ","
+            Print #fileNum, IssueToJSON(finding)() & ","
         Else
-            Print #fileNum, IssueToJSON(issue)()
+            Print #fileNum, IssueToJSON(finding)()
         End If
     Next i
     Print #fileNum, "  ],"
@@ -479,11 +478,11 @@ Public Function GenerateReport(issues As Collection, _
     Dim countDict As Object
     Set countDict = CreateObject("Scripting.Dictionary")
     For i = 1 To issues.Count
-        Set issue = issues(i)
-        If countDict.Exists(GetIssueProp(issue, "RuleName")) Then
-            countDict(GetIssueProp(issue, "RuleName")) = countDict(GetIssueProp(issue, "RuleName")) + 1
+        Set finding = issues(i)
+        If countDict.Exists(GetIssueProp(finding, "RuleName")) Then
+            countDict(GetIssueProp(finding, "RuleName")) = countDict(GetIssueProp(finding, "RuleName")) + 1
         Else
-            countDict.Add GetIssueProp(issue, "RuleName"), 1
+            countDict.Add GetIssueProp(finding, "RuleName"), 1
         End If
     Next i
 
@@ -517,15 +516,15 @@ End Function
 Public Function GetIssueSummary(issues As Collection) As String
     Dim countDict As Object
     Set countDict = CreateObject("Scripting.Dictionary")
-    Dim issue As Object
+    Dim finding As Object
     Dim i As Long
 
     For i = 1 To issues.Count
-        Set issue = issues(i)
-        If countDict.Exists(GetIssueProp(issue, "RuleName")) Then
-            countDict(GetIssueProp(issue, "RuleName")) = countDict(GetIssueProp(issue, "RuleName")) + 1
+        Set finding = issues(i)
+        If countDict.Exists(GetIssueProp(finding, "RuleName")) Then
+            countDict(GetIssueProp(finding, "RuleName")) = countDict(GetIssueProp(finding, "RuleName")) + 1
         Else
-            countDict.Add GetIssueProp(issue, "RuleName"), 1
+            countDict.Add GetIssueProp(finding, "RuleName"), 1
         End If
     Next i
 
@@ -542,12 +541,12 @@ Public Function GetIssueSummary(issues As Collection) As String
     For k = 0 To countDict.Count - 1
         Dim cnt As Long
         cnt = countDict(keys(k))
-        result = result & CStr(keys(k)) & ": " & cnt & " issue"
+        result = result & CStr(keys(k)) & ": " & cnt & " finding"
         If cnt <> 1 Then result = result & "s"
         result = result & vbCrLf
     Next k
 
-    result = result & vbCrLf & "Total: " & issues.Count & " issue"
+    result = result & vbCrLf & "Total: " & issues.Count & " finding"
     If issues.Count <> 1 Then result = result & "s"
     GetIssueSummary = result
 End Function
@@ -687,7 +686,7 @@ Private Function EscJSON(ByVal txt As String) As String
 End Function
 
 ' ================================================================
-'  PUBLIC: Factory function to create a dictionary-based issue
+'  PUBLIC: Factory function to create a dictionary-based finding
 '  Called by rule modules via Application.Run
 ' ================================================================
 Public Function CreateIssue(ByVal ruleName_ As String, _
@@ -712,25 +711,25 @@ Public Function CreateIssue(ByVal ruleName_ As String, _
 End Function
 
 ' ================================================================
-'  PRIVATE: Read a property from an issue (supports both
-'  PleadingsIssue class and Dictionary-based issues)
+'  PRIVATE: Read a property from an finding (supports both
+'  issue dictionary class and Dictionary-based issues)
 ' ================================================================
-Private Function GetIssueProp(issue As Object, ByVal propName As String) As Variant
+Private Function GetIssueProp(finding As Object, ByVal propName As String) As Variant
     On Error Resume Next
     ' Try dictionary access first
-    If TypeName(issue) = "Dictionary" Then
-        GetIssueProp = issue(propName)
+    If TypeName(finding) = "Dictionary" Then
+        GetIssueProp = finding(propName)
     Else
         ' Fall back to object property access
         Select Case propName
-            Case "RuleName":    GetIssueProp = GetIssueProp(issue, "RuleName")
-            Case "Location":    GetIssueProp = GetIssueProp(issue, "Location")
-            Case "Issue":       GetIssueProp = GetIssueProp(issue, "Issue")
-            Case "Suggestion":  GetIssueProp = GetIssueProp(issue, "Suggestion")
-            Case "Severity":    GetIssueProp = GetIssueProp(issue, "Severity")
-            Case "RangeStart":  GetIssueProp = GetIssueProp(issue, "RangeStart")
-            Case "RangeEnd":    GetIssueProp = GetIssueProp(issue, "RangeEnd")
-            Case "AutoFixSafe": GetIssueProp = GetIssueProp(issue, "AutoFixSafe")
+            Case "RuleName":    GetIssueProp = GetIssueProp(finding, "RuleName")
+            Case "Location":    GetIssueProp = GetIssueProp(finding, "Location")
+            Case "Issue":       GetIssueProp = GetIssueProp(finding, "Issue")
+            Case "Suggestion":  GetIssueProp = GetIssueProp(finding, "Suggestion")
+            Case "Severity":    GetIssueProp = GetIssueProp(finding, "Severity")
+            Case "RangeStart":  GetIssueProp = GetIssueProp(finding, "RangeStart")
+            Case "RangeEnd":    GetIssueProp = GetIssueProp(finding, "RangeEnd")
+            Case "AutoFixSafe": GetIssueProp = GetIssueProp(finding, "AutoFixSafe")
         End Select
     End If
     If Err.Number <> 0 Then
@@ -741,17 +740,17 @@ Private Function GetIssueProp(issue As Object, ByVal propName As String) As Vari
 End Function
 
 ' ================================================================
-'  PRIVATE: Format an issue as JSON (supports both types)
+'  PRIVATE: Format an finding as JSON (supports both types)
 ' ================================================================
-Private Function IssueToJSON(issue As Object) As String
+Private Function IssueToJSON(finding As Object) As String
     Dim s As String
     s = "    {" & vbCrLf
-    s = s & "      ""rule"": """ & EscJSON(CStr(GetIssueProp(issue, "RuleName"))) & """," & vbCrLf
-    s = s & "      ""location"": """ & EscJSON(CStr(GetIssueProp(issue, "Location"))) & """," & vbCrLf
-    s = s & "      ""severity"": """ & EscJSON(CStr(GetIssueProp(issue, "Severity"))) & """," & vbCrLf
-    s = s & "      ""issue"": """ & EscJSON(CStr(GetIssueProp(issue, "Issue"))) & """," & vbCrLf
-    s = s & "      ""suggestion"": """ & EscJSON(CStr(GetIssueProp(issue, "Suggestion"))) & """," & vbCrLf
-    s = s & "      ""auto_fix_safe"": " & IIf(CBool(GetIssueProp(issue, "AutoFixSafe")), "true", "false") & vbCrLf
+    s = s & "      ""rule"": """ & EscJSON(CStr(GetIssueProp(finding, "RuleName"))) & """," & vbCrLf
+    s = s & "      ""location"": """ & EscJSON(CStr(GetIssueProp(finding, "Location"))) & """," & vbCrLf
+    s = s & "      ""severity"": """ & EscJSON(CStr(GetIssueProp(finding, "Severity"))) & """," & vbCrLf
+    s = s & "      ""finding"": """ & EscJSON(CStr(GetIssueProp(finding, "Issue"))) & """," & vbCrLf
+    s = s & "      ""suggestion"": """ & EscJSON(CStr(GetIssueProp(finding, "Suggestion"))) & """," & vbCrLf
+    s = s & "      ""auto_fix_safe"": " & IIf(CBool(GetIssueProp(finding, "AutoFixSafe")), "true", "false") & vbCrLf
     s = s & "    }"
     IssueToJSON = s
 End Function

@@ -139,7 +139,7 @@ Public Function Check_AnglicisedTermsNotItalic(doc As Document) As Collection
     Dim charAfter As String
     Dim rng As Range
     Dim locStr As String
-    Dim issue As Object
+    Dim finding As Object
 
     For Each para In doc.Paragraphs
         ' Skip paragraphs outside the configured page range
@@ -180,8 +180,8 @@ Public Function Check_AnglicisedTermsNotItalic(doc As Document) As Collection
                     locStr = EngineGetLocationString(rng, doc)
                     If Err.Number <> 0 Then locStr = "unknown location": Err.Clear
 
-                    Set issue = CreateIssueDict(RULE_NAME_ANGLICISED, locStr, "Anglicised foreign term is italicised.", "Set)
-                    issues.Add issue
+                    Set finding = CreateIssueDict(RULE_NAME_ANGLICISED, locStr, "Anglicised foreign term is italicised.", "Set)
+                    issues.Add finding
                 End If
 
 NextMatchR30:
@@ -249,7 +249,7 @@ Public Function Check_ForeignNamesNotItalic(doc As Document) As Collection
     Dim charAfter As String
     Dim rng As Range
     Dim locStr As String
-    Dim issue As Object
+    Dim finding As Object
     Dim keys As Variant
 
     keys = foreignNames.keys
@@ -294,8 +294,8 @@ Public Function Check_ForeignNamesNotItalic(doc As Document) As Collection
                     locStr = EngineGetLocationString(rng, doc)
                     If Err.Number <> 0 Then locStr = "unknown location": Err.Clear
 
-                    Set issue = CreateIssueDict(RULE_NAME_FOREIGN, locStr, "Foreign name or institution should not be italicised.", "Set)
-                    issues.Add issue
+                    Set finding = CreateIssueDict(RULE_NAME_FOREIGN, locStr, "Foreign name or institution should not be italicised.", "Set)
+                    issues.Add finding
                 End If
 
 NextMatchR31:
@@ -320,7 +320,7 @@ End Function
 ' ----------------------------------------------------------------
 
 ' ----------------------------------------------------------------
-'  PRIVATE: Create a dictionary-based issue (no class dependency)
+'  PRIVATE: Create a dictionary-based finding (no class dependency)
 ' ----------------------------------------------------------------
 Private Function CreateIssueDict(ByVal ruleName_ As String, _
                                  ByVal location_ As String, _

@@ -141,7 +141,7 @@ End Function
 Private Sub FlagSpacedSlashes(doc As Document, ByRef issues As Collection)
     Dim rng As Range
     Dim found As Boolean
-    Dim issue As Object
+    Dim finding As Object
     Dim locStr As String
 
     Set rng = doc.Content.Duplicate
@@ -172,8 +172,8 @@ Private Sub FlagSpacedSlashes(doc As Document, ByRef issues As Collection)
             Err.Clear
         End If
 
-        Set issue = CreateIssueDict(RULE_NAME_SLASH, locStr, "Spaced slash)
-        issues.Add issue
+        Set finding = CreateIssueDict(RULE_NAME_SLASH, locStr, "Spaced slash)
+        issues.Add finding
 
 ContinueSpaced:
         rng.Collapse wdCollapseEnd
@@ -188,7 +188,7 @@ End Sub
 Private Sub FlagTightSlashes(doc As Document, ByRef issues As Collection)
     Dim rng As Range
     Dim found As Boolean
-    Dim issue As Object
+    Dim finding As Object
     Dim locStr As String
 
     Set rng = doc.Content.Duplicate
@@ -220,8 +220,8 @@ Private Sub FlagTightSlashes(doc As Document, ByRef issues As Collection)
             Err.Clear
         End If
 
-        Set issue = CreateIssueDict(RULE_NAME_SLASH, locStr, "Tight slash)
-        issues.Add issue
+        Set finding = CreateIssueDict(RULE_NAME_SLASH, locStr, "Tight slash)
+        issues.Add finding
 
 ContinueTight:
         rng.Collapse wdCollapseEnd
@@ -236,7 +236,7 @@ End Sub
 Private Sub FlagBackslashes(doc As Document, ByRef issues As Collection)
     Dim rng As Range
     Dim found As Boolean
-    Dim issue As Object
+    Dim finding As Object
     Dim locStr As String
     Dim context As String
     Dim fontName As String
@@ -308,8 +308,8 @@ Private Sub FlagBackslashes(doc As Document, ByRef issues As Collection)
             Err.Clear
         End If
 
-        Set issue = CreateIssueDict(RULE_NAME_SLASH, locStr, "Unexpected backslash -- did you mean forward slash?", "Replace)
-        issues.Add issue
+        Set finding = CreateIssueDict(RULE_NAME_SLASH, locStr, "Unexpected backslash -- did you mean forward slash?", "Replace)
+        issues.Add finding
 
 ContinueBackslash:
         rng.Collapse wdCollapseEnd
@@ -558,14 +558,14 @@ Private Function IsCodeFont(doc As Document, ByVal pos As Long) As Boolean
 End Function
 
 ' ============================================================
-'  PRIVATE: Create a bracket integrity issue
+'  PRIVATE: Create a bracket integrity finding
 ' ============================================================
 Private Sub CreateBracketIssue(doc As Document, _
                                 ByRef issues As Collection, _
                                 ByVal pos As Long, _
                                 ByVal bracketChar As String, _
                                 ByVal issueText As String)
-    Dim issue As Object
+    Dim finding As Object
     Dim locStr As String
     Dim rng As Range
 
@@ -602,8 +602,8 @@ Private Sub CreateBracketIssue(doc As Document, _
         suggestion = "Review bracket pairing"
     End If
 
-    Set issue = CreateIssueDict(RULE_NAME_BRACKET, locStr, issueText, suggestion, pos, pos + 1, "error")
-    issues.Add issue
+    Set finding = CreateIssueDict(RULE_NAME_BRACKET, locStr, issueText, suggestion, pos, pos + 1, "error")
+    issues.Add finding
 End Sub
 
 ' ?==============================================================?
@@ -628,7 +628,7 @@ End Function
 ' ----------------------------------------------------------------
 
 ' ----------------------------------------------------------------
-'  PRIVATE: Create a dictionary-based issue (no class dependency)
+'  PRIVATE: Create a dictionary-based finding (no class dependency)
 ' ----------------------------------------------------------------
 Private Function CreateIssueDict(ByVal ruleName_ As String, _
                                  ByVal location_ As String, _

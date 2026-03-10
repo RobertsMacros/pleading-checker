@@ -336,7 +336,7 @@ NextPara:
             Dim ld As Variant
             ld = listDetails(li)
             If CStr(ld(0)) <> domStyle Then
-                Dim issue As Object
+                Dim finding As Object
                 Dim rng As Range
                 Set rng = doc.Range(CLng(ld(2)), CLng(ld(3)))
                 Dim loc As String
@@ -351,8 +351,8 @@ NextPara:
                 If UBound(domParts) >= 1 Then suggStr = suggStr & ", '" & domParts(1) & "' conjunction"
                 If UBound(domParts) >= 2 Then suggStr = suggStr & ", " & domParts(2) & " ending"
 
-                Set issue = CreateIssueDict(RULE_NAME_INLINE, loc, "Inline list format inconsistency near:)
-                issues.Add issue
+                Set finding = CreateIssueDict(RULE_NAME_INLINE, loc, "Inline list format inconsistency near:)
+                issues.Add finding
             End If
         Next li
     End If
@@ -477,7 +477,7 @@ Private Sub ProcessListGroup(doc As Document, _
 
             Dim rng As Range
             Dim locStr As String
-            Dim issue As Object
+            Dim finding As Object
 
             On Error Resume Next
             Set rng = doc.Range(paraStarts(i), paraEnds(i))
@@ -499,8 +499,8 @@ Private Sub ProcessListGroup(doc As Document, _
             End If
             On Error GoTo 0
 
-            Set issue = CreateIssueDict(RULE_NAME_LISTPN, locStr, "List item ending)
-            issues.Add issue
+            Set finding = CreateIssueDict(RULE_NAME_LISTPN, locStr, "List item ending)
+            issues.Add finding
         End If
 
 ContinueItem:
@@ -519,8 +519,8 @@ ContinueItem:
                         Err.Clear
                     End If
 
-                    Set issue = CreateIssueDict(RULE_NAME_LISTPN, locStr, "Last list item should end with a full stop, not)
-                    issues.Add issue
+                    Set finding = CreateIssueDict(RULE_NAME_LISTPN, locStr, "Last list item should end with a full stop, not)
+                    issues.Add finding
                 End If
             End If
             On Error GoTo 0
@@ -561,8 +561,8 @@ ContinueItem:
                             Err.Clear
                         End If
 
-                        Set issue = CreateIssueDict(RULE_NAME_LISTPN, locStr, "Penultimate list item should include)
-                        issues.Add issue
+                        Set finding = CreateIssueDict(RULE_NAME_LISTPN, locStr, "Penultimate list item should include)
+                        issues.Add finding
                     End If
                 End If
                 On Error GoTo 0
@@ -697,7 +697,7 @@ End Function
 ' ----------------------------------------------------------------
 
 ' ----------------------------------------------------------------
-'  PRIVATE: Create a dictionary-based issue (no class dependency)
+'  PRIVATE: Create a dictionary-based finding (no class dependency)
 ' ----------------------------------------------------------------
 Private Function CreateIssueDict(ByVal ruleName_ As String, _
                                  ByVal location_ As String, _

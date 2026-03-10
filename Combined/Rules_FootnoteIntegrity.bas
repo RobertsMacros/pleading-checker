@@ -52,7 +52,7 @@ Private Sub CheckNoteSequence(doc As Document, _
     Dim i As Long
     Dim expectedIdx As Long
     Dim fn As Footnote
-    Dim issue As Object
+    Dim finding As Object
     Dim locStr As String
 
     expectedIdx = 1
@@ -74,8 +74,8 @@ Private Sub CheckNoteSequence(doc As Document, _
             If Err.Number <> 0 Then locStr = "unknown location": Err.Clear
             On Error GoTo 0
 
-            Set issue = CreateIssueDict(RULE_NAME, locStr, noteType & " numbering gap: expected " & expectedIdx & ", found " & fn.Index, "Renumber " & LCase(noteType) & "s sequentially", fn.Reference.Start, fn.Reference.End, "error")
-            issues.Add issue
+            Set finding = CreateIssueDict(RULE_NAME, locStr, noteType & " numbering gap: expected " & expectedIdx & ", found " & fn.Index, "Renumber " & LCase(noteType) & "s sequentially", fn.Reference.Start, fn.Reference.End, "error")
+            issues.Add finding
         End If
 
         expectedIdx = expectedIdx + 1
@@ -94,7 +94,7 @@ Private Sub CheckEndnoteSequence(doc As Document, _
     Dim i As Long
     Dim expectedIdx As Long
     Dim en As Endnote
-    Dim issue As Object
+    Dim finding As Object
     Dim locStr As String
 
     expectedIdx = 1
@@ -116,8 +116,8 @@ Private Sub CheckEndnoteSequence(doc As Document, _
             If Err.Number <> 0 Then locStr = "unknown location": Err.Clear
             On Error GoTo 0
 
-            Set issue = CreateIssueDict(RULE_NAME, locStr, noteType & " numbering gap: expected " & expectedIdx & ", found " & en.Index, "Renumber " & LCase(noteType) & "s sequentially", en.Reference.Start, en.Reference.End, "error")
-            issues.Add issue
+            Set finding = CreateIssueDict(RULE_NAME, locStr, noteType & " numbering gap: expected " & expectedIdx & ", found " & en.Index, "Renumber " & LCase(noteType) & "s sequentially", en.Reference.Start, en.Reference.End, "error")
+            issues.Add finding
         End If
 
         expectedIdx = expectedIdx + 1
@@ -135,7 +135,7 @@ Private Sub CheckNotePlacement(doc As Document, _
                                 ByRef issues As Collection)
     Dim i As Long
     Dim fn As Footnote
-    Dim issue As Object
+    Dim finding As Object
     Dim locStr As String
     Dim charBefore As String
     Dim refStart As Long
@@ -169,8 +169,8 @@ Private Sub CheckNotePlacement(doc As Document, _
                 If Err.Number <> 0 Then locStr = "unknown location": Err.Clear
                 On Error GoTo 0
 
-                Set issue = CreateIssueDict(RULE_NAME, locStr, noteType & " " & fn.Index & " reference not placed after punctuation", "Place " & LCase(noteType) & " reference after punctuation mark", fn.Reference.Start, fn.Reference.End, "error")
-                issues.Add issue
+                Set finding = CreateIssueDict(RULE_NAME, locStr, noteType & " " & fn.Index & " reference not placed after punctuation", "Place " & LCase(noteType) & " reference after punctuation mark", fn.Reference.Start, fn.Reference.End, "error")
+                issues.Add finding
             End If
         End If
 
@@ -187,7 +187,7 @@ Private Sub CheckEndnotePlacement(doc As Document, _
                                    ByRef issues As Collection)
     Dim i As Long
     Dim en As Endnote
-    Dim issue As Object
+    Dim finding As Object
     Dim locStr As String
     Dim charBefore As String
     Dim refStart As Long
@@ -220,8 +220,8 @@ Private Sub CheckEndnotePlacement(doc As Document, _
                 If Err.Number <> 0 Then locStr = "unknown location": Err.Clear
                 On Error GoTo 0
 
-                Set issue = CreateIssueDict(RULE_NAME, locStr, noteType & " " & en.Index & " reference not placed after punctuation", "Place " & LCase(noteType) & " reference after punctuation mark", en.Reference.Start, en.Reference.End, "error")
-                issues.Add issue
+                Set finding = CreateIssueDict(RULE_NAME, locStr, noteType & " " & en.Index & " reference not placed after punctuation", "Place " & LCase(noteType) & " reference after punctuation mark", en.Reference.Start, en.Reference.End, "error")
+                issues.Add finding
             End If
         End If
 
@@ -238,7 +238,7 @@ Private Sub CheckEmptyNotes(doc As Document, _
                              ByRef issues As Collection)
     Dim i As Long
     Dim fn As Footnote
-    Dim issue As Object
+    Dim finding As Object
     Dim locStr As String
     Dim noteText As String
 
@@ -266,8 +266,8 @@ Private Sub CheckEmptyNotes(doc As Document, _
             If Err.Number <> 0 Then locStr = "unknown location": Err.Clear
             On Error GoTo 0
 
-            Set issue = CreateIssueDict(RULE_NAME, locStr, noteType & " " & fn.Index & " has empty content", "Add content or remove the empty " & LCase(noteType), fn.Reference.Start, fn.Reference.End, "error")
-            issues.Add issue
+            Set finding = CreateIssueDict(RULE_NAME, locStr, noteType & " " & fn.Index & " has empty content", "Add content or remove the empty " & LCase(noteType), fn.Reference.Start, fn.Reference.End, "error")
+            issues.Add finding
         End If
 
 NextFnEmpty:
@@ -283,7 +283,7 @@ Private Sub CheckEmptyEndnotes(doc As Document, _
                                 ByRef issues As Collection)
     Dim i As Long
     Dim en As Endnote
-    Dim issue As Object
+    Dim finding As Object
     Dim locStr As String
     Dim noteText As String
 
@@ -311,8 +311,8 @@ Private Sub CheckEmptyEndnotes(doc As Document, _
             If Err.Number <> 0 Then locStr = "unknown location": Err.Clear
             On Error GoTo 0
 
-            Set issue = CreateIssueDict(RULE_NAME, locStr, noteType & " " & en.Index & " has empty content", "Add content or remove the empty " & LCase(noteType), en.Reference.Start, en.Reference.End, "error")
-            issues.Add issue
+            Set finding = CreateIssueDict(RULE_NAME, locStr, noteType & " " & en.Index & " has empty content", "Add content or remove the empty " & LCase(noteType), en.Reference.Start, en.Reference.End, "error")
+            issues.Add finding
         End If
 
 NextEnEmpty:
@@ -331,7 +331,7 @@ Private Sub CheckDuplicateNotes(doc As Document, _
 
     Dim i As Long
     Dim fn As Footnote
-    Dim issue As Object
+    Dim finding As Object
     Dim locStr As String
     Dim noteText As String
     Dim cleanText As String
@@ -367,8 +367,8 @@ Private Sub CheckDuplicateNotes(doc As Document, _
             If Err.Number <> 0 Then locStr = "unknown location": Err.Clear
             On Error GoTo 0
 
-            Set issue = CreateIssueDict(RULE_NAME, locStr, noteType & " " & fn.Index & " has identical content to " & LCase(noteType) & " " & firstIdx, "Remove duplicate or differentiate content", fn.Reference.Start, fn.Reference.End, "possible_error")
-            issues.Add issue
+            Set finding = CreateIssueDict(RULE_NAME, locStr, noteType & " " & fn.Index & " has identical content to " & LCase(noteType) & " " & firstIdx, "Remove duplicate or differentiate content", fn.Reference.Start, fn.Reference.End, "possible_error")
+            issues.Add finding
         Else
             contentDict.Add cleanText, fn.Index
         End If
@@ -389,7 +389,7 @@ Private Sub CheckDuplicateEndnotes(doc As Document, _
 
     Dim i As Long
     Dim en As Endnote
-    Dim issue As Object
+    Dim finding As Object
     Dim locStr As String
     Dim noteText As String
     Dim cleanText As String
@@ -423,8 +423,8 @@ Private Sub CheckDuplicateEndnotes(doc As Document, _
             If Err.Number <> 0 Then locStr = "unknown location": Err.Clear
             On Error GoTo 0
 
-            Set issue = CreateIssueDict(RULE_NAME, locStr, noteType & " " & en.Index & " has identical content to " & LCase(noteType) & " " & firstEnIdx, "Remove duplicate or differentiate content", en.Reference.Start, en.Reference.End, "possible_error")
-            issues.Add issue
+            Set finding = CreateIssueDict(RULE_NAME, locStr, noteType & " " & en.Index & " has identical content to " & LCase(noteType) & " " & firstEnIdx, "Remove duplicate or differentiate content", en.Reference.Start, en.Reference.End, "possible_error")
+            issues.Add finding
         Else
             contentDict.Add cleanText, en.Index
         End If
@@ -456,7 +456,7 @@ End Function
 ' ----------------------------------------------------------------
 
 ' ----------------------------------------------------------------
-'  PRIVATE: Create a dictionary-based issue (no class dependency)
+'  PRIVATE: Create a dictionary-based finding (no class dependency)
 ' ----------------------------------------------------------------
 Private Function CreateIssueDict(ByVal ruleName_ As String, _
                                  ByVal location_ As String, _

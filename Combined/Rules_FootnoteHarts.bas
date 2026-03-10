@@ -26,7 +26,7 @@ Private Const RULE27_NAME As String = "footnote_abbreviation_dictionary"
 
 Public Function Check_FootnotesNotEndnotes(doc As Document) As Collection
     Dim issues As New Collection
-    Dim issue As Object
+    Dim finding As Object
 
     On Error Resume Next
 
@@ -45,16 +45,16 @@ Public Function Check_FootnotesNotEndnotes(doc As Document) As Collection
 
     If endCount > 0 And fnCount = 0 Then
         ' Document uses only endnotes
-        Set issue = CreateIssueDict(RULE24_NAME, "document level", "Document uses endnotes instead of footnotes.", "Use footnotes rather than endnotes.", 0, 0, "error", False)
-        issues.Add issue
+        Set finding = CreateIssueDict(RULE24_NAME, "document level", "Document uses endnotes instead of footnotes.", "Use footnotes rather than endnotes.", 0, 0, "error", False)
+        issues.Add finding
 
     ElseIf endCount > 0 And fnCount > 0 Then
         ' Document uses both
-        Set issue = CreateIssueDict(RULE24_NAME, "document level", "Document uses both footnotes and endnotes.", "Use footnotes rather than endnotes.", 0, 0, "error", False)
-        issues.Add issue
+        Set finding = CreateIssueDict(RULE24_NAME, "document level", "Document uses both footnotes and endnotes.", "Use footnotes rather than endnotes.", 0, 0, "error", False)
+        issues.Add finding
     End If
 
-    ' If only footnotes exist (endCount = 0): no issue
+    ' If only footnotes exist (endCount = 0): no finding
 
     Set Check_FootnotesNotEndnotes = issues
 End Function
@@ -66,7 +66,7 @@ End Function
 Public Function Check_FootnoteTerminalFullStop(doc As Document) As Collection
     Dim issues As New Collection
     Dim fn As Footnote
-    Dim issue As Object
+    Dim finding As Object
     Dim locStr As String
     Dim noteText As String
     Dim trimmed As String
@@ -129,8 +129,8 @@ Public Function Check_FootnoteTerminalFullStop(doc As Document) As Collection
         If Err.Number <> 0 Then locStr = "unknown location": Err.Clear
         On Error GoTo 0
 
-        Set issue = CreateIssueDict(RULE25_NAME, locStr, "Footnote does not end with a full stop.", "Add a full stop at the end of the footnote.", fn.Range.Start, fn.Range.End, "warning", True)
-        issues.Add issue
+        Set finding = CreateIssueDict(RULE25_NAME, locStr, "Footnote does not end with a full stop.", "Add a full stop at the end of the footnote.", fn.Range.Start, fn.Range.End, "warning", True)
+        issues.Add finding
 
 NextFootnote25:
     Next i
@@ -146,7 +146,7 @@ Public Function Check_FootnoteInitialCapital(doc As Document) As Collection
     Dim issues As New Collection
     Dim allowed As Object
     Dim fn As Footnote
-    Dim issue As Object
+    Dim finding As Object
     Dim locStr As String
     Dim noteText As String
     Dim trimmed As String
@@ -231,8 +231,8 @@ Public Function Check_FootnoteInitialCapital(doc As Document) As Collection
             If Err.Number <> 0 Then locStr = "unknown location": Err.Clear
             On Error GoTo 0
 
-            Set issue = CreateIssueDict(RULE26_NAME, locStr, "Footnote begins with lower-case text outside the approved exceptions.", "Begin the footnote with a capital letter, unless it starts with an approved lower-case abbreviation.", fn.Range.Start, fn.Range.End, "warning", False)
-            issues.Add issue
+            Set finding = CreateIssueDict(RULE26_NAME, locStr, "Footnote begins with lower-case text outside the approved exceptions.", "Begin the footnote with a capital letter, unless it starts with an approved lower-case abbreviation.", fn.Range.Start, fn.Range.End, "warning", False)
+            issues.Add finding
         End If
 
 NextFootnote26:
@@ -377,7 +377,7 @@ Private Sub CheckFootnoteText(doc As Document, _
     Dim noDots As String
     Dim lcToken As String
     Dim preferred As String
-    Dim issue As Object
+    Dim finding As Object
     Dim locStr As String
     Dim j As Long
     Dim issueText As String
@@ -418,8 +418,8 @@ Private Sub CheckFootnoteText(doc As Document, _
             issueText = "Unapproved footnote abbreviation."
             suggText = "Use '" & preferred & "' instead of '" & stripped & "'."
 
-            Set issue = CreateIssueDict(RULE27_NAME, locStr, issueText, suggText, fn.Range.Start, fn.Range.End, "warning", False)
-            issues.Add issue
+            Set finding = CreateIssueDict(RULE27_NAME, locStr, issueText, suggText, fn.Range.Start, fn.Range.End, "warning", False)
+            issues.Add finding
             GoTo NextToken
         End If
 
@@ -444,8 +444,8 @@ Private Sub CheckFootnoteText(doc As Document, _
                     issueText = "Unapproved footnote abbreviation."
                     suggText = "Use '" & noDots & "' instead of '" & token & "'."
 
-                    Set issue = CreateIssueDict(RULE27_NAME, locStr, issueText, suggText, fn.Range.Start, fn.Range.End, "warning", False)
-                    issues.Add issue
+                    Set finding = CreateIssueDict(RULE27_NAME, locStr, issueText, suggText, fn.Range.Start, fn.Range.End, "warning", False)
+                    issues.Add finding
                     GoTo NextToken
                 End If
             End If
@@ -601,7 +601,7 @@ End Function
 ' ----------------------------------------------------------------
 
 ' ----------------------------------------------------------------
-'  PRIVATE: Create a dictionary-based issue (no class dependency)
+'  PRIVATE: Create a dictionary-based finding (no class dependency)
 ' ----------------------------------------------------------------
 Private Function CreateIssueDict(ByVal ruleName_ As String, _
                                  ByVal location_ As String, _

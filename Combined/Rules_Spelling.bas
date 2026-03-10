@@ -106,7 +106,7 @@ End Function
 '  locate whole-word, case-insensitive matches, then filters
 '  by page range and whitelist before creating issues.
 '
-'  direction = "UK" or "US" -- controls the issue text:
+'  direction = "UK" or "US" -- controls the finding text:
 '    "UK" -> "US spelling detected: '...'"
 '    "US" -> "UK spelling detected: '...'"
 ' ============================================================
@@ -120,7 +120,7 @@ Private Sub SearchRangeForSpellingIssues(searchRange As Range, _
     Dim i As Long
     Dim rng As Range
     Dim foundText As String
-    Dim issue As Object
+    Dim finding As Object
     Dim locStr As String
     Dim issueText As String
     Dim sourceLabel As String
@@ -185,7 +185,7 @@ Private Sub SearchRangeForSpellingIssues(searchRange As Range, _
                 GoTo ContinueSearch
             End If
 
-            ' -- Create the issue ----------------------
+            ' -- Create the finding ----------------------
             On Error Resume Next
             locStr = EngineGetLocationString(rng, doc)
             If Err.Number <> 0 Then
@@ -212,8 +212,8 @@ Private Sub SearchRangeForSpellingIssues(searchRange As Range, _
                 issueText = issueText & " (in quoted text " & Chr(8212) & " review manually)"
             End If
 
-            Set issue = CreateIssueDict(RULE_NAME, locStr, issueText, suggestion, rng.Start, rng.End, severity)
-            issues.Add issue
+            Set finding = CreateIssueDict(RULE_NAME, locStr, issueText, suggestion, rng.Start, rng.End, severity)
+            issues.Add finding
 
 ContinueSearch:
             ' Collapse range to end of current match to find next
@@ -575,7 +575,7 @@ Private Sub SearchSingleLicenceTerm(ByVal term As String, _
                               ByRef issues As Collection)
     Dim rng As Range
     Dim found As Boolean
-    Dim issue As Object
+    Dim finding As Object
     Dim locStr As String
     Dim contextBefore As String
     Dim contextAfter As String
@@ -643,8 +643,8 @@ Private Sub SearchSingleLicenceTerm(ByVal term As String, _
             If Err.Number <> 0 Then locStr = "unknown location": Err.Clear
             On Error GoTo 0
 
-            Set issue = CreateIssueDict(RULE_NAME_LICENCE, locStr, ")
-            issues.Add issue
+            Set finding = CreateIssueDict(RULE_NAME_LICENCE, locStr, ")
+            issues.Add finding
             GoTo ContinueLicenceSearch
         End If
 
@@ -654,8 +654,8 @@ Private Sub SearchSingleLicenceTerm(ByVal term As String, _
             If Err.Number <> 0 Then locStr = "unknown location": Err.Clear
             On Error GoTo 0
 
-            Set issue = CreateIssueDict(RULE_NAME_LICENCE, locStr, ")
-            issues.Add issue
+            Set finding = CreateIssueDict(RULE_NAME_LICENCE, locStr, ")
+            issues.Add finding
             GoTo ContinueLicenceSearch
         End If
 
@@ -673,7 +673,7 @@ Private Sub SearchSingleLicenceTerm(ByVal term As String, _
         baseIsVerb = IsVerbIndicator(wordBefore)
         baseIsNoun = IsNounIndicator(wordBefore) Or IsNounFollower(wordAfter)
 
-        ' -- Decide if there is an issue ----------------------
+        ' -- Decide if there is an finding ----------------------
         issueText = ""
         suggestion = ""
 
@@ -705,7 +705,7 @@ Private Sub SearchSingleLicenceTerm(ByVal term As String, _
             suggestion = "Review context: 'licence' = noun, 'license' = verb"
         End If
 
-        ' Only create issue if we found something to flag
+        ' Only create finding if we found something to flag
         If Len(issueText) > 0 Then
             On Error Resume Next
             locStr = EngineGetLocationString(rng, doc)
@@ -715,8 +715,8 @@ Private Sub SearchSingleLicenceTerm(ByVal term As String, _
             End If
             On Error GoTo 0
 
-            Set issue = CreateIssueDict(RULE_NAME_LICENCE, locStr, issueText, suggestion, rng.Start, rng.End, "possible_error")
-            issues.Add issue
+            Set finding = CreateIssueDict(RULE_NAME_LICENCE, locStr, issueText, suggestion, rng.Start, rng.End, "possible_error")
+            issues.Add finding
         End If
 
 ContinueLicenceSearch:
@@ -1128,14 +1128,14 @@ NextParaPass2:
 End Function
 
 ' ============================================================
-'  PRIVATE: Flush a grouped colour issue
+'  PRIVATE: Flush a grouped colour finding
 ' ============================================================
 Private Sub FlushColourGroup(doc As Document, _
                               ByRef issues As Collection, _
                               ByVal startPos As Long, _
                               ByVal endPos As Long, _
                               ByVal fontColor As Long)
-    Dim issue As Object
+    Dim finding As Object
     Dim locStr As String
     Dim hexStr As String
     Dim rng As Range
@@ -1166,8 +1166,8 @@ Private Sub FlushColourGroup(doc As Document, _
     End If
     On Error GoTo 0
 
-    Set issue = CreateIssueDict(RULE_NAME_COLOUR, locStr, "Non-standard font colour " & hexStr & " detected:)
-    issues.Add issue
+    Set finding = CreateIssueDict(RULE_NAME_COLOUR, locStr, "Non-standard font colour " & hexStr & " detected:)
+    issues.Add finding
 End Sub
 
 ' ============================================================
@@ -1227,7 +1227,7 @@ End Function
 ' ----------------------------------------------------------------
 
 ' ----------------------------------------------------------------
-'  PRIVATE: Create a dictionary-based issue (no class dependency)
+'  PRIVATE: Create a dictionary-based finding (no class dependency)
 ' ----------------------------------------------------------------
 Private Function CreateIssueDict(ByVal ruleName_ As String, _
                                  ByVal location_ As String, _

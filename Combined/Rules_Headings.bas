@@ -274,7 +274,7 @@ Private Sub FlagOccurrences(doc As Document, _
                              ByRef issues As Collection)
     Dim rng As Range
     Dim found As Boolean
-    Dim issue As Object
+    Dim finding As Object
     Dim locStr As String
 
     Set rng = doc.Content.Duplicate
@@ -302,8 +302,8 @@ Private Sub FlagOccurrences(doc As Document, _
             If Err.Number <> 0 Then locStr = "unknown location": Err.Clear
             On Error GoTo 0
 
-            Set issue = CreateIssueDict(RULE_NAME_TITLE, locStr, issueText, suggestionText, rng.Start, rng.End, "error")
-            issues.Add issue
+            Set finding = CreateIssueDict(RULE_NAME_TITLE, locStr, issueText, suggestionText, rng.Start, rng.End, "error")
+            issues.Add finding
         End If
 
         On Error Resume Next
@@ -412,7 +412,7 @@ NextPara:
             Dim hPattern As String
             hPattern = CStr(hInfo(2))
             If hPattern <> dominantPattern Then
-                Dim issue As Object
+                Dim finding As Object
                 Dim loc As String
                 Dim rng As Range
                 Set rng = doc.Range(CLng(hInfo(3)), CLng(hInfo(4)))
@@ -433,8 +433,8 @@ NextPara:
                         suggestion = "Review capitalisation for consistency with other level " & CLng(lvlKey) & " headings"
                 End Select
 
-                Set issue = CreateIssueDict(RULE_NAME_CAPITALISATION, loc, "Heading capitalisation mismatch:)
-                issues.Add issue
+                Set finding = CreateIssueDict(RULE_NAME_CAPITALISATION, loc, "Heading capitalisation mismatch:)
+                issues.Add finding
             End If
         Next h
 NextLevel:
@@ -495,7 +495,7 @@ End Function
 ' ----------------------------------------------------------------
 
 ' ----------------------------------------------------------------
-'  PRIVATE: Create a dictionary-based issue (no class dependency)
+'  PRIVATE: Create a dictionary-based finding (no class dependency)
 ' ----------------------------------------------------------------
 Private Function CreateIssueDict(ByVal ruleName_ As String, _
                                  ByVal location_ As String, _

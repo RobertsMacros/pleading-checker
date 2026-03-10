@@ -49,7 +49,7 @@ Private Sub CheckNativeListNumbering(doc As Document, _
     Dim listValue As Long
     Dim expectedNext As Long
     Dim levelDict As Object
-    Dim issue As Object
+    Dim finding As Object
     Dim locStr As String
     Dim issueText As String
     Dim suggestion As String
@@ -176,8 +176,8 @@ Private Sub CheckNativeListNumbering(doc As Document, _
                 issueText = "Duplicate number " & listValue & " at level " & listLevel
                 suggestion = "Expected " & expectedNext & "; remove or renumber the duplicate"
 
-                Set issue = CreateIssueDict(RULE_NAME_SEQ, locStr, issueText, suggestion, paraRange.Start, paraRange.End, "error")
-                issues.Add issue
+                Set finding = CreateIssueDict(RULE_NAME_SEQ, locStr, issueText, suggestion, paraRange.Start, paraRange.End, "error")
+                issues.Add finding
                 ' Do not advance expectedNext for duplicates
 
             ElseIf listValue > expectedNext Then
@@ -194,8 +194,8 @@ Private Sub CheckNativeListNumbering(doc As Document, _
                 suggestion = "Check whether items " & expectedNext & " through " & _
                              (listValue - 1) & " are missing"
 
-                Set issue = CreateIssueDict(RULE_NAME_SEQ, locStr, issueText, suggestion, paraRange.Start, paraRange.End, "error")
-                issues.Add issue
+                Set finding = CreateIssueDict(RULE_NAME_SEQ, locStr, issueText, suggestion, paraRange.Start, paraRange.End, "error")
+                issues.Add finding
 
                 ' Update expected to continue from current
                 levelDict(listLevel) = listValue + 1
@@ -213,8 +213,8 @@ Private Sub CheckNativeListNumbering(doc As Document, _
                             " -- numbering went backwards"
                 suggestion = "Renumber this item to " & expectedNext & " or check list continuity"
 
-                Set issue = CreateIssueDict(RULE_NAME_SEQ, locStr, issueText, suggestion, paraRange.Start, paraRange.End, "error")
-                issues.Add issue
+                Set finding = CreateIssueDict(RULE_NAME_SEQ, locStr, issueText, suggestion, paraRange.Start, paraRange.End, "error")
+                issues.Add finding
 
                 ' Update expected to continue from current
                 levelDict(listLevel) = listValue + 1
@@ -247,7 +247,7 @@ Private Sub CheckManualNumbering(doc As Document, _
     Dim manualNum As Long
     Dim expectedNext As Long
     Dim tracking As Boolean
-    Dim issue As Object
+    Dim finding As Object
     Dim locStr As String
     Dim issueText As String
     Dim suggestion As String
@@ -334,8 +334,8 @@ Private Sub CheckManualNumbering(doc As Document, _
             suggestion = "Check whether items " & expectedNext & " through " & _
                          (manualNum - 1) & " are missing"
 
-            Set issue = CreateIssueDict(RULE_NAME_SEQ, locStr, issueText, suggestion, paraRange.Start, paraRange.End, "error")
-            issues.Add issue
+            Set finding = CreateIssueDict(RULE_NAME_SEQ, locStr, issueText, suggestion, paraRange.Start, paraRange.End, "error")
+            issues.Add finding
 
             expectedNext = manualNum + 1
 
@@ -351,8 +351,8 @@ Private Sub CheckManualNumbering(doc As Document, _
             issueText = "Manual numbering: duplicate number " & manualNum
             suggestion = "Remove or renumber the duplicate item"
 
-            Set issue = CreateIssueDict(RULE_NAME_SEQ, locStr, issueText, suggestion, paraRange.Start, paraRange.End, "error")
-            issues.Add issue
+            Set finding = CreateIssueDict(RULE_NAME_SEQ, locStr, issueText, suggestion, paraRange.Start, paraRange.End, "error")
+            issues.Add finding
 
         ElseIf manualNum < expectedNext - 1 Then
             ' Backwards
@@ -367,8 +367,8 @@ Private Sub CheckManualNumbering(doc As Document, _
                         " but found " & manualNum & " -- numbering went backwards"
             suggestion = "Renumber this item to " & expectedNext & " or check sequence"
 
-            Set issue = CreateIssueDict(RULE_NAME_SEQ, locStr, issueText, suggestion, paraRange.Start, paraRange.End, "error")
-            issues.Add issue
+            Set finding = CreateIssueDict(RULE_NAME_SEQ, locStr, issueText, suggestion, paraRange.Start, paraRange.End, "error")
+            issues.Add finding
 
             expectedNext = manualNum + 1
         Else
@@ -718,14 +718,14 @@ NextClausePara:
 
             If dominantFormats.Exists(levelCat) Then
                 If clauseFmt <> dominantFormats(levelCat) Then
-                    Dim issue As Object
+                    Dim finding As Object
                     Dim rng As Range
                     Set rng = doc.Range(CLng(clauseData(2)), CLng(clauseData(3)))
                     Dim loc As String
                     loc = EngineGetLocationString(rng, doc)
 
-                    Set issue = CreateIssueDict(RULE_NAME_FMT, loc, "Mixed clause number format:)
-                    issues.Add issue
+                    Set finding = CreateIssueDict(RULE_NAME_FMT, loc, "Mixed clause number format:)
+                    issues.Add finding
                 End If
             End If
         Next ci
@@ -744,7 +744,7 @@ End Function
 ' ----------------------------------------------------------------
 
 ' ----------------------------------------------------------------
-'  PRIVATE: Create a dictionary-based issue (no class dependency)
+'  PRIVATE: Create a dictionary-based finding (no class dependency)
 ' ----------------------------------------------------------------
 Private Function CreateIssueDict(ByVal ruleName_ As String, _
                                  ByVal location_ As String, _

@@ -69,7 +69,7 @@ Private Sub SearchAndFlag(doc As Document, _
                            ByRef issues As Collection)
     Dim rng As Range
     Dim found As Boolean
-    Dim issue As Object
+    Dim finding As Object
     Dim locStr As String
 
     Set rng = doc.Content.Duplicate
@@ -97,8 +97,8 @@ Private Sub SearchAndFlag(doc As Document, _
             If Err.Number <> 0 Then locStr = "unknown location": Err.Clear
             On Error GoTo 0
 
-            Set issue = CreateIssueDict(RULE_NAME, locStr, "Incorrect brand name:)
-            issues.Add issue
+            Set finding = CreateIssueDict(RULE_NAME, locStr, "Incorrect brand name:)
+            issues.Add finding
         End If
 
         On Error Resume Next
@@ -254,7 +254,7 @@ End Sub
 ' ----------------------------------------------------------------
 
 ' ----------------------------------------------------------------
-'  PRIVATE: Create a dictionary-based issue (no class dependency)
+'  PRIVATE: Create a dictionary-based finding (no class dependency)
 ' ----------------------------------------------------------------
 Private Function CreateIssueDict(ByVal ruleName_ As String, _
                                  ByVal location_ As String, _

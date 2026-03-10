@@ -259,7 +259,7 @@ Private Sub CheckISOCodeFormat(doc As Document, _
                                 ByRef issues As Collection)
     Dim rng As Range
     Dim isoPattern As String
-    Dim issue As Object
+    Dim finding As Object
     Dim locStr As String
 
     ' Search for ISO code followed by space and number
@@ -298,8 +298,8 @@ Private Sub CheckISOCodeFormat(doc As Document, _
             If Err.Number <> 0 Then locStr = "unknown location": Err.Clear
             On Error GoTo 0
 
-            Set issue = CreateIssueDict(RULE_NAME_CURRENCY, locStr, "ISO code format used:)
-            issues.Add issue
+            Set finding = CreateIssueDict(RULE_NAME_CURRENCY, locStr, "ISO code format used:)
+            issues.Add finding
         End If
 
         On Error Resume Next
@@ -318,7 +318,7 @@ Private Sub FlagMinorityRanges(doc As Document, _
                                 ByRef issues As Collection)
     Dim i As Long
     Dim rng As Range
-    Dim issue As Object
+    Dim finding As Object
     Dim locStr As String
 
     For i = 1 To ranges.Count
@@ -329,8 +329,8 @@ Private Sub FlagMinorityRanges(doc As Document, _
         If Err.Number <> 0 Then locStr = "unknown location": Err.Clear
         On Error GoTo 0
 
-        Set issue = CreateIssueDict(RULE_NAME_CURRENCY, locStr, symLabel & " amount uses)
-        issues.Add issue
+        Set finding = CreateIssueDict(RULE_NAME_CURRENCY, locStr, symLabel & " amount uses)
+        issues.Add finding
     Next i
 End Sub
 
@@ -455,7 +455,7 @@ Public Function Check_DateTimeFormat(doc As Document) As Collection
                 dType = CStr(dInfo(0))
 
                 If dType <> dominantDate Then
-                    Dim issueD As Object
+                    Dim findingD As Object
                     Dim rngD As Range
                     Set rngD = doc.Range(CLng(dInfo(2)), CLng(dInfo(3)))
                     Dim locD As String
@@ -471,8 +471,8 @@ Public Function Check_DateTimeFormat(doc As Document) As Collection
                             suggestion = "Reformat to numeric style (e.g., '01/01/2024')"
                     End Select
 
-                    Set issueD = CreateIssueDict(RULE_NAME_DATE_TIME, locD, "Inconsistent date format:)
-                    issues.Add issueD
+                    Set findingD = CreateIssueDict(RULE_NAME_DATE_TIME, locD, "Inconsistent date format:)
+                    issues.Add findingD
                 End If
             Next i
         End If
@@ -549,7 +549,7 @@ Public Function Check_DateTimeFormat(doc As Document) As Collection
                 tType = CStr(tInfo(0))
 
                 If tType <> dominantTime Then
-                    Dim issueT As Object
+                    Dim findingT As Object
                     Dim rngT As Range
                     Set rngT = doc.Range(CLng(tInfo(2)), CLng(tInfo(3)))
                     Dim locT As String
@@ -562,8 +562,8 @@ Public Function Check_DateTimeFormat(doc As Document) As Collection
                         timeSugg = "Use 24-hour format (e.g., '14:30') for consistency"
                     End If
 
-                    Set issueT = CreateIssueDict(RULE_NAME_DATE_TIME, locT, "Inconsistent time format:)
-                    issues.Add issueT
+                    Set findingT = CreateIssueDict(RULE_NAME_DATE_TIME, locT, "Inconsistent time format:)
+                    issues.Add findingT
                 End If
             Next i
         End If
@@ -649,7 +649,7 @@ End Function
 ' ----------------------------------------------------------------
 
 ' ----------------------------------------------------------------
-'  PRIVATE: Create a dictionary-based issue (no class dependency)
+'  PRIVATE: Create a dictionary-based finding (no class dependency)
 ' ----------------------------------------------------------------
 Private Function CreateIssueDict(ByVal ruleName_ As String, _
                                  ByVal location_ As String, _

@@ -220,26 +220,26 @@ NextPara:
 
             ' Check after-spacing deviation
             If hAft <> domAfter And Len(domAfter) > 0 Then
-                Dim issueA As Object
+                Dim findingA As Object
                 Dim rngA As Range
                 Set rngA = doc.Range(CLng(hInfo(3)), CLng(hInfo(4)))
                 Dim locA As String
                 locA = EngineGetLocationString(rngA, doc)
 
-                Set issueA = CreateIssueDict(RULE_NAME_PARAGRAPH_BREAK, locA, "After-heading spacing inconsistency at)
-                issues.Add issueA
+                Set findingA = CreateIssueDict(RULE_NAME_PARAGRAPH_BREAK, locA, "After-heading spacing inconsistency at)
+                issues.Add findingA
             End If
 
             ' Check before-spacing deviation
             If hBef <> domBefore And Len(domBefore) > 0 Then
-                Dim issueB As Object
+                Dim findingB As Object
                 Dim rngB As Range
                 Set rngB = doc.Range(CLng(hInfo(3)), CLng(hInfo(4)))
                 Dim locB As String
                 locB = EngineGetLocationString(rngB, doc)
 
-                Set issueB = CreateIssueDict(RULE_NAME_PARAGRAPH_BREAK, locB, "Before-heading spacing inconsistency at)
-                issues.Add issueB
+                Set findingB = CreateIssueDict(RULE_NAME_PARAGRAPH_BREAK, locB, "Before-heading spacing inconsistency at)
+                issues.Add findingB
             End If
         Next h
 NextLevel:
@@ -382,15 +382,15 @@ NextFootnote:
         If Len(paraFontName) > 0 And paraFontSize > 0 Then
             fk = FontKey(paraFontName, paraFontSize)
             If fk <> expectedFont Then
-                Dim issuePara As Object
+                Dim findingPara As Object
                 Dim locP As String
                 locP = EngineGetLocationString(para.Range, doc)
 
                 Dim cleanParaText As String
                 cleanParaText = Trim$(Replace(Left$(para.Range.Text, 60), vbCr, ""))
 
-                Set issuePara = CreateIssueDict(RULE_NAME_FONT, locP, "Font inconsistency in " & context & ":)
-                issues.Add issuePara
+                Set findingPara = CreateIssueDict(RULE_NAME_FONT, locP, "Font inconsistency in " & context & ":)
+                issues.Add findingPara
                 ' Skip run-level check if paragraph-level already flagged
                 GoTo NextParaFont2
             End If
@@ -446,15 +446,15 @@ NextFootnote:
                         If Not isField Then
                             fk = FontKey(currentFontName, currentFontSize)
                             If fk <> expectedFont And Len(currentFontName) > 0 And currentFontSize > 0 Then
-                                Dim issueRun As Object
+                                Dim findingRun As Object
                                 Dim locR As String
                                 locR = EngineGetLocationString(runRange, doc)
 
                                 Dim cleanRunText As String
                                 cleanRunText = Trim$(Replace(Left$(runText, 40), vbCr, ""))
 
-                                Set issueRun = CreateIssueDict(RULE_NAME_FONT, locR, "Mid-paragraph font change in " & context & ":)
-                                issues.Add issueRun
+                                Set findingRun = CreateIssueDict(RULE_NAME_FONT, locR, "Mid-paragraph font change in " & context & ":)
+                                issues.Add findingRun
                                 ' Only flag once per paragraph for run-level
                                 GoTo NextParaFont2
                             End If
@@ -486,15 +486,15 @@ NextParaFont2:
             If Len(fnFontName) > 0 And fnFontSize > 0 Then
                 fk = FontKey(fnFontName, fnFontSize)
                 If fk <> domFootnote Then
-                    Dim issueFN As Object
+                    Dim findingFN As Object
                     Dim locFN As String
                     locFN = EngineGetLocationString(fn.Range, doc)
 
                     Dim cleanFNText As String
                     cleanFNText = Trim$(Replace(Left$(fn.Range.Text, 50), vbCr, ""))
 
-                    Set issueFN = CreateIssueDict(RULE_NAME_FONT, locFN, "Footnote font inconsistency:)
-                    issues.Add issueFN
+                    Set findingFN = CreateIssueDict(RULE_NAME_FONT, locFN, "Footnote font inconsistency:)
+                    issues.Add findingFN
                 End If
             End If
 NextFN2:
@@ -514,7 +514,7 @@ End Function
 ' ----------------------------------------------------------------
 
 ' ----------------------------------------------------------------
-'  PRIVATE: Create a dictionary-based issue (no class dependency)
+'  PRIVATE: Create a dictionary-based finding (no class dependency)
 ' ----------------------------------------------------------------
 Private Function CreateIssueDict(ByVal ruleName_ As String, _
                                  ByVal location_ As String, _

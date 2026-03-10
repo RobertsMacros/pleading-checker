@@ -173,7 +173,7 @@ Public Function Check_SingleQuotesDefault(doc As Document) As Collection
     Dim i As Long
     Dim charCode As Long
     Dim singleDepth As Long
-    Dim issue As Object
+    Dim finding As Object
     Dim locStr As String
     Dim charRange As Range
 
@@ -271,8 +271,8 @@ Public Function Check_SingleQuotesDefault(doc As Document) As Collection
                         End If
                     End If
 
-                    Set issue = CreateIssueDict(RULE_NAME_32, locStr, "Outer quotation marks should use single quotation marks.", "Use single quotation marks instead of double quotation marks.", rangeStart32, rangeEnd32, "warning", False)
-                    issues.Add issue
+                    Set finding = CreateIssueDict(RULE_NAME_32, locStr, "Outer quotation marks should use single quotation marks.", "Use single quotation marks instead of double quotation marks.", rangeStart32, rangeEnd32, "warning", False)
+                    issues.Add finding
             End Select
         Next i
 
@@ -364,17 +364,17 @@ NextParaPass1:
     On Error GoTo 0
 
     ' -- Determine if there is a mix ------------------------
-    ' If only one style or no quotes at all, no issue
+    ' If only one style or no quotes at all, no finding
     If straightCount = 0 Or curlyCount = 0 Then
         Set Check_SmartQuoteConsistency = issues
         Exit Function
     End If
 
     ' Per spec: prefer curly as dominant when both exist
-    ' Emit document-level summary issue
-    Dim summaryIssue As Object
-    Set summaryIssue = CreateIssueDict(RULE_NAME_33, "Document", "Quotation mark style is inconsistent. Found " & straightCount & " straight and " & curlyCount & " curly quotation marks.", "Use curly quotation marks consistently throughout the document.", 0, 0, "warning", False)
-    issues.Add summaryIssue
+    ' Emit document-level summary finding
+    Dim summaryFinding As Object
+    Set summaryFinding = CreateIssueDict(RULE_NAME_33, "Document", "Quotation mark style is inconsistent. Found " & straightCount & " straight and " & curlyCount & " curly quotation marks.", "Use curly quotation marks consistently throughout the document.", 0, 0, "warning", False)
+    issues.Add summaryFinding
 
     ' -- Second pass: flag each straight quote occurrence ---
     On Error Resume Next
@@ -423,7 +423,7 @@ NextParaPass1:
                 Dim rangeEnd33 As Long
                 Dim locStr33 As String
                 Dim charRange33 As Range
-                Dim issue33 As Object
+                Dim finding33 As Object
 
                 rangeStart33 = paraRange.Start + i - 1
                 rangeEnd33 = rangeStart33 + 1
@@ -441,8 +441,8 @@ NextParaPass1:
                     End If
                 End If
 
-                Set issue33 = CreateIssueDict(RULE_NAME_33, locStr33, "Straight quotation mark found in otherwise curly-quoted document.", "Replace with curly quotation mark.", rangeStart33, rangeEnd33, "warning", False)
-                issues.Add issue33
+                Set finding33 = CreateIssueDict(RULE_NAME_33, locStr33, "Straight quotation mark found in otherwise curly-quoted document.", "Replace with curly quotation mark.", rangeStart33, rangeEnd33, "warning", False)
+                issues.Add finding33
             End If
         Next i
 
@@ -515,7 +515,7 @@ Private Sub FlagQuotationMarks(doc As Document, _
                                 ByVal suggestion As String)
     Dim rng As Range
     Dim found As Boolean
-    Dim issue As Object
+    Dim finding As Object
     Dim locStr As String
 
     Set rng = doc.Content.Duplicate
@@ -545,8 +545,8 @@ Private Sub FlagQuotationMarks(doc As Document, _
             Err.Clear
         End If
 
-        Set issue = CreateIssueDict(RULE_NAME_17, locStr, issueText, suggestion, rng.Start, rng.End, "possible_error")
-        issues.Add issue
+        Set finding = CreateIssueDict(RULE_NAME_17, locStr, issueText, suggestion, rng.Start, rng.End, "possible_error")
+        issues.Add finding
 
 ContinueFlag:
         rng.Collapse wdCollapseEnd
@@ -567,7 +567,7 @@ Private Sub FlagSingleQuotationMarks(doc As Document, _
                                       ByVal checkApostrophe As Boolean)
     Dim rng As Range
     Dim found As Boolean
-    Dim issue As Object
+    Dim finding As Object
     Dim locStr As String
 
     Set rng = doc.Content.Duplicate
@@ -629,8 +629,8 @@ Private Sub FlagSingleQuotationMarks(doc As Document, _
             Err.Clear
         End If
 
-        Set issue = CreateIssueDict(RULE_NAME_17, locStr, issueText, suggestion, rng.Start, rng.End, "possible_error")
-        issues.Add issue
+        Set finding = CreateIssueDict(RULE_NAME_17, locStr, issueText, suggestion, rng.Start, rng.End, "possible_error")
+        issues.Add finding
 
 ContinueSingle:
         rng.Collapse wdCollapseEnd
@@ -662,7 +662,7 @@ End Function
 ' ----------------------------------------------------------------
 
 ' ----------------------------------------------------------------
-'  PRIVATE: Create a dictionary-based issue (no class dependency)
+'  PRIVATE: Create a dictionary-based finding (no class dependency)
 ' ----------------------------------------------------------------
 Private Function CreateIssueDict(ByVal ruleName_ As String, _
                                  ByVal location_ As String, _

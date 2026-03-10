@@ -168,7 +168,7 @@ Private Sub FlagPhraseOccurrences(doc As Document, _
                                    ByRef issues As Collection)
     Dim rng As Range
     Dim found As Boolean
-    Dim issue As Object
+    Dim finding As Object
     Dim locStr As String
 
     Set rng = doc.Content.Duplicate
@@ -196,8 +196,8 @@ Private Sub FlagPhraseOccurrences(doc As Document, _
             If Err.Number <> 0 Then locStr = "unknown location": Err.Clear
             On Error GoTo 0
 
-            Set issue = CreateIssueDict(RULE23_NAME, locStr, "Inconsistent phrase:)
-            issues.Add issue
+            Set finding = CreateIssueDict(RULE23_NAME, locStr, "Inconsistent phrase:)
+            issues.Add finding
         End If
 
         On Error Resume Next
@@ -467,11 +467,11 @@ NextParenFind:
             Set lcRng = FindTermRange(doc, lcTerm2, True)
             If Not lcRng Is Nothing Then
                 If EngineIsInPageRange(lcRng) Then
-                    Dim issueLC As Object
+                    Dim findingLC As Object
                     Dim locLC As String
                     locLC = EngineGetLocationString(lcRng, doc)
-                    Set issueLC = CreateIssueDict(RULE07_NAME, locLC, "Inconsistent capitalisation:)
-                    issues.Add issueLC
+                    Set findingLC = CreateIssueDict(RULE07_NAME, locLC, "Inconsistent capitalisation:)
+                    issues.Add findingLC
                 End If
             End If
         End If
@@ -484,11 +484,11 @@ NextParenFind:
             Set nhRng = FindTermRange(doc, noHyphen, False)
             If Not nhRng Is Nothing Then
                 If EngineIsInPageRange(nhRng) Then
-                    Dim issueH As Object
+                    Dim findingH As Object
                     Dim locH As String
                     locH = EngineGetLocationString(nhRng, doc)
-                    Set issueH = CreateIssueDict(RULE07_NAME, locH, "Hyphenation variant:)
-                    issues.Add issueH
+                    Set findingH = CreateIssueDict(RULE07_NAME, locH, "Hyphenation variant:)
+                    issues.Add findingH
                 End If
             End If
         Else
@@ -502,13 +502,13 @@ NextParenFind:
         totalCount = CountTermInDoc(doc, term)
         If totalCount <= 1 Then
             ' Only appears at the definition site
-            Dim issueUnused As Object
+            Dim findingUnused As Object
             Dim unusedRng As Range
             Set unusedRng = doc.Range(CLng(tInfo(1)), CLng(tInfo(2)))
             Dim locUnused As String
             locUnused = EngineGetLocationString(unusedRng, doc)
-            Set issueUnused = CreateIssueDict(RULE07_NAME, locUnused, "Defined term never referenced:)
-            issues.Add issueUnused
+            Set findingUnused = CreateIssueDict(RULE07_NAME, locUnused, "Defined term never referenced:)
+            issues.Add findingUnused
         End If
     Next termKey
 
@@ -558,7 +558,7 @@ End Function
 '  PRIVATE: Late-bound wrapper for EngineSetWhitelist ' ----------------------------------------------------------------
 
 ' ----------------------------------------------------------------
-'  PRIVATE: Create a dictionary-based issue (no class dependency)
+'  PRIVATE: Create a dictionary-based finding (no class dependency)
 ' ----------------------------------------------------------------
 Private Function CreateIssueDict(ByVal ruleName_ As String, _
                                  ByVal location_ As String, _
