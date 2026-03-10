@@ -217,29 +217,17 @@ Public Function Check_CustomTermWhitelist(doc As Document) As Collection
 
     ' -- Define default whitelist terms ----------------------
     Dim terms As Variant
-    terms = Array( _
-        "co-counsel", _
-        "anti-suit injunction", _
-        "pre-action", _
-        "re-examination", _
-        "cross-examination", _
-        "counter-claim", _
-        "sub-contract", _
-        "non-disclosure", _
-        "inter-partes", _
-        "ex-parte", _
-        "bona fide", _
-        "prima facie", _
-        "pro rata", _
-        "ad hoc", _
-        "de facto", _
-        "de jure", _
-        "inter alia", _
-        "mutatis mutandis", _
-        "pari passu", _
-        "ultra vires", _
-        "vis-a-vis" _
-    )
+    Dim batch1 As Variant, batch2 As Variant
+    batch1 = Array( _
+        "co-counsel", "anti-suit injunction", "pre-action", _
+        "re-examination", "cross-examination", "counter-claim", _
+        "sub-contract", "non-disclosure", "inter-partes", _
+        "ex-parte", "bona fide")
+    batch2 = Array( _
+        "prima facie", "pro rata", "ad hoc", "de facto", _
+        "de jure", "inter alia", "mutatis mutandis", _
+        "pari passu", "ultra vires", "vis-a-vis")
+    terms = MergeArrays2(batch1, batch2)
 
     ' -- Build the dictionary -------------------------------
     Dim dict As Object
@@ -627,3 +615,19 @@ Private Sub EngineSetWhitelist(dict As Object)
     If Err.Number <> 0 Then Err.Clear
     On Error GoTo 0
 End Sub
+
+' ----------------------------------------------------------------
+'  Merge 2 Variant arrays into one flat Variant array
+' ----------------------------------------------------------------
+Private Function MergeArrays2(a1 As Variant, a2 As Variant) As Variant
+    Dim total As Long
+    total = UBound(a1) - LBound(a1) + 1 _
+          + UBound(a2) - LBound(a2) + 1
+    Dim out() As Variant
+    ReDim out(0 To total - 1)
+    Dim idx As Long: idx = 0
+    Dim v As Variant
+    For Each v In a1: out(idx) = v: idx = idx + 1: Next v
+    For Each v In a2: out(idx) = v: idx = idx + 1: Next v
+    MergeArrays2 = out
+End Function

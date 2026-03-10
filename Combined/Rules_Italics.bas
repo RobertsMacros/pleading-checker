@@ -87,35 +87,20 @@ End Function
 ' ------------------------------------------------------------
 Private Sub InitSeedTerms()
     If seedInitialised Then Exit Sub
-    seedTerms = Array( _
-        "amicus curiae", _
-        "a priori", _
-        "a fortiori", _
-        "bona fide", _
-        "de facto", _
-        "de jure", _
-        "ex parte", _
-        "ex post", _
-        "ex post facto", _
-        "indicia", _
-        "in situ", _
-        "inter alia", _
-        "laissez-faire", _
-        "mutatis mutandis", _
-        "novus actus interveniens", _
-        "obiter dicta", _
-        "per se", _
-        "prima facie", _
-        "quantum meruit", _
-        "quid pro quo", _
-        "raison d'etre", _
-        "ratio decidendi", _
-        "stare decisis", _
-        "terra nullius", _
-        "ultra vires", _
-        "vice versa", _
-        "vis-a-vis", _
-        "viz")
+    Dim batch1 As Variant, batch2 As Variant, batch3 As Variant
+    batch1 = Array( _
+        "amicus curiae", "a priori", "a fortiori", "bona fide", _
+        "de facto", "de jure", "ex parte", "ex post", _
+        "ex post facto", "indicia")
+    batch2 = Array( _
+        "in situ", "inter alia", "laissez-faire", "mutatis mutandis", _
+        "novus actus interveniens", "obiter dicta", "per se", _
+        "prima facie", "quantum meruit", "quid pro quo")
+    batch3 = Array( _
+        "raison d'etre", "ratio decidendi", "stare decisis", _
+        "terra nullius", "ultra vires", "vice versa", _
+        "vis-a-vis", "viz")
+    seedTerms = MergeArrays(batch1, batch2, batch3)
     seedInitialised = True
 End Sub
 
@@ -375,4 +360,22 @@ Private Function EngineGetLocationString(rng As Object, doc As Document) As Stri
         Err.Clear
     End If
     On Error GoTo 0
+End Function
+
+' ----------------------------------------------------------------
+'  Merge up to 3 Variant arrays into one flat Variant array
+' ----------------------------------------------------------------
+Private Function MergeArrays(a1 As Variant, a2 As Variant, a3 As Variant) As Variant
+    Dim total As Long
+    total = UBound(a1) - LBound(a1) + 1 _
+          + UBound(a2) - LBound(a2) + 1 _
+          + UBound(a3) - LBound(a3) + 1
+    Dim out() As Variant
+    ReDim out(0 To total - 1)
+    Dim idx As Long: idx = 0
+    Dim v As Variant
+    For Each v In a1: out(idx) = v: idx = idx + 1: Next v
+    For Each v In a2: out(idx) = v: idx = idx + 1: Next v
+    For Each v In a3: out(idx) = v: idx = idx + 1: Next v
+    MergeArrays = out
 End Function

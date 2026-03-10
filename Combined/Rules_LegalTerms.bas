@@ -157,31 +157,18 @@ Public Function Check_AlwaysCapitaliseTerms(doc As Document) As Collection
 
     ' -- Seed dictionary of correct forms -------------------
     Dim terms As Variant
-    terms = Array( _
-        "Act", _
-        "Bill", _
-        "Attorney-General", _
-        "Cabinet", _
-        "Commonwealth", _
-        "Constitution", _
-        "Crown", _
-        "Executive Council", _
-        "Governor", _
-        "Governor-General", _
-        "Her Majesty", _
-        "the Queen", _
-        "his Honour", _
-        "her Honour", _
-        "their Honours", _
-        "Law Lords", _
-        "their Lordships", _
-        "Lords Justices", _
-        "Member States", _
-        "Parliament", _
-        "Labour Party", _
-        "Prime Minister", _
-        "Vice-Chancellor" _
-    )
+    Dim batch1 As Variant, batch2 As Variant
+    batch1 = Array( _
+        "Act", "Bill", "Attorney-General", "Cabinet", _
+        "Commonwealth", "Constitution", "Crown", _
+        "Executive Council", "Governor", "Governor-General", _
+        "Her Majesty", "the Queen")
+    batch2 = Array( _
+        "his Honour", "her Honour", "their Honours", _
+        "Law Lords", "their Lordships", "Lords Justices", _
+        "Member States", "Parliament", "Labour Party", _
+        "Prime Minister", "Vice-Chancellor")
+    terms = MergeArrays2(batch1, batch2)
 
     ' -- Iterate paragraphs ---------------------------------
     Dim para As Paragraph
@@ -443,4 +430,20 @@ Private Function EngineGetLocationString(rng As Object, doc As Document) As Stri
         Err.Clear
     End If
     On Error GoTo 0
+End Function
+
+' ----------------------------------------------------------------
+'  Merge 2 Variant arrays into one flat Variant array
+' ----------------------------------------------------------------
+Private Function MergeArrays2(a1 As Variant, a2 As Variant) As Variant
+    Dim total As Long
+    total = UBound(a1) - LBound(a1) + 1 _
+          + UBound(a2) - LBound(a2) + 1
+    Dim out() As Variant
+    ReDim out(0 To total - 1)
+    Dim idx As Long: idx = 0
+    Dim v As Variant
+    For Each v In a1: out(idx) = v: idx = idx + 1: Next v
+    For Each v In a2: out(idx) = v: idx = idx + 1: Next v
+    MergeArrays2 = out
 End Function
