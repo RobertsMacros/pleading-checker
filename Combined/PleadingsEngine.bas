@@ -452,18 +452,75 @@ RunnerCleanup:
 End Function
 
 ' ============================================================
-'  FILTER: Remove issues inside block quotes / quoted text
+'  FILTER: Remove issues inside block quotes and cover pages
 '
-'  Detects block quote paragraphs by:
+'  Block quotes detected by:
 '    1. Style name containing "quote", "block", or "extract"
 '    2. Significant left indentation (> 36pt) with smaller font
-'    3. Paragraph text starting with open quotation mark and
-'       ending with close quotation mark (direct quotations)
+'    3. Paragraph text wrapped in quotation marks
+'
+'  Cover pages detected by:
+'    - Content before the first section break, OR
+'    - All page-1 content when the document has > 1 page and
+'      page 1 contains no numbered paragraphs
 ' ============================================================
 Private Function FilterBlockQuoteIssues(doc As Document, _
                                          issues As Collection) As Collection
     Dim filtered As New Collection
     Dim i As Long
+
+    ' -- Determine cover page end position -------------------------
+    Dim coverPageEnd As Long
+    coverPageEnd = -1  ' -1 means no cover page detected
+
+    On Error Resume Next
+
+    ' Method 1: First section break position
+    If doc.Sections.Count > 1 Then
+        coverPageEnd = doc.Sections(1).Range.End
+        If Err.Number <> 0 Then coverPageEnd = -1: Err.Clear
+    End If
+
+    ' Method 2: If no section breaks, check if page 1 looks like
+    ' a cover page (centered, no numbered paragraphs, short text)
+    If coverPageEnd < 0 Then
+        Dim totalPages As Long
+        totalPages = doc.ComputeStatistics(wdStatisticPages)
+        If Err.Number <> 0 Then totalPages = 1: Err.Clear
+
+        If totalPages > 1 Then
+            ' Walk paragraphs on page 1 to see if any are numbered
+            Dim hasNumberedPara As Boolean
+            hasNumberedPara = False
+            Dim coverPara As Paragraph
+            For Each coverPara In doc.Paragraphs
+                Err.Clear
+                Dim cpPage As Long
+                cpPage = coverPara.Range.Information(wdActiveEndAdjustedPageNumber)
+                If Err.Number <> 0 Then Err.Clear: Exit For
+                If cpPage > 1 Then
+                    ' Record where page 1 ends
+                    coverPageEnd = coverPara.Range.Start
+                    Exit For
+                End If
+                ' Check if paragraph starts with a number + period/tab
+                Dim cpText As String
+                cpText = ""
+                cpText = Left(coverPara.Range.Text, 5)
+                If Err.Number <> 0 Then cpText = "": Err.Clear
+                If Len(cpText) > 0 Then
+                    If cpText Like "#[.)*" & vbTab & "]#*" Or _
+                       cpText Like "##[.)*" & vbTab & "]#*" Then
+                        hasNumberedPara = True
+                    End If
+                End If
+            Next coverPara
+
+            ' If page 1 has numbered paragraphs, it's not a cover page
+            If hasNumberedPara Then coverPageEnd = -1
+        End If
+    End If
+    On Error GoTo 0
 
     ' -- Build list of block-quote paragraph ranges ----------------
     Dim bqStarts() As Long, bqEnds() As Long
@@ -517,7 +574,6 @@ Private Function FilterBlockQuoteIssues(doc As Document, _
             If Len(pText) > 2 Then
                 Dim firstCh As Long, lastCh As Long
                 firstCh = AscW(Left(pText, 1))
-                ' Trim trailing paragraph mark
                 Dim trimmed As String
                 trimmed = pText
                 If Right(trimmed, 1) = vbCr Or Right(trimmed, 1) = vbLf Then
@@ -525,14 +581,8 @@ Private Function FilterBlockQuoteIssues(doc As Document, _
                 End If
                 If Len(trimmed) > 1 Then
                     lastCh = AscW(Right(trimmed, 1))
-                    ' Opening + closing curly double quotes
-                    If (firstCh = 8220 And lastCh = 8221) Then
-                        isBQ = True
-                    End If
-                    ' Opening + closing straight double quotes
-                    If (firstCh = 34 And lastCh = 34) Then
-                        isBQ = True
-                    End If
+                    If (firstCh = 8220 And lastCh = 8221) Then isBQ = True
+                    If (firstCh = 34 And lastCh = 34) Then isBQ = True
                 End If
             End If
         End If
@@ -552,7 +602,7 @@ NxtBQ:
     On Error GoTo 0
 
     ' -- Filter issues ---------------------------------------------
-    If bqCount = 0 Then
+    If bqCount = 0 And coverPageEnd < 0 Then
         Set FilterBlockQuoteIssues = issues
         Exit Function
     End If
@@ -563,6 +613,11 @@ NxtBQ:
         Dim rs As Long
         rs = GetIssueProp(finding, "RangeStart")
 
+        ' Skip issues on cover page
+        If coverPageEnd > 0 And rs < coverPageEnd Then GoTo SkipIssue
+
+        ' Skip content-based issues in block quotes
+        ' (formatting rules like font_consistency still apply)
         Dim inBQ As Boolean
         inBQ = False
         Dim j As Long
@@ -572,10 +627,21 @@ NxtBQ:
                 Exit For
             End If
         Next j
-
-        If Not inBQ Then
-            filtered.Add finding
+        If inBQ Then
+            Dim ruleName As String
+            ruleName = GetIssueProp(finding, "RuleName")
+            ' Allow formatting rules through in block quotes
+            If ruleName <> "font_consistency" And _
+               ruleName <> "paragraph_break_consistency" And _
+               ruleName <> "colour_formatting" Then
+                GoTo SkipIssue
+            End If
         End If
+
+        filtered.Add finding
+        GoTo NextIssue
+SkipIssue:
+NextIssue:
     Next i
 
     Set FilterBlockQuoteIssues = filtered
