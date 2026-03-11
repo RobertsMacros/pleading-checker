@@ -44,7 +44,7 @@ Private pageRangeSet    As Object   ' Dictionary of page numbers (Long -> True)
 Private whitelistDict   As Object
 Private spellingMode    As String   ' "UK" or "US"
 Private quoteNesting   As String   ' "SINGLE" or "DOUBLE" (outer marks)
-Private smartQuotePref As String   ' "CURLY" or "STRAIGHT"
+Private smartQuotePref As String   ' "SMART" or "STRAIGHT"
 Private dateFormatPref As String   ' "UK" or "US" or "AUTO"
 Private termFormatPref As String   ' "BOLD", "BOLDITALIC", "ITALIC", or "NONE"
 Private termQuotePref  As String   ' "SINGLE" or "DOUBLE"
@@ -122,15 +122,15 @@ Public Function GetQuoteNesting() As String
 End Function
 
 ' ============================================================
-'  SMART QUOTE PREFERENCE (curly or straight)
+'  SMART QUOTE PREFERENCE (smart or straight)
 ' ============================================================
 Public Sub SetSmartQuotePref(ByVal mode As String)
     smartQuotePref = UCase(Trim(mode))
-    If smartQuotePref <> "STRAIGHT" Then smartQuotePref = "CURLY"
+    If smartQuotePref <> "STRAIGHT" Then smartQuotePref = "SMART"
 End Sub
 
 Public Function GetSmartQuotePref() As String
-    If Len(smartQuotePref) = 0 Then smartQuotePref = "CURLY"
+    If Len(smartQuotePref) = 0 Then smartQuotePref = "SMART"
     GetSmartQuotePref = smartQuotePref
 End Function
 
@@ -175,7 +175,7 @@ Public Function GetTermQuotePref() As String
 End Function
 
 ' ============================================================
-'  SPACE STYLE PREFERENCE (one space or two after period)
+'  SPACE STYLE PREFERENCE (one space or two after full stop)
 ' ============================================================
 Public Sub SetSpaceStylePref(ByVal mode As String)
     spaceStylePref = UCase(Trim(mode))
@@ -645,7 +645,7 @@ NextCoverPara:
 
     ' -- Build list of block-quote paragraph ranges ----------------
     ' Detects block quotes via style name, indentation+smaller font,
-    ' or multi-paragraph curly-quote spans (open " on first para,
+    ' or multi-paragraph smart-quote spans (open " on first para,
     ' close " on last para — all paras in between are block-quoted).
     Dim bqStarts() As Long, bqEnds() As Long
     Dim bqCount As Long, bqCap As Long
@@ -695,7 +695,7 @@ NextCoverPara:
             If leftInd > 72 Then isBQ = True
         End If
 
-        ' Check 3: Multi-paragraph curly-quote detection
+        ' Check 3: Multi-paragraph smart-quote detection
         Dim pText As String
         pText = ""
         pText = para.Range.Text
@@ -861,10 +861,12 @@ Public Sub ApplySuggestionsAsTrackedChanges(doc As Document, _
             Set rng = doc.Range(GetIssueProp(finding, "RangeStart"), GetIssueProp(finding, "RangeEnd"))
             If Err.Number = 0 Then
                 If GetIssueProp(finding, "AutoFixSafe") Then
-                    ' Remember original position before modification
+                    ' Remember original position and length before modification
                     Dim origStart As Long
+                    Dim origLen As Long
                     Dim sugText As String
                     origStart = rng.Start
+                    origLen = rng.End - rng.Start
                     sugText = GetIssueProp(finding, "Suggestion")
 
                     ' Apply tracked change
@@ -872,13 +874,19 @@ Public Sub ApplySuggestionsAsTrackedChanges(doc As Document, _
                     rng.Text = sugText
                     doc.TrackRevisions = wasTrackingChanges
 
-                    ' Re-anchor comment to the replacement text using
-                    ' a fresh range (rng may have shifted unpredictably
-                    ' after tracked-change insertion/deletion)
+                    ' Re-anchor comment to the replacement/deletion range
                     If addComments Then
                         Dim commentRng As Range
-                        Set commentRng = doc.Range(origStart, _
-                            origStart + Len(sugText))
+                        If Len(sugText) > 0 Then
+                            ' Replacement: anchor on the new text
+                            Set commentRng = doc.Range(origStart, _
+                                origStart + Len(sugText))
+                        Else
+                            ' Deletion: anchor on the original range
+                            ' (deletion mark still exists in tracked changes)
+                            Set commentRng = doc.Range(origStart, _
+                                origStart + origLen)
+                        End If
                         If Err.Number <> 0 Then
                             Err.Clear
                             Set commentRng = rng

@@ -519,8 +519,8 @@ NextPre:
                 If Err.Number <> 0 Then pText = "": Err.Clear
                 pText = Replace(Replace(Replace(pText, vbCr, ""), vbTab, ""), ChrW(160), "")
                 pText = Trim$(pText)
-                Dim hasCurlyQuotes As Boolean
-                hasCurlyQuotes = False
+                Dim hasSmartQuotes As Boolean
+                hasSmartQuotes = False
                 If Len(pText) > 2 Then
                     Dim fcCh As String
                     Dim lcCh As String
@@ -528,15 +528,15 @@ NextPre:
                     lcCh = Right$(pText, 1)
                     If (fcCh = ChrW(8220) Or fcCh = Chr(34)) And _
                        (lcCh = ChrW(8221) Or lcCh = Chr(34)) Then
-                        hasCurlyQuotes = True
+                        hasSmartQuotes = True
                     End If
                 End If
 
                 If isExtraIndented And isSmallerFont Then
                     paraType = "block_quote"
-                ElseIf isExtraIndented And hasCurlyQuotes Then
+                ElseIf isExtraIndented And hasSmartQuotes Then
                     paraType = "block_quote"
-                ElseIf isSmallerFont And hasCurlyQuotes And pInd > domBodyIndent Then
+                ElseIf isSmallerFont And hasSmartQuotes And pInd > domBodyIndent Then
                     paraType = "block_quote"
                 ElseIf pInd > domBodyIndent + 54 Then
                     ' Very heavy indentation alone (>~0.75 inch beyond body)

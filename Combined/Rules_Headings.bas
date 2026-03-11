@@ -472,13 +472,13 @@ Public Function Check_TitleFormatting(doc As Document) As Collection
                 ' noDot is dominant -- flag all withDot occurrences
                 FlagOccurrences doc, CStr(withDot(i)), _
                     "Inconsistent title formatting: '" & withDot(i) & "' used", _
-                    "Use '" & noDot(i) & "' without period (dominant style)", _
+                    "Use '" & noDot(i) & "' without full stop (dominant style)", _
                     issues
             Else
                 ' withDot is dominant -- flag all noDot occurrences
                 FlagOccurrences doc, CStr(noDot(i)), _
                     "Inconsistent title formatting: '" & noDot(i) & "' used", _
-                    "Use '" & withDot(i) & "' with period (dominant style)", _
+                    "Use '" & withDot(i) & "' with full stop (dominant style)", _
                     issues
             End If
         End If

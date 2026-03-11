@@ -127,8 +127,9 @@ Public Function Check_DoubleSpaces(doc As Document) As Collection
                 dsMsg = md.Length & " consecutive spaces found."
             End If
 
+            ' Range covers only the EXTRA space(s) — keep the first one
             Set finding = CreateIssueDict(RULE_DOUBLE_SPACES, locStr, _
-                dsMsg, " ", dsStart, dsEnd, "error", True)
+                dsMsg, "", dsStart + 1, dsEnd, "error", True)
             issues.Add finding
 
 NextDoubleMatch:
@@ -277,10 +278,10 @@ Public Function Check_SpaceBeforePunct(doc As Document) As Collection
         Dim punctChar As String
         punctChar = Mid(rng.Text, 2, 1)
 
+        ' Range covers only the space (not the punctuation character)
         Set finding = CreateIssueDict(RULE_SPACE_BEFORE_PUNCT, locStr, _
             "Unexpected space before '" & punctChar & "'.", _
-            "Remove the space before '" & punctChar & "'.", _
-            rng.Start, rng.End, "error", True)
+            "", rng.Start, rng.Start + 1, "error", True)
         issues.Add finding
 
         rng.Collapse wdCollapseEnd

@@ -53,7 +53,7 @@ Private optSpellingUK   As MSForms.OptionButton
 Private optSpellingUS   As MSForms.OptionButton
 Private optQuoteSingle  As MSForms.OptionButton
 Private optQuoteDouble  As MSForms.OptionButton
-Private optSmartCurly   As MSForms.OptionButton
+Private optSmart   As MSForms.OptionButton
 Private optSmartStraight As MSForms.OptionButton
 Private optDateUK       As MSForms.OptionButton
 Private optDateUS       As MSForms.OptionButton
@@ -245,16 +245,16 @@ Private Sub UserForm_Initialize()
     End With
     yPos = yPos + CHK_H + ITEM_GAP
 
-    ' -- Smart quotes toggle (Curly / Straight) --
+    ' -- Smart quotes toggle (Smart / Straight) --
     Set lbl = Me.Controls.Add("Forms.Label.1", "lblSmartQuotes")
     With lbl
         .Caption = "Smart quotes:"
         .Left = colRight: .Top = yPos + 2: .Width = 80: .Height = LBL_H
     End With
 
-    Set optSmartCurly = Me.Controls.Add("Forms.OptionButton.1", "optSmartCurly")
-    With optSmartCurly
-        .Caption = "Curly"
+    Set optSmart = Me.Controls.Add("Forms.OptionButton.1", "optSmart")
+    With optSmart
+        .Caption = "Smart"
         .Left = colRight + 82: .Top = yPos: .Width = 60: .Height = CHK_H
         .Value = True
         .GroupName = "SmartQuotes"
@@ -330,10 +330,10 @@ Private Sub UserForm_Initialize()
 
     yPos = yPos + TXT_H + ITEM_GAP
 
-    ' -- Space style after periods dropdown --
+    ' -- Space style after full stops dropdown --
     Set lbl = Me.Controls.Add("Forms.Label.1", "lblSpaceStyle")
     With lbl
-        .Caption = "After period:"
+        .Caption = "After full stop:"
         .Left = colRight: .Top = yPos + 2: .Width = 80: .Height = LBL_H
     End With
 
@@ -562,7 +562,7 @@ Private Sub btnRun_Click()
     If optSmartStraight.Value Then
         PleadingsEngine.SetSmartQuotePref "STRAIGHT"
     Else
-        PleadingsEngine.SetSmartQuotePref "CURLY"
+        PleadingsEngine.SetSmartQuotePref "SMART"
     End If
 
     If optDateUS.Value Then

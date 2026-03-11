@@ -2,9 +2,9 @@ Attribute VB_Name = "Rules_Quotes"
 ' ============================================================
 ' Rules_Quotes.bas
 ' Quotation-mark rules for UK legal proofreading:
-'   Rule 17: quotation mark consistency (straight vs curly)
+'   Rule 17: quotation mark consistency (straight vs smart)
 '   Rule 32: single quotes as default outer marks
-'   Rule 33: smart quote consistency (prefers curly)
+'   Rule 33: smart quote consistency (prefers smart)
 '
 ' Performance notes:
 '   - All character scanning uses byte arrays, not Mid$/AscW
@@ -24,11 +24,11 @@ Private Const RULE33 As String = "smart_quote_consistency"
 
 ' -- Unicode code points ----------------------------------------
 Private Const QD  As Long = 34     ' straight double  "
-Private Const QDO As Long = 8220   ' curly double open
-Private Const QDC As Long = 8221   ' curly double close
+Private Const QDO As Long = 8220   ' smart double open
+Private Const QDC As Long = 8221   ' smart double close
 Private Const QS  As Long = 39     ' straight single  '
-Private Const QSO As Long = 8216   ' curly single open
-Private Const QSC As Long = 8217   ' curly single close
+Private Const QSO As Long = 8216   ' smart single open
+Private Const QSC As Long = 8217   ' smart single close
 
 ' ================================================================
 '  RULE 17 -- QUOTATION MARK CONSISTENCY
@@ -70,9 +70,9 @@ Public Function Check_QuotationMarkConsistency( _
 
     ' -- Counters -----------------------------------------------
     Dim cSD As Long   ' straight double
-    Dim cCD As Long   ' curly double
+    Dim cCD As Long   ' smart double
     Dim cSS As Long   ' straight single (excluding apostrophes)
-    Dim cCS As Long   ' curly single   (excluding apostrophes)
+    Dim cCS As Long   ' smart single   (excluding apostrophes)
 
     ' -- Position collectors (grow-on-demand) --------------------
     Dim pSD() As Long
@@ -149,7 +149,7 @@ Public Function Check_QuotationMarkConsistency( _
     ' -- Flag minority doubles ----------------------------------
     If dblStraight And cCD > 0 Then
         EmitFromPositions doc, issues, pCD, cCD, RULE17, _
-            "Curly double quotation mark found; " & _
+            "Smart double quotation mark found; " & _
             "document predominantly uses straight", _
             "Change to straight double quotation mark (" & _
             Chr$(QD) & ")"
@@ -157,15 +157,15 @@ Public Function Check_QuotationMarkConsistency( _
     ElseIf (Not dblStraight) And cSD > 0 Then
         EmitFromPositions doc, issues, pSD, cSD, RULE17, _
             "Straight double quotation mark found; " & _
-            "document predominantly uses curly", _
-            "Change to curly double quotation marks (" & _
+            "document predominantly uses smart", _
+            "Change to smart double quotation marks (" & _
             ChrW$(QDO) & ChrW$(QDC) & ")"
     End If
 
     ' -- Flag minority singles ----------------------------------
     If sglStraight And cCS > 0 Then
         EmitFromPositions doc, issues, pCS, cCS, RULE17, _
-            "Curly single quotation mark found; " & _
+            "Smart single quotation mark found; " & _
             "document predominantly uses straight", _
             "Change to straight single quotation mark (" & _
             Chr$(QS) & ")"
@@ -173,8 +173,8 @@ Public Function Check_QuotationMarkConsistency( _
     ElseIf (Not sglStraight) And cSS > 0 Then
         EmitFromPositions doc, issues, pSS, cSS, RULE17, _
             "Straight single quotation mark found; " & _
-            "document predominantly uses curly", _
-            "Change to curly single quotation marks (" & _
+            "document predominantly uses smart", _
+            "Change to smart single quotation marks (" & _
             ChrW$(QSO) & ChrW$(QSC) & ")"
     End If
 
@@ -296,9 +296,9 @@ End Function
 ' ================================================================
 '  RULE 33 -- SMART QUOTE CONSISTENCY
 '
-'  Single pass over paragraphs: counts straight vs curly quotes
+'  Single pass over paragraphs: counts straight vs smart quotes
 '  AND collects minority-style positions simultaneously.
-'  Preference (curly or straight) is read from the engine toggle.
+'  Preference (smart or straight) is read from the engine toggle.
 '  If both styles exist, flags the non-preferred style.
 ' ================================================================
 Public Function Check_SmartQuoteConsistency( _
@@ -314,12 +314,12 @@ Public Function Check_SmartQuoteConsistency( _
     Dim i As Long, code As Long
 
     Dim prefStyle As String
-    prefStyle = EngineGetSmartQuotePref()  ' "CURLY" or "STRAIGHT"
-    Dim preferCurly As Boolean
-    preferCurly = (prefStyle <> "STRAIGHT")
+    prefStyle = EngineGetSmartQuotePref()  ' "SMART" or "STRAIGHT"
+    Dim preferSmart As Boolean
+    preferSmart = (prefStyle <> "STRAIGHT")
 
     ' Counters
-    Dim cStraight As Long, cCurly As Long
+    Dim cStraight As Long, cSmart As Long
 
     ' Collect positions of the non-preferred style
     Dim fPos() As Long
@@ -351,38 +351,38 @@ Public Function Check_SmartQuoteConsistency( _
             Select Case code
             Case QD
                 cStraight = cStraight + 1
-                If Not preferCurly Then GoTo NxtCode33
-                ' Prefer curly -> collect straight positions
+                If Not preferSmart Then GoTo NxtCode33
+                ' Prefer smart -> collect straight positions
                 If fCnt >= fCap Then fCap = fCap * 2: ReDim Preserve fPos(0 To fCap - 1)
                 fPos(fCnt) = pStart + (i \ 2): fCnt = fCnt + 1
 
             Case QDO, QDC
-                cCurly = cCurly + 1
-                If preferCurly Then GoTo NxtCode33
-                ' Prefer straight -> collect curly positions
+                cSmart = cSmart + 1
+                If preferSmart Then GoTo NxtCode33
+                ' Prefer straight -> collect smart positions
                 If fCnt >= fCap Then fCap = fCap * 2: ReDim Preserve fPos(0 To fCap - 1)
                 fPos(fCnt) = pStart + (i \ 2): fCnt = fCnt + 1
 
             Case QS
                 If Not ByteIsApostrophe(b, i, bMax) Then
                     cStraight = cStraight + 1
-                    If preferCurly Then
+                    If preferSmart Then
                         If fCnt >= fCap Then fCap = fCap * 2: ReDim Preserve fPos(0 To fCap - 1)
                         fPos(fCnt) = pStart + (i \ 2): fCnt = fCnt + 1
                     End If
                 End If
 
             Case QSO
-                cCurly = cCurly + 1
-                If Not preferCurly Then
+                cSmart = cSmart + 1
+                If Not preferSmart Then
                     If fCnt >= fCap Then fCap = fCap * 2: ReDim Preserve fPos(0 To fCap - 1)
                     fPos(fCnt) = pStart + (i \ 2): fCnt = fCnt + 1
                 End If
 
             Case QSC
                 If Not ByteIsApostrophe(b, i, bMax) Then
-                    cCurly = cCurly + 1
-                    If Not preferCurly Then
+                    cSmart = cSmart + 1
+                    If Not preferSmart Then
                         If fCnt >= fCap Then fCap = fCap * 2: ReDim Preserve fPos(0 To fCap - 1)
                         fPos(fCnt) = pStart + (i \ 2): fCnt = fCnt + 1
                     End If
@@ -396,20 +396,20 @@ NxtP33:
     On Error GoTo 0
 
     ' -- No mix? Nothing to report ------------------------------
-    If cStraight = 0 Or cCurly = 0 Then
+    If cStraight = 0 Or cSmart = 0 Then
         Set Check_SmartQuoteConsistency = issues
         Exit Function
     End If
 
     ' -- Summary finding ----------------------------------------
     Dim prefName As String, wrongName As String
-    If preferCurly Then prefName = "curly": wrongName = "straight" _
-    Else prefName = "straight": wrongName = "curly"
+    If preferSmart Then prefName = "smart": wrongName = "straight" _
+    Else prefName = "straight": wrongName = "smart"
 
     issues.Add CreateIssueDict(RULE33, "Document", _
         "Quotation mark style is inconsistent. Found " & _
-        cStraight & " straight and " & cCurly & _
-        " curly quotation marks.", _
+        cStraight & " straight and " & cSmart & _
+        " smart quotation marks.", _
         "Use " & prefName & " quotation marks consistently " & _
         "throughout the document.", 0, 0, "warning")
 
@@ -599,7 +599,7 @@ Private Function EngineGetSmartQuotePref() As String
     EngineGetSmartQuotePref = Application.Run( _
         "PleadingsEngine.GetSmartQuotePref")
     If Err.Number <> 0 Then
-        EngineGetSmartQuotePref = "CURLY"
+        EngineGetSmartQuotePref = "SMART"
         Err.Clear
     End If
     On Error GoTo 0

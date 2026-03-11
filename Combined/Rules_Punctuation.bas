@@ -705,7 +705,7 @@ Public Function Check_DashUsage(doc As Document) As Collection
             End If
 
             Set finding = CreateIssueDict(RULE_NAME_DASH, locStr, _
-                "Hyphen used in number range. Use an en-dash for ranges.", _
+                "Hyphen used in number range. Use an en-dash (" & enDash & ") for ranges.", _
                 enDash, hyphenPos, hrEnd, "error", True)
             issues.Add finding
         Next hm
@@ -731,7 +731,7 @@ Public Function Check_DashUsage(doc As Document) As Collection
             End If
 
             Set finding = CreateIssueDict(RULE_NAME_DASH, locStr, _
-                "Double-hyphen found. Use an em-dash instead.", _
+                "Double-hyphen found. Use an em-dash (" & emDash & ") instead.", _
                 emDash, dhStart, dhEnd, "error", True)
             issues.Add finding
         Next dhm
@@ -771,7 +771,7 @@ Public Function Check_DashUsage(doc As Document) As Collection
                     End If
 
                     Set finding = CreateIssueDict(RULE_NAME_DASH, locStr, _
-                        "En-dash used between words. Use a hyphen for compound words.", _
+                        "En-dash (" & enDash & ") used between words. Use a hyphen (-) for compound words.", _
                         "-", enStart, enEnd, "error", True)
                     issues.Add finding
                 End If
@@ -814,7 +814,7 @@ Public Function Check_DashUsage(doc As Document) As Collection
                     End If
 
                     Set finding = CreateIssueDict(RULE_NAME_DASH, locStr, _
-                        "Spaced en-dash found. Consider using an em-dash for parenthetical interruptions.", _
+                        "Spaced en-dash (" & enDash & ") found. Consider using an em-dash (" & emDash & ") for parenthetical interruptions.", _
                         emDash, snStart, snEnd, "warning", False)
                     issues.Add finding
                 End If

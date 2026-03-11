@@ -562,8 +562,8 @@ Private Function GetPrecedingWord(ByRef txt As String, _
 
     If k < 1 Then Exit Function
 
-    ' Check we landed on a letter or period (for abbreviations like "s.")
-    ' Skip trailing period/dot
+    ' Check we landed on a letter or full stop (for abbreviations like "s.")
+    ' Skip trailing full stop/dot
     If ch = "." Then
         k = k - 1
         If k < 1 Then Exit Function

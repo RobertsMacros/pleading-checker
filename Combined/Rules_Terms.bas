@@ -310,24 +310,24 @@ Public Function Check_DefinedTerms(doc As Document) As Collection
     '  PASS 1: Scan for defined terms
     ' ==========================================================
 
-    ' -- Pattern A: Curly-quoted defined terms ----------------
+    ' -- Pattern A: Smart-quoted defined terms ----------------
     ' Use quote preference from engine to determine which quotes to search
-    Dim leftCurly As String
-    Dim rightCurly As String
+    Dim leftSmart As String
+    Dim rightSmart As String
     Dim termQPref As String
     termQPref = EngineGetTermQuotePref()
     If termQPref = "SINGLE" Then
-        leftCurly = ChrW(8216)   ' left single curly quote
-        rightCurly = ChrW(8217)  ' right single curly quote
+        leftSmart = ChrW(8216)   ' left single smart quote
+        rightSmart = ChrW(8217)  ' right single smart quote
     Else
-        leftCurly = ChrW(8220)   ' left double curly quote
-        rightCurly = ChrW(8221)  ' right double curly quote
+        leftSmart = ChrW(8220)   ' left double smart quote
+        rightSmart = ChrW(8221)  ' right double smart quote
     End If
 
     Set rng = doc.Content.Duplicate
     With rng.Find
         .ClearFormatting
-        .Text = leftCurly & "[A-Z]"
+        .Text = leftSmart & "[A-Z]"
         .Forward = True
         .Wrap = wdFindStop
         .MatchCase = True
@@ -341,16 +341,16 @@ Public Function Check_DefinedTerms(doc As Document) As Collection
         lastPos = rng.Start
         If Not EngineIsInPageRange(rng) Then
             rng.Collapse wdCollapseEnd
-            GoTo NextCurlyFind
+            GoTo NextSmartFind
         End If
 
-        ' Expand to find the closing curly quote
+        ' Expand to find the closing smart quote
         Dim startPos As Long
         startPos = rng.Start
         Dim expandedRng As Range
         Set expandedRng = doc.Range(startPos, startPos)
 
-        ' Search forward for closing curly quote (max 100 chars)
+        ' Search forward for closing smart quote (max 100 chars)
         Dim endSearch As Long
         endSearch = startPos + 100
         If endSearch > doc.Content.End Then endSearch = doc.Content.End
@@ -359,7 +359,7 @@ Public Function Check_DefinedTerms(doc As Document) As Collection
         fullText = expandedRng.Text
 
         Dim closePos As Long
-        closePos = InStr(2, fullText, rightCurly)
+        closePos = InStr(2, fullText, rightSmart)
         If closePos > 1 Then
             Dim termText As String
             ' Extract between quotes (skip the opening quote)
@@ -377,7 +377,7 @@ Public Function Check_DefinedTerms(doc As Document) As Collection
         End If
 
         rng.Collapse wdCollapseEnd
-NextCurlyFind:
+NextSmartFind:
     Loop
 
     ' -- Pattern B: "X means " or "X has the meaning " -------
@@ -395,13 +395,13 @@ NextCurlyFind:
             beforeMeans = Trim$(Left$(paraText, meansPos - 1))
             ' Take last quoted or significant phrase
             Dim lastQuoteStart As Long
-            lastQuoteStart = InStrRev(beforeMeans, leftCurly)
+            lastQuoteStart = InStrRev(beforeMeans, leftSmart)
             If lastQuoteStart = 0 Then lastQuoteStart = InStrRev(beforeMeans, """")
             If lastQuoteStart > 0 Then
                 Dim afterQuote As String
                 afterQuote = Mid$(beforeMeans, lastQuoteStart + 1)
                 Dim endQuote As Long
-                endQuote = InStr(1, afterQuote, rightCurly)
+                endQuote = InStr(1, afterQuote, rightSmart)
                 If endQuote = 0 Then endQuote = InStr(1, afterQuote, """")
                 If endQuote > 1 Then
                     Dim meansTerm As String
@@ -423,11 +423,11 @@ NextCurlyFind:
         If htmPos > 1 Then
             Dim beforeHTM As String
             beforeHTM = Trim$(Left$(paraText, htmPos - 1))
-            lastQuoteStart = InStrRev(beforeHTM, leftCurly)
+            lastQuoteStart = InStrRev(beforeHTM, leftSmart)
             If lastQuoteStart = 0 Then lastQuoteStart = InStrRev(beforeHTM, """")
             If lastQuoteStart > 0 Then
                 afterQuote = Mid$(beforeHTM, lastQuoteStart + 1)
-                endQuote = InStr(1, afterQuote, rightCurly)
+                endQuote = InStr(1, afterQuote, rightSmart)
                 If endQuote = 0 Then endQuote = InStr(1, afterQuote, """")
                 If endQuote > 1 Then
                     Dim htmTerm As String
@@ -449,7 +449,7 @@ NextParaMeans:
     Set rng = doc.Content.Duplicate
     With rng.Find
         .ClearFormatting
-        .Text = "(the " & leftCurly & "[A-Z]"
+        .Text = "(the " & leftSmart & "[A-Z]"
         .Forward = True
         .Wrap = wdFindStop
         .MatchCase = True
@@ -471,12 +471,12 @@ NextParaMeans:
         Set expandedRng = doc.Range(startPos, endSearch)
         fullText = expandedRng.Text
 
-        ' Find closing curly quote then closing paren
-        closePos = InStr(6, fullText, rightCurly)
+        ' Find closing smart quote then closing paren
+        closePos = InStr(6, fullText, rightSmart)
         If closePos > 6 Then
-            ' Extract between the curly quotes
+            ' Extract between the smart quotes
             Dim pOpenQ As Long
-            pOpenQ = InStr(1, fullText, leftCurly)
+            pOpenQ = InStr(1, fullText, leftSmart)
             If pOpenQ > 0 Then
                 Dim parenTerm As String
                 parenTerm = Mid$(fullText, pOpenQ + 1, closePos - pOpenQ - 1)
