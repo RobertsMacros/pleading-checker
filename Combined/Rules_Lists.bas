@@ -32,13 +32,25 @@ Private Const MARKER_NUMBER As String = "number"   ' (1), (2), (3)
 ' the "1(" is adjacent. These are structural references, not lists.
 Private Function IsClauseRef(ByRef paraText As String, _
                               ByVal openParen As Long) As Boolean
+    Dim prevCh As String
+    Dim refWords As Variant
+    Dim wEnd As Long
+    Dim wStart As Long
+    Dim wCh As String
+    Dim prevWord As String
+    Dim ri As Long
+    Dim conjEnd As Long
+    Dim conjWord As String
+    Dim cStart As Long
+    Dim cc As String
+    Dim scanBack As Long
+
     IsClauseRef = False
     If openParen <= 1 Then Exit Function
 
-    Dim prevCh As String
     prevCh = Mid$(paraText, openParen - 1, 1)
 
-    ' If preceded by a digit, letter, or closing paren — it's a clause ref
+    ' If preceded by a digit, letter, or closing paren -- clause ref
     If (prevCh >= "0" And prevCh <= "9") Or _
        (prevCh >= "A" And prevCh <= "Z") Or _
        (prevCh >= "a" And prevCh <= "z") Or _
@@ -47,30 +59,27 @@ Private Function IsClauseRef(ByRef paraText As String, _
         Exit Function
     End If
 
-    ' If preceded by a space, check for structural reference word
-    ' e.g. "paragraph (1)" or "section (2)"
-    If prevCh = " " Then
-        Dim refWords As Variant
-        refWords = Array("paragraph", "paragraphs", "para", "paras", _
-                         "section", "sections", "sect", "sects", _
-                         "clause", "clauses", "cl", _
-                         "article", "articles", "art", "arts", _
-                         "rule", "rules", "r", _
-                         "regulation", "regulations", "reg", "regs", _
-                         "schedule", "schedules", "sch", _
-                         "sub-paragraph", "sub-paragraphs", _
-                         "sub-section", "sub-sections", _
-                         "sub-clause", "sub-clauses", _
-                         "part", "parts", "pt", _
-                         "item", "items", "annex")
-        ' Extract word before the space
-        Dim wEnd As Long
-        wEnd = openParen - 2
-        If wEnd < 1 Then Exit Function
-        Dim wStart As Long
+    ' If not preceded by a space, nothing more to check
+    If prevCh <> " " Then Exit Function
+
+    ' -- Check for structural reference word before the space --
+    refWords = Array("paragraph", "paragraphs", "para", "paras", _
+                     "section", "sections", "sect", "sects", _
+                     "clause", "clauses", "cl", _
+                     "article", "articles", "art", "arts", _
+                     "rule", "rules", "r", _
+                     "regulation", "regulations", "reg", "regs", _
+                     "schedule", "schedules", "sch", _
+                     "sub-paragraph", "sub-paragraphs", _
+                     "sub-section", "sub-sections", _
+                     "sub-clause", "sub-clauses", _
+                     "part", "parts", "pt", _
+                     "item", "items", "annex")
+
+    wEnd = openParen - 2
+    If wEnd >= 1 Then
         wStart = wEnd
         Do While wStart >= 1
-            Dim wCh As String
             wCh = Mid$(paraText, wStart, 1)
             If (wCh >= "A" And wCh <= "Z") Or _
                (wCh >= "a" And wCh <= "z") Or wCh = "-" Then
@@ -81,9 +90,7 @@ Private Function IsClauseRef(ByRef paraText As String, _
         Loop
         wStart = wStart + 1
         If wStart <= wEnd Then
-            Dim prevWord As String
             prevWord = LCase(Mid$(paraText, wStart, wEnd - wStart + 1))
-            Dim ri As Long
             For ri = LBound(refWords) To UBound(refWords)
                 If prevWord = CStr(refWords(ri)) Then
                     IsClauseRef = True
@@ -93,39 +100,30 @@ Private Function IsClauseRef(ByRef paraText As String, _
         End If
     End If
 
-    ' Check for conjunction-linked clause ref: "or (2)" after "(1)"
-    ' e.g. "paragraph (1) or (2)" — the "(2)" is preceded by "or "
-    If prevCh = " " Then
-        Dim conjEnd As Long
-        conjEnd = openParen - 2
-        If conjEnd >= 1 Then
-            Dim conjWord As String
-            ' Extract preceding word (skip the space)
-            Dim cStart As Long
-            cStart = conjEnd
-            Do While cStart >= 1
-                Dim cc As String
-                cc = Mid$(paraText, cStart, 1)
-                If (cc >= "A" And cc <= "Z") Or (cc >= "a" And cc <= "z") Then
-                    cStart = cStart - 1
-                Else
-                    Exit Do
-                End If
-            Loop
-            cStart = cStart + 1
-            If cStart <= conjEnd Then
-                conjWord = LCase(Mid$(paraText, cStart, conjEnd - cStart + 1))
-                If conjWord = "and" Or conjWord = "or" Or conjWord = "to" Then
-                    ' Look back past the conjunction for a closing paren ")"
-                    Dim scanBack As Long
-                    scanBack = cStart - 1
-                    Do While scanBack >= 1 And Mid$(paraText, scanBack, 1) = " "
-                        scanBack = scanBack - 1
-                    Loop
-                    If scanBack >= 1 And Mid$(paraText, scanBack, 1) = ")" Then
-                        IsClauseRef = True
-                        Exit Function
-                    End If
+    ' -- Check for conjunction-linked clause ref --
+    ' e.g. "paragraph (1) or (2)" -- the "(2)" preceded by "or "
+    conjEnd = openParen - 2
+    If conjEnd >= 1 Then
+        cStart = conjEnd
+        Do While cStart >= 1
+            cc = Mid$(paraText, cStart, 1)
+            If (cc >= "A" And cc <= "Z") Or (cc >= "a" And cc <= "z") Then
+                cStart = cStart - 1
+            Else
+                Exit Do
+            End If
+        Loop
+        cStart = cStart + 1
+        If cStart <= conjEnd Then
+            conjWord = LCase(Mid$(paraText, cStart, conjEnd - cStart + 1))
+            If conjWord = "and" Or conjWord = "or" Or conjWord = "to" Then
+                scanBack = cStart - 1
+                Do While scanBack >= 1 And Mid$(paraText, scanBack, 1) = " "
+                    scanBack = scanBack - 1
+                Loop
+                If scanBack >= 1 And Mid$(paraText, scanBack, 1) = ")" Then
+                    IsClauseRef = True
+                    Exit Function
                 End If
             End If
         End If
