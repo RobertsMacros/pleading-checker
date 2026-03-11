@@ -1273,28 +1273,8 @@ Public Sub ApplySuggestionsAsTrackedChanges(doc As Document, _
                     doc.TrackRevisions = True
                     rng.Text = sugText
                     doc.TrackRevisions = wasTrackingChanges
-
-                    ' Re-anchor comment to the replacement/deletion range
-                    If addComments Then
-                        Dim commentRng As Range
-                        If Len(sugText) > 0 Then
-                            ' Replacement: anchor on the new text
-                            Set commentRng = doc.Range(origStart, _
-                                origStart + Len(sugText))
-                        Else
-                            ' Deletion: anchor on the original range
-                            ' (deletion mark still exists in tracked changes)
-                            Set commentRng = doc.Range(origStart, _
-                                origStart + origLen)
-                        End If
-                        If Err.Number <> 0 Then
-                            Err.Clear
-                            Set commentRng = rng
-                        End If
-                        doc.Comments.Add Range:=commentRng, _
-                            Text:=GetIssueProp(finding, "Issue")
-                        Err.Clear
-                    End If
+                    ' No comment for auto-fixed items: the tracked change
+                    ' itself is self-explanatory.
                 Else
                     If addComments Then
                         doc.Comments.Add Range:=rng, Text:=BuildCommentText(finding)
