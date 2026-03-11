@@ -26,6 +26,7 @@ Attribute VB_Name = "PleadingsEngine"
 '   - Rules_FootnoteHarts.bas   (Rules 24, 25, 26, 27)
 '   - Rules_LegalTerms.bas      (Rules 28, 29)
 '   - Rules_Italics.bas         (Rules 30, 31)
+'   - Rules_Spacing.bas        (Rules 35-39: double spaces, commas, spacing)
 '
 ' Installation:
 '   1. Open the VBA Editor (Alt+F11)
@@ -48,6 +49,7 @@ Private smartQuotePref As String   ' "CURLY" or "STRAIGHT"
 Private dateFormatPref As String   ' "UK" or "US" or "AUTO"
 Private termFormatPref As String   ' "BOLD", "BOLDITALIC", "ITALIC", or "NONE"
 Private termQuotePref  As String   ' "SINGLE" or "DOUBLE"
+Private spaceStylePref As String   ' "ONE" or "TWO"
 Private ruleErrorCount  As Long
 Private ruleErrorLog    As String
 
@@ -174,6 +176,19 @@ Public Function GetTermQuotePref() As String
 End Function
 
 ' ============================================================
+'  SPACE STYLE PREFERENCE (one space or two after period)
+' ============================================================
+Public Sub SetSpaceStylePref(ByVal mode As String)
+    spaceStylePref = UCase(Trim(mode))
+    If spaceStylePref <> "TWO" Then spaceStylePref = "ONE"
+End Sub
+
+Public Function GetSpaceStylePref() As String
+    If Len(spaceStylePref) = 0 Then spaceStylePref = "ONE"
+    GetSpaceStylePref = spaceStylePref
+End Function
+
+' ============================================================
 '  RULE CONFIGURATION
 ' ============================================================
 Public Function InitRuleConfig() As Object
@@ -215,6 +230,11 @@ Public Function InitRuleConfig() As Object
     cfg.Add "single_quotes_default", True
     cfg.Add "smart_quote_consistency", True
     cfg.Add "spell_out_under_ten", True
+    cfg.Add "double_spaces", True
+    cfg.Add "double_commas", True
+    cfg.Add "space_before_punct", True
+    cfg.Add "missing_space_after_dot", True
+    cfg.Add "trailing_spaces", True
 
     Set InitRuleConfig = cfg
 End Function
@@ -290,6 +310,33 @@ Public Function RunAllPleadingsRules(doc As Document, _
     If IsRuleEnabled(config, "spell_out_under_ten") Then
         AddIssuesToCollection allIssues, _
             TryRunRule("Rules_TextScan.Check_SpellOutUnderTen", doc)
+    End If
+
+    DoEvents
+    ' -- Spacing rules --
+    If IsRuleEnabled(config, "double_spaces") Then
+        AddIssuesToCollection allIssues, _
+            TryRunRule("Rules_Spacing.Check_DoubleSpaces", doc)
+    End If
+
+    If IsRuleEnabled(config, "double_commas") Then
+        AddIssuesToCollection allIssues, _
+            TryRunRule("Rules_Spacing.Check_DoubleCommas", doc)
+    End If
+
+    If IsRuleEnabled(config, "space_before_punct") Then
+        AddIssuesToCollection allIssues, _
+            TryRunRule("Rules_Spacing.Check_SpaceBeforePunct", doc)
+    End If
+
+    If IsRuleEnabled(config, "missing_space_after_dot") Then
+        AddIssuesToCollection allIssues, _
+            TryRunRule("Rules_Spacing.Check_MissingSpaceAfterDot", doc)
+    End If
+
+    If IsRuleEnabled(config, "trailing_spaces") Then
+        AddIssuesToCollection allIssues, _
+            TryRunRule("Rules_Spacing.Check_TrailingSpaces", doc)
     End If
 
     DoEvents
@@ -1001,6 +1048,11 @@ Public Function GetRuleDisplayNames() As Object
     d.Add "single_quotes_default", "Single Quotes Default"
     d.Add "smart_quote_consistency", "Smart Quote Consistency"
     d.Add "spell_out_under_ten", "Spell Out Numbers Under 10"
+    d.Add "double_spaces", "Double Spaces"
+    d.Add "double_commas", "Double Commas"
+    d.Add "space_before_punct", "Space Before Punctuation"
+    d.Add "missing_space_after_dot", "Missing Space After Full Stop"
+    d.Add "trailing_spaces", "Trailing Spaces"
 
     Set GetRuleDisplayNames = d
 End Function

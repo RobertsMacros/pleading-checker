@@ -33,7 +33,6 @@ Private ruleCheckboxes  As Collection  ' MSForms.CheckBox controls
 
 ' Controls created at runtime (module-level so event subs can reference them)
 Private WithEvents btnRun           As MSForms.CommandButton
-Private WithEvents btnHighlight     As MSForms.CommandButton
 Private WithEvents btnExport        As MSForms.CommandButton
 Private WithEvents btnClose         As MSForms.CommandButton
 Private WithEvents btnSelectAll     As MSForms.CommandButton
@@ -61,6 +60,7 @@ Private optDateUK       As MSForms.OptionButton
 Private optDateUS       As MSForms.OptionButton
 Private cboTermFormat   As MSForms.ComboBox
 Private cboTermQuotes   As MSForms.ComboBox
+Private cboSpaceStyle   As MSForms.ComboBox
 Private lblStatus       As MSForms.Label
 
 Private lastResults     As Collection
@@ -342,6 +342,24 @@ Private Sub UserForm_Initialize()
         .ListIndex = 1
     End With
 
+    yPos = yPos + TXT_H + ITEM_GAP
+
+    ' -- Space style after periods dropdown --
+    Set lbl = Me.Controls.Add("Forms.Label.1", "lblSpaceStyle")
+    With lbl
+        .Caption = "After period:"
+        .Left = colRight: .Top = yPos + 2: .Width = 80: .Height = LBL_H
+    End With
+
+    Set cboSpaceStyle = Me.Controls.Add("Forms.ComboBox.1", "cboSpaceStyle")
+    With cboSpaceStyle
+        .Left = colRight + 82: .Top = yPos: .Width = 120: .Height = TXT_H
+        .Style = fmStyleDropDownList
+        .AddItem "One space"
+        .AddItem "Two spaces"
+        .ListIndex = 0
+    End With
+
     yPos = yPos + TXT_H + SEC_GAP
 
     ' ==========================================================
@@ -436,21 +454,14 @@ Private Sub UserForm_Initialize()
     Set btnRun = Me.Controls.Add("Forms.CommandButton.1", "btnRun")
     With btnRun
         .Caption = "Run Checks"
-        .Left = PAD: .Top = yPos: .Width = ACT_BTN_W: .Height = ACT_BTN_H
+        .Left = PAD: .Top = yPos: .Width = ACT_BTN_W + 20: .Height = ACT_BTN_H
         .Font.Bold = True
-    End With
-
-    Set btnHighlight = Me.Controls.Add("Forms.CommandButton.1", "btnHighlight")
-    With btnHighlight
-        .Caption = "Apply Suggestions"
-        .Left = PAD + ACT_BTN_W + ACT_GAP: .Top = yPos
-        .Width = ACT_BTN_W + 12: .Height = ACT_BTN_H
     End With
 
     Set btnExport = Me.Controls.Add("Forms.CommandButton.1", "btnExport")
     With btnExport
         .Caption = "Export Report"
-        .Left = PAD + 2 * (ACT_BTN_W + ACT_GAP) + 12: .Top = yPos
+        .Left = PAD + ACT_BTN_W + 20 + ACT_GAP: .Top = yPos
         .Width = ACT_BTN_W: .Height = ACT_BTN_H
     End With
 
@@ -600,6 +611,13 @@ Private Sub btnRun_Click()
     End If
     PleadingsEngine.SetTermQuotePref termQt
 
+    ' Set space style preference
+    If cboSpaceStyle.ListIndex = 1 Then
+        PleadingsEngine.SetSpaceStylePref "TWO"
+    Else
+        PleadingsEngine.SetSpaceStylePref "ONE"
+    End If
+
     ' Run checks
     lblStatus.Caption = "Running checks..."
     Me.Repaint
@@ -630,45 +648,32 @@ Private Sub btnRun_Click()
         If errCount > 0 Then
             errMsg = vbCrLf & "(Note: " & errCount & " rule(s) failed to run -- check Ctrl+G for details.)"
         End If
-        lblStatus.Caption = lastResults.Count & " issue(s) found. Click Apply Suggestions or Export Report."
-        MsgBox lastResults.Count & " issue(s) found." & errMsg & vbCrLf & vbCrLf & _
-               "Click 'Apply Suggestions' to fix, or 'Export Report' for details.", _
-               vbInformation, "Pleadings Checker"
+
+        ' Ask user whether to apply suggestions
+        Dim reply As VbMsgBoxResult
+        reply = MsgBox(lastResults.Count & " issue(s) found." & errMsg & vbCrLf & vbCrLf & _
+               "Apply suggestions to the document?", _
+               vbYesNo + vbQuestion, "Pleadings Checker")
+
+        If reply = vbYes Then
+            lblStatus.Caption = "Applying suggestions..."
+            Me.Repaint
+            DoEvents
+
+            Dim addComments As Boolean
+            addComments = (chkAddComments.Value = True)
+
+            If chkTrackedChanges.Value = True Then
+                PleadingsEngine.ApplySuggestionsAsTrackedChanges ActiveDocument, lastResults, addComments
+            Else
+                PleadingsEngine.ApplyHighlights ActiveDocument, lastResults, addComments
+            End If
+
+            lblStatus.Caption = lastResults.Count & " issue(s) applied."
+        Else
+            lblStatus.Caption = lastResults.Count & " issue(s) found. Use Export Report for details."
+        End If
     End If
-End Sub
-
-' ============================================================
-'  HIGHLIGHT / APPLY SUGGESTIONS BUTTON
-' ============================================================
-Private Sub btnHighlight_Click()
-    If lastResults Is Nothing Then
-        MsgBox "Run checks first before highlighting.", vbExclamation, "Pleadings Checker"
-        Exit Sub
-    End If
-    If lastResults.Count = 0 Then
-        MsgBox "No issues to highlight.", vbInformation, "Pleadings Checker"
-        Exit Sub
-    End If
-
-    Dim addComments As Boolean
-    addComments = (chkAddComments.Value = True)
-
-    lblStatus.Caption = "Applying suggestions..."
-    Me.Repaint
-    DoEvents
-
-    If chkTrackedChanges.Value = True Then
-        PleadingsEngine.ApplySuggestionsAsTrackedChanges ActiveDocument, lastResults, addComments
-    Else
-        PleadingsEngine.ApplyHighlights ActiveDocument, lastResults, addComments
-    End If
-
-    lblStatus.Caption = lastResults.Count & " issue(s) processed."
-    MsgBox lastResults.Count & " issue(s) processed in document." & vbCrLf & _
-           IIf(chkTrackedChanges.Value, "Auto-fix suggestions applied as tracked changes.", _
-               "Issues highlighted.") & vbCrLf & _
-           IIf(addComments, "Comments added for non-auto-fix items.", ""), _
-           vbInformation, "Pleadings Checker"
 End Sub
 
 ' ============================================================
