@@ -297,13 +297,13 @@ Private Sub UserForm_Initialize()
     ' -- Defined term formatting style dropdown --
     Set lbl = Me.Controls.Add("Forms.Label.1", "lblTermFormat")
     With lbl
-        .Caption = "Term format:"
-        .Left = colRight: .Top = yPos + 2: .Width = 80: .Height = LBL_H
+        .Caption = "Defined term format:"
+        .Left = colRight: .Top = yPos + 2: .Width = 110: .Height = LBL_H
     End With
 
     Set cboTermFormat = Me.Controls.Add("Forms.ComboBox.1", "cboTermFormat")
     With cboTermFormat
-        .Left = colRight + 82: .Top = yPos: .Width = 120: .Height = TXT_H
+        .Left = colRight + 112: .Top = yPos: .Width = 120: .Height = TXT_H
         .Style = fmStyleDropDownList
         .AddItem "Bold"
         .AddItem "Bold Italics"
