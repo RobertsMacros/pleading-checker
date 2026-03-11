@@ -251,6 +251,11 @@ Public Function Check_SpellOutUnderTen(doc As Document) As Collection
                     GoTo NextChar
                 End If
 
+                ' -- Check: digit adjacent to a letter (postcodes, codes) --
+                If IsAdjacentToLetter(paraText, i, textLen) Then
+                    GoTo NextChar
+                End If
+
                 ' -- Check: preceded by structural reference word --
                 If IsPrecededByStructuralRef(paraText, i) Then
                     GoTo NextChar
@@ -258,6 +263,16 @@ Public Function Check_SpellOutUnderTen(doc As Document) As Collection
 
                 ' -- Check: inside parentheses (clause sub-numbers) --
                 If IsInsideParentheses(paraText, i) Then
+                    GoTo NextChar
+                End If
+
+                ' -- Check: digit followed by opening bracket (clause ref like 1(4)) --
+                If IsFollowedByBracket(paraText, i, textLen) Then
+                    GoTo NextChar
+                End If
+
+                ' -- Check: digit followed by month name (date like 1 October) --
+                If IsFollowedByMonthName(paraText, i, textLen) Then
                     GoTo NextChar
                 End If
 
@@ -463,9 +478,17 @@ Private Function IsPrecededByStructuralRef(ByRef txt As String, _
     Dim lWord As String
     lWord = LCase(prevWord)
 
+    ' Strip trailing "s" to handle plurals (e.g. "Rules" -> "rule")
+    Dim lWordBase As String
+    lWordBase = lWord
+    If Len(lWordBase) > 2 And Right$(lWordBase, 1) = "s" Then
+        lWordBase = Left$(lWordBase, Len(lWordBase) - 1)
+    End If
+
     Dim j As Long
     For j = LBound(refWords) To UBound(refWords)
-        If lWord = LCase(CStr(refWords(j))) Then
+        If lWord = LCase(CStr(refWords(j))) Or _
+           lWordBase = LCase(CStr(refWords(j))) Then
             IsPrecededByStructuralRef = True
             Exit Function
         End If
@@ -676,6 +699,92 @@ Private Function IsPrecededByCurrencyOrUnit(ByRef txt As String, _
             End If
         End If
     End If
+End Function
+
+' ------------------------------------------------------------
+'  PRIVATE: Check if digit is adjacent to a letter
+'  (postcodes like SO50 2ZH, codes like ET1, etc.)
+' ------------------------------------------------------------
+Private Function IsAdjacentToLetter(ByRef txt As String, _
+                                     ByVal pos As Long, _
+                                     ByVal textLen As Long) As Boolean
+    IsAdjacentToLetter = False
+
+    ' Check character before
+    If pos > 1 Then
+        If IsLetterChar(Mid(txt, pos - 1, 1)) Then
+            IsAdjacentToLetter = True
+            Exit Function
+        End If
+    End If
+
+    ' Check character after
+    If pos < textLen Then
+        If IsLetterChar(Mid(txt, pos + 1, 1)) Then
+            IsAdjacentToLetter = True
+            Exit Function
+        End If
+    End If
+End Function
+
+' ------------------------------------------------------------
+'  PRIVATE: Check if digit is followed by opening bracket
+'  (clause references like 1(4), 3(a), etc.)
+' ------------------------------------------------------------
+Private Function IsFollowedByBracket(ByRef txt As String, _
+                                      ByVal pos As Long, _
+                                      ByVal textLen As Long) As Boolean
+    IsFollowedByBracket = False
+
+    If pos < textLen Then
+        If Mid(txt, pos + 1, 1) = "(" Then
+            IsFollowedByBracket = True
+        End If
+    End If
+End Function
+
+' ------------------------------------------------------------
+'  PRIVATE: Check if digit is followed by a month name
+'  (date patterns like "1 October 2004")
+' ------------------------------------------------------------
+Private Function IsFollowedByMonthName(ByRef txt As String, _
+                                        ByVal pos As Long, _
+                                        ByVal textLen As Long) As Boolean
+    IsFollowedByMonthName = False
+
+    ' Need at least a space + 3 chars after the digit
+    If pos + 4 > textLen Then Exit Function
+
+    ' Must be followed by a space
+    If Mid(txt, pos + 1, 1) <> " " Then Exit Function
+
+    ' Extract the next word after the space
+    Dim wordStart As Long
+    wordStart = pos + 2
+    Dim wordEnd As Long
+    wordEnd = wordStart
+    Do While wordEnd <= textLen
+        If Not IsLetterChar(Mid(txt, wordEnd, 1)) Then Exit Do
+        wordEnd = wordEnd + 1
+    Loop
+
+    If wordEnd <= wordStart Then Exit Function
+
+    Dim nextWord As String
+    nextWord = LCase(Mid(txt, wordStart, wordEnd - wordStart))
+
+    Dim months As Variant
+    months = Array("january", "february", "march", "april", "may", _
+                   "june", "july", "august", "september", "october", _
+                   "november", "december")
+
+    Dim m As Long
+    For m = LBound(months) To UBound(months)
+        If nextWord = CStr(months(m)) Then
+            IsFollowedByMonthName = True
+            Exit Function
+        End If
+    Next m
 End Function
 
 ' ============================================================

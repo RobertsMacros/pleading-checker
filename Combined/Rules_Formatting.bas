@@ -110,8 +110,24 @@ Private Function IsBlockQuotePara(para As Paragraph) As Boolean
     fontSize = para.Range.Font.Size
     If Err.Number <> 0 Then fontSize = 0: Err.Clear
 
-    ' If significantly indented AND smaller font, it's a block quote
+    ' Block quote if significantly indented AND smaller font
     If leftInd > 36 And fontSize > 0 And fontSize < 11 Then
+        IsBlockQuotePara = True
+        On Error GoTo 0
+        Exit Function
+    End If
+
+    ' Block quote if indented at all and font is noticeably smaller
+    ' (some block quotes use moderate indent with clearly smaller font)
+    If leftInd > 18 And fontSize > 0 And fontSize < 10 Then
+        IsBlockQuotePara = True
+        On Error GoTo 0
+        Exit Function
+    End If
+
+    ' Block quote if very significantly indented (>72pt = 1 inch),
+    ' regardless of font size — heavy indentation alone signals a quote
+    If leftInd > 72 Then
         IsBlockQuotePara = True
     End If
 

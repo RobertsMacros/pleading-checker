@@ -46,6 +46,8 @@ Private spellingMode    As String   ' "UK" or "US"
 Private quoteNesting   As String   ' "SINGLE" or "DOUBLE" (outer marks)
 Private smartQuotePref As String   ' "CURLY" or "STRAIGHT"
 Private dateFormatPref As String   ' "UK" or "US" or "AUTO"
+Private termFormatPref As String   ' "BOLD", "BOLDITALIC", "ITALIC", or "NONE"
+Private termQuotePref  As String   ' "SINGLE" or "DOUBLE"
 Private ruleErrorCount  As Long
 Private ruleErrorLog    As String
 
@@ -88,7 +90,7 @@ Public Sub RunQuick()
         MsgBox "No issues found.", vbInformation, "Pleadings Checker"
     Else
         MsgBox summary, vbInformation, "Pleadings Checker"
-        ApplyHighlights ActiveDocument, issues, True
+        ApplySuggestionsAsTrackedChanges ActiveDocument, issues, True
     End If
 End Sub
 
@@ -142,6 +144,33 @@ End Sub
 Public Function GetDateFormatPref() As String
     If Len(dateFormatPref) = 0 Then dateFormatPref = "UK"
     GetDateFormatPref = dateFormatPref
+End Function
+
+' ============================================================
+'  DEFINED TERM FORMAT PREFERENCE
+' ============================================================
+Public Sub SetTermFormatPref(ByVal mode As String)
+    termFormatPref = UCase(Trim(mode))
+    If termFormatPref <> "BOLDITALIC" And termFormatPref <> "ITALIC" And _
+       termFormatPref <> "NONE" Then termFormatPref = "BOLD"
+End Sub
+
+Public Function GetTermFormatPref() As String
+    If Len(termFormatPref) = 0 Then termFormatPref = "BOLD"
+    GetTermFormatPref = termFormatPref
+End Function
+
+' ============================================================
+'  DEFINED TERM QUOTE PREFERENCE
+' ============================================================
+Public Sub SetTermQuotePref(ByVal mode As String)
+    termQuotePref = UCase(Trim(mode))
+    If termQuotePref <> "SINGLE" Then termQuotePref = "DOUBLE"
+End Sub
+
+Public Function GetTermQuotePref() As String
+    If Len(termQuotePref) = 0 Then termQuotePref = "DOUBLE"
+    GetTermQuotePref = termQuotePref
 End Function
 
 ' ============================================================
@@ -764,7 +793,6 @@ Public Sub ApplyHighlights(doc As Document, _
             On Error Resume Next: Err.Clear
             Set rng = doc.Range(GetIssueProp(finding, "RangeStart"), GetIssueProp(finding, "RangeEnd"))
             If Err.Number = 0 Then
-                rng.HighlightColorIndex = wdYellow
                 If addComments Then
                     doc.Comments.Add Range:=rng, Text:=BuildCommentText(finding)
                 End If
@@ -797,7 +825,6 @@ Public Sub ApplySuggestionsAsTrackedChanges(doc As Document, _
                     rng.Text = GetIssueProp(finding, "Suggestion")
                     doc.TrackRevisions = wasTrackingChanges
                 Else
-                    rng.HighlightColorIndex = wdYellow
                     If addComments Then
                         doc.Comments.Add Range:=rng, Text:=BuildCommentText(finding)
                     End If

@@ -59,6 +59,8 @@ Private optSmartCurly   As MSForms.OptionButton
 Private optSmartStraight As MSForms.OptionButton
 Private optDateUK       As MSForms.OptionButton
 Private optDateUS       As MSForms.OptionButton
+Private cboTermFormat   As MSForms.ComboBox
+Private cboTermQuotes   As MSForms.ComboBox
 Private lblStatus       As MSForms.Label
 
 Private lastResults     As Collection
@@ -303,7 +305,44 @@ Private Sub UserForm_Initialize()
         .GroupName = "DateFormat"
     End With
 
-    yPos = yPos + CHK_H + SEC_GAP
+    yPos = yPos + CHK_H + ITEM_GAP
+
+    ' -- Defined term formatting style dropdown --
+    Set lbl = Me.Controls.Add("Forms.Label.1", "lblTermFormat")
+    With lbl
+        .Caption = "Term format:"
+        .Left = colRight: .Top = yPos + 2: .Width = 80: .Height = LBL_H
+    End With
+
+    Set cboTermFormat = Me.Controls.Add("Forms.ComboBox.1", "cboTermFormat")
+    With cboTermFormat
+        .Left = colRight + 82: .Top = yPos: .Width = 120: .Height = TXT_H
+        .Style = fmStyleDropDownList
+        .AddItem "Bold"
+        .AddItem "Bold Italics"
+        .AddItem "Italics"
+        .AddItem "None"
+        .ListIndex = 0
+    End With
+    yPos = yPos + TXT_H + ITEM_GAP
+
+    ' -- Defined term quote style dropdown --
+    Set lbl = Me.Controls.Add("Forms.Label.1", "lblTermQuotes")
+    With lbl
+        .Caption = "Term quotes:"
+        .Left = colRight: .Top = yPos + 2: .Width = 80: .Height = LBL_H
+    End With
+
+    Set cboTermQuotes = Me.Controls.Add("Forms.ComboBox.1", "cboTermQuotes")
+    With cboTermQuotes
+        .Left = colRight + 82: .Top = yPos: .Width = 120: .Height = TXT_H
+        .Style = fmStyleDropDownList
+        .AddItem "Single quotes"
+        .AddItem "Double quotes"
+        .ListIndex = 1
+    End With
+
+    yPos = yPos + TXT_H + SEC_GAP
 
     ' ==========================================================
     '  ROW 4: Brand Rules
@@ -542,6 +581,24 @@ Private Sub btnRun_Click()
     Else
         PleadingsEngine.SetDateFormatPref "UK"
     End If
+
+    ' Set defined term detection preferences
+    Dim termFmt As String
+    Select Case cboTermFormat.ListIndex
+        Case 0: termFmt = "BOLD"
+        Case 1: termFmt = "BOLDITALIC"
+        Case 2: termFmt = "ITALIC"
+        Case Else: termFmt = "NONE"
+    End Select
+    PleadingsEngine.SetTermFormatPref termFmt
+
+    Dim termQt As String
+    If cboTermQuotes.ListIndex = 0 Then
+        termQt = "SINGLE"
+    Else
+        termQt = "DOUBLE"
+    End If
+    PleadingsEngine.SetTermQuotePref termQt
 
     ' Run checks
     lblStatus.Caption = "Running checks..."

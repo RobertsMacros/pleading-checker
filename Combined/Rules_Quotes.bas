@@ -210,11 +210,11 @@ Public Function Check_SingleQuotesDefault( _
     Dim issueMsg As String
     Dim suggMsg As String
     If nestMode = "DOUBLE" Then
-        issueMsg = "Outer quotation marks should use double quotation marks."
-        suggMsg = "Use double quotation marks instead of single quotation marks."
+        issueMsg = "Outer quotation marks should use double quotation marks, not single quotation marks."
+        suggMsg = ""
     Else
-        issueMsg = "Outer quotation marks should use single quotation marks."
-        suggMsg = "Use single quotation marks instead of double quotation marks."
+        issueMsg = "Outer quotation marks should use single quotation marks, not double quotation marks."
+        suggMsg = ""
     End If
 
     ' Reusable range -- created once, repositioned via SetRange

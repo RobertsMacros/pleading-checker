@@ -16,6 +16,38 @@ Private Const RULE23_NAME As String = "phrase_consistency"
 '  PRIVATE HELPERS (Rule07)
 ' ============================================================
 
+' -- Helper: check if quoted text looks like a sentence/quote --
+' rather than a defined term (questions, long phrases, etc.)
+Private Function LooksLikeSentence(ByVal txt As String) As Boolean
+    LooksLikeSentence = False
+
+    ' Contains a question mark — it's a question, not a term
+    If InStr(1, txt, "?") > 0 Then
+        LooksLikeSentence = True
+        Exit Function
+    End If
+
+    ' Very long text is unlikely to be a term name
+    If Len(txt) > 60 Then
+        LooksLikeSentence = True
+        Exit Function
+    End If
+
+    ' Count spaces to estimate word count
+    Dim spaceCount As Long
+    Dim ci As Long
+    spaceCount = 0
+    For ci = 1 To Len(txt)
+        If Mid$(txt, ci, 1) = " " Then spaceCount = spaceCount + 1
+    Next ci
+
+    ' More than 8 words is almost certainly a sentence
+    If spaceCount >= 8 Then
+        LooksLikeSentence = True
+        Exit Function
+    End If
+End Function
+
 ' -- Helper: remove hyphens from a term ----------------------
 Private Function RemoveHyphens(ByVal term As String) As String
     RemoveHyphens = Replace(term, "-", "")
@@ -279,11 +311,18 @@ Public Function Check_DefinedTerms(doc As Document) As Collection
     ' ==========================================================
 
     ' -- Pattern A: Curly-quoted defined terms ----------------
-    ' Look for opening curly quote followed by uppercase letter
+    ' Use quote preference from engine to determine which quotes to search
     Dim leftCurly As String
     Dim rightCurly As String
-    leftCurly = ChrW(8220)   ' left double curly quote
-    rightCurly = ChrW(8221)  ' right double curly quote
+    Dim termQPref As String
+    termQPref = EngineGetTermQuotePref()
+    If termQPref = "SINGLE" Then
+        leftCurly = ChrW(8216)   ' left single curly quote
+        rightCurly = ChrW(8217)  ' right single curly quote
+    Else
+        leftCurly = ChrW(8220)   ' left double curly quote
+        rightCurly = ChrW(8221)  ' right double curly quote
+    End If
 
     Set rng = doc.Content.Duplicate
     With rng.Find
@@ -325,7 +364,10 @@ Public Function Check_DefinedTerms(doc As Document) As Collection
             Dim termText As String
             ' Extract between quotes (skip the opening quote)
             termText = Mid$(fullText, 2, closePos - 2)
-            If Len(Trim$(termText)) > 0 And Not definedTerms.Exists(termText) Then
+            ' Skip if it looks like a sentence/quote rather than a defined term
+            ' (too long, contains question marks, or has many words)
+            If Len(Trim$(termText)) > 0 And Not definedTerms.Exists(termText) _
+               And Not LooksLikeSentence(termText) Then
                 ReDim defInfo(0 To 2)
                 defInfo(0) = 0 ' paragraph index (approximate)
                 defInfo(1) = startPos + 1  ' range start of term
@@ -632,4 +674,30 @@ Private Function MergeArrays2(a1 As Variant, a2 As Variant) As Variant
     For Each v In a1: out(idx) = v: idx = idx + 1: Next v
     For Each v In a2: out(idx) = v: idx = idx + 1: Next v
     MergeArrays2 = out
+End Function
+
+' ----------------------------------------------------------------
+'  Late-bound wrapper: PleadingsEngine.GetTermQuotePref
+' ----------------------------------------------------------------
+Private Function EngineGetTermQuotePref() As String
+    On Error Resume Next
+    EngineGetTermQuotePref = Application.Run("PleadingsEngine.GetTermQuotePref")
+    If Err.Number <> 0 Then
+        EngineGetTermQuotePref = "DOUBLE"
+        Err.Clear
+    End If
+    On Error GoTo 0
+End Function
+
+' ----------------------------------------------------------------
+'  Late-bound wrapper: PleadingsEngine.GetTermFormatPref
+' ----------------------------------------------------------------
+Private Function EngineGetTermFormatPref() As String
+    On Error Resume Next
+    EngineGetTermFormatPref = Application.Run("PleadingsEngine.GetTermFormatPref")
+    If Err.Number <> 0 Then
+        EngineGetTermFormatPref = "BOLD"
+        Err.Clear
+    End If
+    On Error GoTo 0
 End Function

@@ -26,6 +26,27 @@ Private Const MARKER_NUMBER As String = "number"   ' (1), (2), (3)
 '  RULE 10 - PRIVATE HELPERS
 ' ==============================================================
 
+' -- Helper: check if a parenthesized marker is a clause reference --
+' Returns True if the opening paren is immediately preceded by a
+' digit or letter (no space), e.g. "3(4)" or "Rule 1(a)" where
+' the "1(" is adjacent. These are structural references, not lists.
+Private Function IsClauseRef(ByRef paraText As String, _
+                              ByVal openParen As Long) As Boolean
+    IsClauseRef = False
+    If openParen <= 1 Then Exit Function
+
+    Dim prevCh As String
+    prevCh = Mid$(paraText, openParen - 1, 1)
+
+    ' If preceded by a digit, letter, or closing paren — it's a clause ref
+    If (prevCh >= "0" And prevCh <= "9") Or _
+       (prevCh >= "A" And prevCh <= "Z") Or _
+       (prevCh >= "a" And prevCh <= "z") Or _
+       prevCh = ")" Then
+        IsClauseRef = True
+    End If
+End Function
+
 ' -- Helper: detect marker type from content between parens ----
 Private Function GetMarkerType(ByVal content As String) As String
     If Len(content) = 0 Then
@@ -90,7 +111,7 @@ Private Function FindMarkersInPara(ByVal paraText As String) As Collection
         content = Mid$(paraText, openParen + 1, closeParen - openParen - 1)
         mType = GetMarkerType(content)
 
-        If Len(mType) > 0 Then
+        If Len(mType) > 0 And Not IsClauseRef(paraText, openParen) Then
             ReDim info(0 To 3)
             info(0) = openParen         ' position in paragraph text
             info(1) = Mid$(paraText, openParen, closeParen - openParen + 1) ' full marker text
