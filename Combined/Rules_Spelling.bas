@@ -259,168 +259,215 @@ End Function
 ' ============================================================
 Private Sub BuildSpellingArrays(ByRef usWords() As String, _
                                  ByRef ukWords() As String)
-    Const PAIR_COUNT As Long = 133
+    ' Dynamic pair building -- no hard-coded PAIR_COUNT needed.
+    ' Only low-risk, non-contentious US-to-UK variants are included.
+    ' Excluded: check/cheque, practice/practise, license/licence,
+    '   judgment/judgement, program/programme, draft/draught,
+    '   tire/tyre, curb/kerb, story/storey, meter/metre,
+    '   sulphur/sulfur, medical/scientific variants.
+    Dim pairCount As Long
+    pairCount = 0
+    ReDim usWords(0 To 255)
+    ReDim ukWords(0 To 255)
 
-    ReDim usWords(0 To PAIR_COUNT - 1)
-    ReDim ukWords(0 To PAIR_COUNT - 1)
+    ' -- -or -> -our and inflections --
+    AddSpellingPair usWords, ukWords, pairCount, "color", "colour"
+    AddSpellingPair usWords, ukWords, pairCount, "colors", "colours"
+    AddSpellingPair usWords, ukWords, pairCount, "colored", "coloured"
+    AddSpellingPair usWords, ukWords, pairCount, "coloring", "colouring"
+    AddSpellingPair usWords, ukWords, pairCount, "favor", "favour"
+    AddSpellingPair usWords, ukWords, pairCount, "favored", "favoured"
+    AddSpellingPair usWords, ukWords, pairCount, "favoring", "favouring"
+    AddSpellingPair usWords, ukWords, pairCount, "favorite", "favourite"
+    AddSpellingPair usWords, ukWords, pairCount, "favorites", "favourites"
+    AddSpellingPair usWords, ukWords, pairCount, "honor", "honour"
+    AddSpellingPair usWords, ukWords, pairCount, "honors", "honours"
+    AddSpellingPair usWords, ukWords, pairCount, "honored", "honoured"
+    AddSpellingPair usWords, ukWords, pairCount, "honoring", "honouring"
+    AddSpellingPair usWords, ukWords, pairCount, "humor", "humour"
+    AddSpellingPair usWords, ukWords, pairCount, "labor", "labour"
+    AddSpellingPair usWords, ukWords, pairCount, "labored", "laboured"
+    AddSpellingPair usWords, ukWords, pairCount, "laboring", "labouring"
+    AddSpellingPair usWords, ukWords, pairCount, "neighbor", "neighbour"
+    AddSpellingPair usWords, ukWords, pairCount, "neighbors", "neighbours"
+    AddSpellingPair usWords, ukWords, pairCount, "neighboring", "neighbouring"
+    AddSpellingPair usWords, ukWords, pairCount, "neighborhood", "neighbourhood"
+    AddSpellingPair usWords, ukWords, pairCount, "behavior", "behaviour"
+    AddSpellingPair usWords, ukWords, pairCount, "behaviors", "behaviours"
+    AddSpellingPair usWords, ukWords, pairCount, "behavioral", "behavioural"
+    AddSpellingPair usWords, ukWords, pairCount, "endeavor", "endeavour"
+    AddSpellingPair usWords, ukWords, pairCount, "endeavored", "endeavoured"
+    AddSpellingPair usWords, ukWords, pairCount, "endeavoring", "endeavouring"
+    AddSpellingPair usWords, ukWords, pairCount, "harbor", "harbour"
+    AddSpellingPair usWords, ukWords, pairCount, "harbors", "harbours"
+    AddSpellingPair usWords, ukWords, pairCount, "vigor", "vigour"
+    AddSpellingPair usWords, ukWords, pairCount, "valor", "valour"
+    AddSpellingPair usWords, ukWords, pairCount, "candor", "candour"
+    AddSpellingPair usWords, ukWords, pairCount, "clamor", "clamour"
+    AddSpellingPair usWords, ukWords, pairCount, "glamor", "glamour"
+    AddSpellingPair usWords, ukWords, pairCount, "parlor", "parlour"
+    AddSpellingPair usWords, ukWords, pairCount, "rancor", "rancour"
+    AddSpellingPair usWords, ukWords, pairCount, "rigor", "rigour"
+    AddSpellingPair usWords, ukWords, pairCount, "rumor", "rumour"
+    AddSpellingPair usWords, ukWords, pairCount, "rumors", "rumours"
+    AddSpellingPair usWords, ukWords, pairCount, "savior", "saviour"
+    AddSpellingPair usWords, ukWords, pairCount, "splendor", "splendour"
+    AddSpellingPair usWords, ukWords, pairCount, "tumor", "tumour"
+    AddSpellingPair usWords, ukWords, pairCount, "tumors", "tumours"
+    AddSpellingPair usWords, ukWords, pairCount, "vapor", "vapour"
+    AddSpellingPair usWords, ukWords, pairCount, "fervor", "fervour"
+    AddSpellingPair usWords, ukWords, pairCount, "armor", "armour"
+    AddSpellingPair usWords, ukWords, pairCount, "armored", "armoured"
+    AddSpellingPair usWords, ukWords, pairCount, "flavor", "flavour"
+    AddSpellingPair usWords, ukWords, pairCount, "flavors", "flavours"
+    AddSpellingPair usWords, ukWords, pairCount, "flavored", "flavoured"
+    AddSpellingPair usWords, ukWords, pairCount, "flavoring", "flavouring"
 
-    Dim idx As Long
-    idx = 0
+    ' -- -er -> -re where generally safe --
+    AddSpellingPair usWords, ukWords, pairCount, "center", "centre"
+    AddSpellingPair usWords, ukWords, pairCount, "centers", "centres"
+    AddSpellingPair usWords, ukWords, pairCount, "centered", "centred"
+    AddSpellingPair usWords, ukWords, pairCount, "centering", "centring"
+    AddSpellingPair usWords, ukWords, pairCount, "fiber", "fibre"
+    AddSpellingPair usWords, ukWords, pairCount, "fibers", "fibres"
+    AddSpellingPair usWords, ukWords, pairCount, "theater", "theatre"
+    AddSpellingPair usWords, ukWords, pairCount, "theaters", "theatres"
+    AddSpellingPair usWords, ukWords, pairCount, "somber", "sombre"
+    AddSpellingPair usWords, ukWords, pairCount, "caliber", "calibre"
+    AddSpellingPair usWords, ukWords, pairCount, "saber", "sabre"
+    AddSpellingPair usWords, ukWords, pairCount, "specter", "spectre"
+    AddSpellingPair usWords, ukWords, pairCount, "meager", "meagre"
+    AddSpellingPair usWords, ukWords, pairCount, "luster", "lustre"
+    AddSpellingPair usWords, ukWords, pairCount, "maneuver", "manoeuvre"
+    AddSpellingPair usWords, ukWords, pairCount, "maneuvered", "manoeuvred"
+    AddSpellingPair usWords, ukWords, pairCount, "maneuvering", "manoeuvring"
+    AddSpellingPair usWords, ukWords, pairCount, "reconnoiter", "reconnoitre"
+    AddSpellingPair usWords, ukWords, pairCount, "goiter", "goitre"
+    AddSpellingPair usWords, ukWords, pairCount, "ocher", "ochre"
 
-    ' -- -or -> -our (25 pairs) ----------------------------
-    usWords(idx) = "color":       ukWords(idx) = "colour":       idx = idx + 1
-    usWords(idx) = "favor":       ukWords(idx) = "favour":       idx = idx + 1
-    usWords(idx) = "honor":       ukWords(idx) = "honour":       idx = idx + 1
-    usWords(idx) = "humor":       ukWords(idx) = "humour":       idx = idx + 1
-    usWords(idx) = "labor":       ukWords(idx) = "labour":       idx = idx + 1
-    usWords(idx) = "neighbor":    ukWords(idx) = "neighbour":    idx = idx + 1
-    usWords(idx) = "behavior":    ukWords(idx) = "behaviour":    idx = idx + 1
-    usWords(idx) = "endeavor":    ukWords(idx) = "endeavour":    idx = idx + 1
-    usWords(idx) = "harbor":      ukWords(idx) = "harbour":      idx = idx + 1
-    usWords(idx) = "vigor":       ukWords(idx) = "vigour":       idx = idx + 1
-    usWords(idx) = "valor":       ukWords(idx) = "valour":       idx = idx + 1
-    usWords(idx) = "candor":      ukWords(idx) = "candour":      idx = idx + 1
-    usWords(idx) = "clamor":      ukWords(idx) = "clamour":      idx = idx + 1
-    usWords(idx) = "glamor":      ukWords(idx) = "glamour":      idx = idx + 1
-    usWords(idx) = "parlor":      ukWords(idx) = "parlour":      idx = idx + 1
-    usWords(idx) = "rancor":      ukWords(idx) = "rancour":      idx = idx + 1
-    usWords(idx) = "rigor":       ukWords(idx) = "rigour":       idx = idx + 1
-    usWords(idx) = "rumor":       ukWords(idx) = "rumour":       idx = idx + 1
-    usWords(idx) = "savior":      ukWords(idx) = "saviour":      idx = idx + 1
-    usWords(idx) = "splendor":    ukWords(idx) = "splendour":    idx = idx + 1
-    usWords(idx) = "tumor":       ukWords(idx) = "tumour":       idx = idx + 1
-    usWords(idx) = "vapor":       ukWords(idx) = "vapour":       idx = idx + 1
-    usWords(idx) = "fervor":      ukWords(idx) = "fervour":      idx = idx + 1
-    usWords(idx) = "armor":       ukWords(idx) = "armour":       idx = idx + 1
-    usWords(idx) = "flavor":      ukWords(idx) = "flavour":      idx = idx + 1
+    ' -- -se -> -ce where safe --
+    AddSpellingPair usWords, ukWords, pairCount, "defense", "defence"
+    AddSpellingPair usWords, ukWords, pairCount, "defenses", "defences"
+    AddSpellingPair usWords, ukWords, pairCount, "offense", "offence"
+    AddSpellingPair usWords, ukWords, pairCount, "offenses", "offences"
+    AddSpellingPair usWords, ukWords, pairCount, "pretense", "pretence"
 
-    ' -- -ize -> -ise (30 pairs) ---------------------------
-    usWords(idx) = "organize":      ukWords(idx) = "organise":      idx = idx + 1
-    usWords(idx) = "realize":       ukWords(idx) = "realise":       idx = idx + 1
-    usWords(idx) = "recognize":     ukWords(idx) = "recognise":     idx = idx + 1
-    usWords(idx) = "authorize":     ukWords(idx) = "authorise":     idx = idx + 1
-    usWords(idx) = "characterize":  ukWords(idx) = "characterise":  idx = idx + 1
-    usWords(idx) = "customize":     ukWords(idx) = "customise":     idx = idx + 1
-    usWords(idx) = "emphasize":     ukWords(idx) = "emphasise":     idx = idx + 1
-    usWords(idx) = "finalize":      ukWords(idx) = "finalise":      idx = idx + 1
-    usWords(idx) = "maximize":      ukWords(idx) = "maximise":      idx = idx + 1
-    usWords(idx) = "minimize":      ukWords(idx) = "minimise":      idx = idx + 1
-    usWords(idx) = "normalize":     ukWords(idx) = "normalise":     idx = idx + 1
-    usWords(idx) = "optimize":      ukWords(idx) = "optimise":      idx = idx + 1
-    usWords(idx) = "prioritize":    ukWords(idx) = "prioritise":    idx = idx + 1
-    usWords(idx) = "standardize":   ukWords(idx) = "standardise":   idx = idx + 1
-    usWords(idx) = "summarize":     ukWords(idx) = "summarise":     idx = idx + 1
-    usWords(idx) = "symbolize":     ukWords(idx) = "symbolise":     idx = idx + 1
-    usWords(idx) = "utilize":       ukWords(idx) = "utilise":       idx = idx + 1
-    usWords(idx) = "apologize":     ukWords(idx) = "apologise":     idx = idx + 1
-    usWords(idx) = "capitalize":    ukWords(idx) = "capitalise":    idx = idx + 1
-    usWords(idx) = "criticize":     ukWords(idx) = "criticise":     idx = idx + 1
-    usWords(idx) = "legalize":      ukWords(idx) = "legalise":      idx = idx + 1
-    usWords(idx) = "memorize":      ukWords(idx) = "memorise":      idx = idx + 1
-    usWords(idx) = "patronize":     ukWords(idx) = "patronise":     idx = idx + 1
-    usWords(idx) = "penalize":      ukWords(idx) = "penalise":      idx = idx + 1
-    usWords(idx) = "privatize":     ukWords(idx) = "privatise":     idx = idx + 1
-    usWords(idx) = "harmonize":     ukWords(idx) = "harmonise":     idx = idx + 1
-    usWords(idx) = "economize":     ukWords(idx) = "economise":     idx = idx + 1
-    usWords(idx) = "immunize":      ukWords(idx) = "immunise":      idx = idx + 1
-    usWords(idx) = "neutralize":    ukWords(idx) = "neutralise":    idx = idx + 1
-    usWords(idx) = "stabilize":     ukWords(idx) = "stabilise":     idx = idx + 1
+    ' -- -og -> -ogue --
+    AddSpellingPair usWords, ukWords, pairCount, "analog", "analogue"
+    AddSpellingPair usWords, ukWords, pairCount, "catalog", "catalogue"
+    AddSpellingPair usWords, ukWords, pairCount, "dialog", "dialogue"
+    AddSpellingPair usWords, ukWords, pairCount, "monolog", "monologue"
+    AddSpellingPair usWords, ukWords, pairCount, "prolog", "prologue"
+    AddSpellingPair usWords, ukWords, pairCount, "epilog", "epilogue"
 
-    ' -- -ization -> -isation (15 pairs) -------------------
-    usWords(idx) = "organization":     ukWords(idx) = "organisation":     idx = idx + 1
-    usWords(idx) = "authorization":    ukWords(idx) = "authorisation":    idx = idx + 1
-    usWords(idx) = "characterization": ukWords(idx) = "characterisation": idx = idx + 1
-    usWords(idx) = "customization":    ukWords(idx) = "customisation":    idx = idx + 1
-    usWords(idx) = "optimization":     ukWords(idx) = "optimisation":     idx = idx + 1
-    usWords(idx) = "normalization":    ukWords(idx) = "normalisation":    idx = idx + 1
-    usWords(idx) = "realization":      ukWords(idx) = "realisation":      idx = idx + 1
-    usWords(idx) = "utilization":      ukWords(idx) = "utilisation":      idx = idx + 1
-    usWords(idx) = "specialization":   ukWords(idx) = "specialisation":   idx = idx + 1
-    usWords(idx) = "globalization":    ukWords(idx) = "globalisation":    idx = idx + 1
-    usWords(idx) = "legalization":     ukWords(idx) = "legalisation":     idx = idx + 1
-    usWords(idx) = "privatization":    ukWords(idx) = "privatisation":    idx = idx + 1
-    usWords(idx) = "harmonization":    ukWords(idx) = "harmonisation":    idx = idx + 1
-    usWords(idx) = "neutralization":   ukWords(idx) = "neutralisation":   idx = idx + 1
-    usWords(idx) = "stabilization":    ukWords(idx) = "stabilisation":    idx = idx + 1
+    ' -- -ment and similar safe variants --
+    AddSpellingPair usWords, ukWords, pairCount, "acknowledgment", "acknowledgement"
+    AddSpellingPair usWords, ukWords, pairCount, "acknowledgments", "acknowledgements"
+    AddSpellingPair usWords, ukWords, pairCount, "fulfillment", "fulfilment"
+    AddSpellingPair usWords, ukWords, pairCount, "fulfill", "fulfil"
+    AddSpellingPair usWords, ukWords, pairCount, "enrollment", "enrolment"
+    AddSpellingPair usWords, ukWords, pairCount, "enroll", "enrol"
+    AddSpellingPair usWords, ukWords, pairCount, "installment", "instalment"
+    AddSpellingPair usWords, ukWords, pairCount, "installments", "instalments"
 
-    ' -- -er -> -re (15 pairs) -----------------------------
-    usWords(idx) = "center":    ukWords(idx) = "centre":    idx = idx + 1
-    usWords(idx) = "fiber":     ukWords(idx) = "fibre":     idx = idx + 1
-    usWords(idx) = "liter":     ukWords(idx) = "litre":     idx = idx + 1
-    usWords(idx) = "meter":     ukWords(idx) = "metre":     idx = idx + 1
-    usWords(idx) = "theater":   ukWords(idx) = "theatre":   idx = idx + 1
-    usWords(idx) = "somber":    ukWords(idx) = "sombre":    idx = idx + 1
-    usWords(idx) = "caliber":   ukWords(idx) = "calibre":   idx = idx + 1
-    usWords(idx) = "saber":     ukWords(idx) = "sabre":     idx = idx + 1
-    usWords(idx) = "specter":   ukWords(idx) = "spectre":   idx = idx + 1
-    usWords(idx) = "meager":    ukWords(idx) = "meagre":    idx = idx + 1
-    usWords(idx) = "luster":    ukWords(idx) = "lustre":    idx = idx + 1
-    usWords(idx) = "maneuver":  ukWords(idx) = "manoeuvre":  idx = idx + 1
-    usWords(idx) = "reconnoiter": ukWords(idx) = "reconnoitre": idx = idx + 1
-    usWords(idx) = "goiter":    ukWords(idx) = "goitre":    idx = idx + 1
-    usWords(idx) = "ocher":     ukWords(idx) = "ochre":     idx = idx + 1
+    ' -- Doubled consonant variants --
+    AddSpellingPair usWords, ukWords, pairCount, "traveled", "travelled"
+    AddSpellingPair usWords, ukWords, pairCount, "traveling", "travelling"
+    AddSpellingPair usWords, ukWords, pairCount, "traveler", "traveller"
+    AddSpellingPair usWords, ukWords, pairCount, "travelers", "travellers"
+    AddSpellingPair usWords, ukWords, pairCount, "canceled", "cancelled"
+    AddSpellingPair usWords, ukWords, pairCount, "canceling", "cancelling"
+    AddSpellingPair usWords, ukWords, pairCount, "labeled", "labelled"
+    AddSpellingPair usWords, ukWords, pairCount, "labeling", "labelling"
+    AddSpellingPair usWords, ukWords, pairCount, "modeled", "modelled"
+    AddSpellingPair usWords, ukWords, pairCount, "modeling", "modelling"
+    AddSpellingPair usWords, ukWords, pairCount, "counselor", "counsellor"
+    AddSpellingPair usWords, ukWords, pairCount, "counselors", "counsellors"
+    AddSpellingPair usWords, ukWords, pairCount, "counseling", "counselling"
+    AddSpellingPair usWords, ukWords, pairCount, "signaled", "signalled"
+    AddSpellingPair usWords, ukWords, pairCount, "signaling", "signalling"
+    AddSpellingPair usWords, ukWords, pairCount, "fueled", "fuelled"
+    AddSpellingPair usWords, ukWords, pairCount, "fueling", "fuelling"
 
-    ' -- -se -> -ce (3 pairs) ------------------------------
-    ' Note: license/licence handled by separate Rule 12
-    ' Note: practice/practise excepted (noun vs verb distinction)
-    usWords(idx) = "defense":   ukWords(idx) = "defence":   idx = idx + 1
-    usWords(idx) = "offense":   ukWords(idx) = "offence":   idx = idx + 1
-    usWords(idx) = "pretense":  ukWords(idx) = "pretence":  idx = idx + 1
+    ' -- -ize -> -ise (safe subset) --
+    AddSpellingPair usWords, ukWords, pairCount, "organize", "organise"
+    AddSpellingPair usWords, ukWords, pairCount, "realize", "realise"
+    AddSpellingPair usWords, ukWords, pairCount, "recognize", "recognise"
+    AddSpellingPair usWords, ukWords, pairCount, "authorize", "authorise"
+    AddSpellingPair usWords, ukWords, pairCount, "characterize", "characterise"
+    AddSpellingPair usWords, ukWords, pairCount, "customize", "customise"
+    AddSpellingPair usWords, ukWords, pairCount, "emphasize", "emphasise"
+    AddSpellingPair usWords, ukWords, pairCount, "finalize", "finalise"
+    AddSpellingPair usWords, ukWords, pairCount, "maximize", "maximise"
+    AddSpellingPair usWords, ukWords, pairCount, "minimize", "minimise"
+    AddSpellingPair usWords, ukWords, pairCount, "normalize", "normalise"
+    AddSpellingPair usWords, ukWords, pairCount, "optimize", "optimise"
+    AddSpellingPair usWords, ukWords, pairCount, "prioritize", "prioritise"
+    AddSpellingPair usWords, ukWords, pairCount, "standardize", "standardise"
+    AddSpellingPair usWords, ukWords, pairCount, "summarize", "summarise"
+    AddSpellingPair usWords, ukWords, pairCount, "symbolize", "symbolise"
+    AddSpellingPair usWords, ukWords, pairCount, "utilize", "utilise"
+    AddSpellingPair usWords, ukWords, pairCount, "apologize", "apologise"
+    AddSpellingPair usWords, ukWords, pairCount, "capitalize", "capitalise"
+    AddSpellingPair usWords, ukWords, pairCount, "criticize", "criticise"
+    AddSpellingPair usWords, ukWords, pairCount, "legalize", "legalise"
+    AddSpellingPair usWords, ukWords, pairCount, "memorize", "memorise"
+    AddSpellingPair usWords, ukWords, pairCount, "patronize", "patronise"
+    AddSpellingPair usWords, ukWords, pairCount, "penalize", "penalise"
+    AddSpellingPair usWords, ukWords, pairCount, "privatize", "privatise"
+    AddSpellingPair usWords, ukWords, pairCount, "harmonize", "harmonise"
+    AddSpellingPair usWords, ukWords, pairCount, "economize", "economise"
+    AddSpellingPair usWords, ukWords, pairCount, "immunize", "immunise"
+    AddSpellingPair usWords, ukWords, pairCount, "neutralize", "neutralise"
+    AddSpellingPair usWords, ukWords, pairCount, "stabilize", "stabilise"
 
-    ' -- -og -> -ogue (6 pairs) ----------------------------
-    usWords(idx) = "analog":   ukWords(idx) = "analogue":   idx = idx + 1
-    usWords(idx) = "catalog":  ukWords(idx) = "catalogue":  idx = idx + 1
-    usWords(idx) = "dialog":   ukWords(idx) = "dialogue":   idx = idx + 1
-    usWords(idx) = "monolog":  ukWords(idx) = "monologue":  idx = idx + 1
-    usWords(idx) = "prolog":   ukWords(idx) = "prologue":   idx = idx + 1
-    usWords(idx) = "epilog":   ukWords(idx) = "epilogue":   idx = idx + 1
+    ' -- -ization -> -isation --
+    AddSpellingPair usWords, ukWords, pairCount, "organization", "organisation"
+    AddSpellingPair usWords, ukWords, pairCount, "authorization", "authorisation"
+    AddSpellingPair usWords, ukWords, pairCount, "characterization", "characterisation"
+    AddSpellingPair usWords, ukWords, pairCount, "customization", "customisation"
+    AddSpellingPair usWords, ukWords, pairCount, "optimization", "optimisation"
+    AddSpellingPair usWords, ukWords, pairCount, "normalization", "normalisation"
+    AddSpellingPair usWords, ukWords, pairCount, "realization", "realisation"
+    AddSpellingPair usWords, ukWords, pairCount, "utilization", "utilisation"
+    AddSpellingPair usWords, ukWords, pairCount, "specialization", "specialisation"
+    AddSpellingPair usWords, ukWords, pairCount, "globalization", "globalisation"
+    AddSpellingPair usWords, ukWords, pairCount, "legalization", "legalisation"
+    AddSpellingPair usWords, ukWords, pairCount, "privatization", "privatisation"
+    AddSpellingPair usWords, ukWords, pairCount, "harmonization", "harmonisation"
+    AddSpellingPair usWords, ukWords, pairCount, "neutralization", "neutralisation"
+    AddSpellingPair usWords, ukWords, pairCount, "stabilization", "stabilisation"
 
-    ' -- -ment variants (5 pairs) -------------------------
-    usWords(idx) = "judgment":        ukWords(idx) = "judgement":        idx = idx + 1
-    usWords(idx) = "acknowledgment":  ukWords(idx) = "acknowledgement":  idx = idx + 1
-    usWords(idx) = "fulfillment":     ukWords(idx) = "fulfilment":       idx = idx + 1
-    usWords(idx) = "enrollment":      ukWords(idx) = "enrolment":        idx = idx + 1
-    usWords(idx) = "installment":     ukWords(idx) = "instalment":       idx = idx + 1
+    ' -- Safe miscellaneous pairs --
+    AddSpellingPair usWords, ukWords, pairCount, "gray", "grey"
+    AddSpellingPair usWords, ukWords, pairCount, "plow", "plough"
+    AddSpellingPair usWords, ukWords, pairCount, "skeptic", "sceptic"
+    AddSpellingPair usWords, ukWords, pairCount, "skeptical", "sceptical"
+    AddSpellingPair usWords, ukWords, pairCount, "aluminum", "aluminium"
+    AddSpellingPair usWords, ukWords, pairCount, "artifact", "artefact"
+    AddSpellingPair usWords, ukWords, pairCount, "aging", "ageing"
+    AddSpellingPair usWords, ukWords, pairCount, "pajamas", "pyjamas"
+    AddSpellingPair usWords, ukWords, pairCount, "cozy", "cosy"
+    AddSpellingPair usWords, ukWords, pairCount, "donut", "doughnut"
 
-    ' -- -l -> -ll / -ll -> -l (doubled consonants) -------
-    usWords(idx) = "traveled":     ukWords(idx) = "travelled":     idx = idx + 1
-    usWords(idx) = "traveling":    ukWords(idx) = "travelling":    idx = idx + 1
-    usWords(idx) = "traveler":     ukWords(idx) = "traveller":     idx = idx + 1
-    usWords(idx) = "canceled":     ukWords(idx) = "cancelled":     idx = idx + 1
-    usWords(idx) = "canceling":    ukWords(idx) = "cancelling":    idx = idx + 1
-    usWords(idx) = "labeled":      ukWords(idx) = "labelled":      idx = idx + 1
-    usWords(idx) = "labeling":     ukWords(idx) = "labelling":     idx = idx + 1
-    usWords(idx) = "modeled":      ukWords(idx) = "modelled":      idx = idx + 1
-    usWords(idx) = "modeling":     ukWords(idx) = "modelling":     idx = idx + 1
-    usWords(idx) = "counselor":    ukWords(idx) = "counsellor":    idx = idx + 1
-    usWords(idx) = "counseling":   ukWords(idx) = "counselling":   idx = idx + 1
-    usWords(idx) = "signaled":     ukWords(idx) = "signalled":     idx = idx + 1
-    usWords(idx) = "signaling":    ukWords(idx) = "signalling":    idx = idx + 1
-    usWords(idx) = "fueled":       ukWords(idx) = "fuelled":       idx = idx + 1
-    usWords(idx) = "fueling":      ukWords(idx) = "fuelling":      idx = idx + 1
+    ' Trim arrays to actual size
+    ReDim Preserve usWords(0 To pairCount - 1)
+    ReDim Preserve ukWords(0 To pairCount - 1)
+End Sub
 
-    ' -- Other / miscellaneous (19 pairs) -----------------
-    usWords(idx) = "gray":          ukWords(idx) = "grey":          idx = idx + 1
-    usWords(idx) = "plow":          ukWords(idx) = "plough":        idx = idx + 1
-    usWords(idx) = "tire":          ukWords(idx) = "tyre":          idx = idx + 1
-    usWords(idx) = "skeptic":       ukWords(idx) = "sceptic":       idx = idx + 1
-    usWords(idx) = "aluminum":      ukWords(idx) = "aluminium":     idx = idx + 1
-    usWords(idx) = "artifact":      ukWords(idx) = "artefact":      idx = idx + 1
-    usWords(idx) = "pediatric":     ukWords(idx) = "paediatric":    idx = idx + 1
-    usWords(idx) = "anesthetic":    ukWords(idx) = "anaesthetic":   idx = idx + 1
-    usWords(idx) = "estrogen":      ukWords(idx) = "oestrogen":     idx = idx + 1
-    usWords(idx) = "aging":         ukWords(idx) = "ageing":        idx = idx + 1
-    usWords(idx) = "ax":            ukWords(idx) = "axe":           idx = idx + 1
-    usWords(idx) = "program":       ukWords(idx) = "programme":     idx = idx + 1
-    usWords(idx) = "curb":          ukWords(idx) = "kerb":          idx = idx + 1
-    usWords(idx) = "draft":         ukWords(idx) = "draught":       idx = idx + 1
-    usWords(idx) = "mom":           ukWords(idx) = "mum":           idx = idx + 1
-    usWords(idx) = "pajamas":       ukWords(idx) = "pyjamas":       idx = idx + 1
-    usWords(idx) = "cozy":          ukWords(idx) = "cosy":          idx = idx + 1
-    usWords(idx) = "donut":         ukWords(idx) = "doughnut":      idx = idx + 1
-    usWords(idx) = "skeptical":     ukWords(idx) = "sceptical":     idx = idx + 1
-
-    ' idx should now equal PAIR_COUNT (150)
+Private Sub AddSpellingPair(ByRef usWords() As String, _
+                             ByRef ukWords() As String, _
+                             ByRef pairCount As Long, _
+                             ByVal usWord As String, _
+                             ByVal ukWord As String)
+    ' Grow arrays if needed
+    If pairCount > UBound(usWords) Then
+        ReDim Preserve usWords(0 To UBound(usWords) + 128)
+        ReDim Preserve ukWords(0 To UBound(ukWords) + 128)
+    End If
+    usWords(pairCount) = usWord
+    ukWords(pairCount) = ukWord
+    pairCount = pairCount + 1
 End Sub
 
 ' ============================================================

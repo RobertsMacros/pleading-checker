@@ -80,14 +80,82 @@ End Function
 
 ' -- Helper: parse font key back to readable description -----
 ' ------------------------------------------------------------
-'  PRIVATE: Detect block quote / indented extract paragraphs.
-'  Checks style name and left indentation.
+'  PUBLIC: Detect block quote / indented extract paragraphs.
+'
+'  HARD RULE: Indentation alone is NEVER enough.
+'  A block quote must have at least one of:
+'    1. A block-quote style (name contains "quote"/"block"/"extract")
+'    2. Enclosing quotation marks AND indentation
+'    3. Entirely italic text AND indentation
+'    4. Smaller font than body text AND indentation
+'  Lists, numbered paragraphs, and bullet items are explicitly excluded.
 ' ------------------------------------------------------------
 Public Function IsBlockQuotePara(para As Paragraph) As Boolean
     IsBlockQuotePara = False
     On Error Resume Next
 
-    ' Check style name for quote/block/extract keywords
+    ' ==========================================================
+    '  CHECK 0: Exclude list paragraphs (numbered, bulleted, etc.)
+    '  Lists must NEVER be treated as block quotes.
+    ' ==========================================================
+    Dim listLvl As Long
+    listLvl = 0
+    listLvl = para.Range.ListFormat.ListLevelNumber
+    If Err.Number <> 0 Then listLvl = 0: Err.Clear
+    ' ListLevelNumber > 0 means this paragraph is in a list
+    If listLvl > 0 Then
+        Debug.Print "IsBlockQuotePara SKIP: list paragraph (ListLevel=" & listLvl & ")"
+        On Error GoTo 0
+        Exit Function
+    End If
+
+    ' Also check for list-like text patterns (manual numbering)
+    Dim pTextRaw As String
+    pTextRaw = ""
+    pTextRaw = para.Range.Text
+    If Err.Number <> 0 Then pTextRaw = "": Err.Clear
+    Dim pTextTrimmed As String
+    pTextTrimmed = Replace(Replace(Replace(pTextRaw, vbCr, ""), vbTab, ""), ChrW(160), " ")
+    pTextTrimmed = Trim$(pTextTrimmed)
+
+    ' Check for bullet-like or number-list-like starts
+    If Len(pTextTrimmed) > 1 Then
+        Dim firstTwo As String
+        firstTwo = Left$(pTextTrimmed, 2)
+        ' Bullet characters: bullet, en-dash, em-dash, hyphen
+        If Left$(pTextTrimmed, 1) = ChrW(8226) Or _
+           Left$(pTextTrimmed, 1) = ChrW(8211) & " " Or _
+           firstTwo = "- " Or firstTwo = "* " Then
+            Debug.Print "IsBlockQuotePara SKIP: bullet-like paragraph"
+            On Error GoTo 0
+            Exit Function
+        End If
+        ' Numbered list pattern: "(a)", "(i)", "(1)", "1.", "a.", "i."
+        If pTextTrimmed Like "(#)*" Or pTextTrimmed Like "(##)*" Or _
+           pTextTrimmed Like "([a-z])*" Or pTextTrimmed Like "([ivx])*" Or _
+           pTextTrimmed Like "#.*" Or pTextTrimmed Like "##.*" Or _
+           pTextTrimmed Like "[a-z].*" Then
+            Debug.Print "IsBlockQuotePara SKIP: numbered/lettered list item"
+            On Error GoTo 0
+            Exit Function
+        End If
+    End If
+
+    ' Also check ListFormat.ListString for auto-numbered lists
+    Dim listStr As String
+    listStr = ""
+    listStr = para.Range.ListFormat.ListString
+    If Err.Number <> 0 Then listStr = "": Err.Clear
+    If Len(listStr) > 0 Then
+        Debug.Print "IsBlockQuotePara SKIP: auto-numbered list (ListString='" & listStr & "')"
+        On Error GoTo 0
+        Exit Function
+    End If
+
+    ' ==========================================================
+    '  CHECK 1: Style name for quote/block/extract keywords
+    '  (Definitive indicator - no other checks needed)
+    ' ==========================================================
     Dim sn As String
     sn = LCase(para.Style.NameLocal)
     If Err.Number <> 0 Then sn = "": Err.Clear
@@ -98,96 +166,78 @@ Public Function IsBlockQuotePara(para As Paragraph) As Boolean
         Exit Function
     End If
 
-    ' Check for significant left indentation (> 36pt = 0.5 inch)
-    ' Block quotes typically have extra indentation on both sides
+    ' ==========================================================
+    '  GATHER INDICATORS (only used if indented)
+    ' ==========================================================
     Dim leftInd As Single
     leftInd = para.Format.LeftIndent
     If Err.Number <> 0 Then leftInd = 0: Err.Clear
 
-    ' Get font size — for mixed-format paragraphs, Font.Size returns
-    ' wdUndefined (9999999). In that case, sample the first run's font size.
+    ' No indentation = not a block quote (style check already done above)
+    If leftInd <= 18 Then
+        On Error GoTo 0
+        Exit Function
+    End If
+
+    ' -- Font size (lightweight check: use paragraph-level first) --
     Dim fontSize As Single
     fontSize = para.Range.Font.Size
     If Err.Number <> 0 Then fontSize = 0: Err.Clear
-    If fontSize <= 0 Or fontSize > 1000 Then
-        ' Mixed formatting — sample first character's font size
-        Dim sampleRng As Range
-        Set sampleRng = para.Range.Duplicate
-        If Err.Number = 0 Then
-            sampleRng.Collapse wdCollapseStart
-            sampleRng.MoveEnd wdCharacter, 1
-            fontSize = sampleRng.Font.Size
-            If Err.Number <> 0 Then fontSize = 0: Err.Clear
-            If fontSize > 1000 Then fontSize = 0
-        Else
-            Err.Clear
-        End If
-    End If
+    If fontSize <= 0 Or fontSize > 1000 Then fontSize = 0
 
-    ' Check if paragraph text starts/ends with quotation marks
-    ' (strong block-quote indicator when combined with indentation)
-    Dim pText As String
-    pText = Replace(Replace(Replace(para.Range.Text, vbCr, ""), vbTab, ""), ChrW(160), "")
-    pText = Trim$(pText)
-    If Err.Number <> 0 Then pText = "": Err.Clear
+    ' -- Quotation marks enclosing the paragraph --
     Dim startsWithQuote As Boolean
     Dim endsWithQuote As Boolean
     startsWithQuote = False
     endsWithQuote = False
-    If Len(pText) > 1 Then
-        Dim fc As String
-        Dim lc As String
-        fc = Left$(pText, 1)
-        lc = Right$(pText, 1)
-        startsWithQuote = (fc = Chr(34) Or fc = ChrW(8220) Or fc = ChrW(8216))
-        endsWithQuote = (lc = Chr(34) Or lc = ChrW(8221) Or lc = ChrW(8217))
+    If Len(pTextTrimmed) > 1 Then
+        Dim fcChar As String
+        Dim lcChar As String
+        fcChar = Left$(pTextTrimmed, 1)
+        lcChar = Right$(pTextTrimmed, 1)
+        startsWithQuote = (fcChar = Chr(34) Or fcChar = ChrW(8220) Or fcChar = ChrW(8216))
+        endsWithQuote = (lcChar = Chr(34) Or lcChar = ChrW(8221) Or lcChar = ChrW(8217))
     End If
 
-    ' Check if paragraph is entirely italic (strong block-quote indicator)
+    ' -- Entirely italic check --
     Dim isItalic As Boolean
     isItalic = False
     Dim italVal As Long
     italVal = para.Range.Font.Italic
     If Err.Number <> 0 Then italVal = 0: Err.Clear
-    If italVal = -1 Then isItalic = True  ' wdTrue = -1
+    If italVal = -1 Then isItalic = True  ' wdTrue = -1 means ALL italic
 
-    ' Block quote if significantly indented AND smaller font
-    If leftInd > 36 And fontSize > 0 And fontSize < 11 Then
+    ' ==========================================================
+    '  DECISION: Indentation PLUS at least one strong indicator
+    ' ==========================================================
+
+    ' Block quote if indented AND wrapped in quotation marks
+    If startsWithQuote Or endsWithQuote Then
         IsBlockQuotePara = True
         On Error GoTo 0
         Exit Function
     End If
 
-    ' Block quote if indented at all and font is noticeably smaller
-    If leftInd > 18 And fontSize > 0 And fontSize < 10 Then
+    ' Block quote if indented AND entirely italic
+    If isItalic Then
         IsBlockQuotePara = True
         On Error GoTo 0
         Exit Function
     End If
 
-    ' Block quote if indented and wrapped in quotation marks
-    If leftInd > 18 And (startsWithQuote Or endsWithQuote) Then
+    ' Block quote if indented AND noticeably smaller font (< 11pt)
+    ' This is the weakest indicator so it requires clear font difference
+    If fontSize > 0 And fontSize < 11 Then
         IsBlockQuotePara = True
         On Error GoTo 0
         Exit Function
     End If
 
-    ' Block quote if indented and entirely italic
-    If leftInd > 18 And isItalic Then
-        IsBlockQuotePara = True
-        On Error GoTo 0
-        Exit Function
-    End If
-
-    ' Heavy indentation (>72pt) but ONLY if quotes, italic, or smaller font
-    ' (plain indentation at body font size is likely a list, not a quote)
-    If leftInd > 72 Then
-        If isItalic Or startsWithQuote Or endsWithQuote Then
-            IsBlockQuotePara = True
-        ElseIf fontSize > 0 And fontSize < 11 Then
-            IsBlockQuotePara = True
-        End If
-    End If
+    ' ==========================================================
+    '  DEFAULT: Indented but no strong indicator = NOT a block quote
+    '  (likely a list, definition, or indented body text)
+    ' ==========================================================
+    Debug.Print "IsBlockQuotePara SKIP: indented (" & leftInd & "pt) but no strong indicator (fontSize=" & fontSize & ", italic=" & isItalic & ", quotes=" & startsWithQuote & "/" & endsWithQuote & ")"
 
     On Error GoTo 0
 End Function
@@ -375,56 +425,123 @@ Public Function Check_FontConsistency(doc As Document) As Collection
     On Error Resume Next
 
     ' ==========================================================
-    '  PASS 1a: Quick scan of body-text paragraphs to determine
-    '  the dominant body indent and font size (needed later to
-    '  classify block-quote paragraphs by relative metrics).
+    '  SINGLE MERGED PASS: Classify paragraphs and collect font
+    '  tallies in one scan (was 2 separate passes, a major
+    '  regression cause since each pass iterates all paragraphs
+    '  with heavy object-model access).
+    '
+    '  Strategy: First pass collects body-text indent/size tallies
+    '  AND caches paragraph metadata. Then we determine dominants
+    '  and classify in memory without re-scanning the document.
     ' ==========================================================
     Dim bodyIndents As Object   ' LeftIndent (rounded) -> count
     Set bodyIndents = CreateObject("Scripting.Dictionary")
     Dim bodySizes As Object     ' FontSize (rounded) -> count
     Set bodySizes = CreateObject("Scripting.Dictionary")
 
+    Dim headingFonts As Object
+    Set headingFonts = CreateObject("Scripting.Dictionary")
+    Dim bodyFonts As Object
+    Set bodyFonts = CreateObject("Scripting.Dictionary")
+    Dim bqFonts As Object
+    Set bqFonts = CreateObject("Scripting.Dictionary")
+    Dim footnoteFonts As Object
+    Set footnoteFonts = CreateObject("Scripting.Dictionary")
+
+    ' Cache paragraph metadata in arrays to avoid re-scanning
+    Dim paraCap As Long
+    paraCap = 512
+    Dim pLevels() As Long       ' outline level
+    Dim pIndents() As Single    ' left indent
+    Dim pFontNames() As String  ' font name
+    Dim pFontSizes() As Single  ' font size
+    Dim pStarts() As Long       ' range start
+    Dim pEnds() As Long         ' range end
+    Dim pTypes() As String      ' "heading"/"body"/"block_quote"/""
+    Dim pInRange() As Boolean   ' in page range
+    ReDim pLevels(0 To paraCap - 1)
+    ReDim pIndents(0 To paraCap - 1)
+    ReDim pFontNames(0 To paraCap - 1)
+    ReDim pFontSizes(0 To paraCap - 1)
+    ReDim pStarts(0 To paraCap - 1)
+    ReDim pEnds(0 To paraCap - 1)
+    ReDim pTypes(0 To paraCap - 1)
+    ReDim pInRange(0 To paraCap - 1)
+
     Dim para As Paragraph
     Dim paraIdx As Long
     Dim fk As String
 
+    ' -- Single scan: collect all paragraph metadata --
     paraIdx = 0
     For Each para In doc.Paragraphs
+        ' Grow arrays if needed
+        If paraIdx >= paraCap Then
+            paraCap = paraCap * 2
+            ReDim Preserve pLevels(0 To paraCap - 1)
+            ReDim Preserve pIndents(0 To paraCap - 1)
+            ReDim Preserve pFontNames(0 To paraCap - 1)
+            ReDim Preserve pFontSizes(0 To paraCap - 1)
+            ReDim Preserve pStarts(0 To paraCap - 1)
+            ReDim Preserve pEnds(0 To paraCap - 1)
+            ReDim Preserve pTypes(0 To paraCap - 1)
+            ReDim Preserve pInRange(0 To paraCap - 1)
+        End If
+
+        pTypes(paraIdx) = ""
+        pInRange(paraIdx) = EngineIsInPageRange(para.Range)
+        If Not pInRange(paraIdx) Then
+            paraIdx = paraIdx + 1
+            GoTo NextScanPara
+        End If
+
+        Dim lvl As Long
+        lvl = para.OutlineLevel
+        If Err.Number <> 0 Then lvl = wdOutlineLevelBodyText: Err.Clear
+        pLevels(paraIdx) = lvl
+
+        Dim curInd As Single
+        curInd = para.Format.LeftIndent
+        If Err.Number <> 0 Then curInd = 0: Err.Clear
+        pIndents(paraIdx) = curInd
+
+        pStarts(paraIdx) = para.Range.Start
+        pEnds(paraIdx) = para.Range.End
+
+        ' Font info (read once, cache for reuse)
+        Dim curFontName As String
+        Dim curFontSize As Single
+        curFontName = para.Range.Font.Name
+        If Err.Number <> 0 Then curFontName = "": Err.Clear
+        curFontSize = para.Range.Font.Size
+        If Err.Number <> 0 Then curFontSize = 0: Err.Clear
+        If curFontSize > 1000 Then curFontSize = 0
+        pFontNames(paraIdx) = curFontName
+        pFontSizes(paraIdx) = curFontSize
+
+        ' Tally body-text indent and size (for dominant calculation)
+        If lvl = wdOutlineLevelBodyText And curFontSize > 0 Then
+            Dim indKey As String
+            indKey = CStr(CLng(curInd))
+            If bodyIndents.Exists(indKey) Then
+                bodyIndents(indKey) = bodyIndents(indKey) + 1
+            Else
+                bodyIndents.Add indKey, 1
+            End If
+            Dim szKey As String
+            szKey = CStr(CLng(curFontSize * 10))
+            If bodySizes.Exists(szKey) Then
+                bodySizes(szKey) = bodySizes(szKey) + 1
+            Else
+                bodySizes.Add szKey, 1
+            End If
+        End If
+
         paraIdx = paraIdx + 1
-        If Not EngineIsInPageRange(para.Range) Then GoTo NextPre
-        Dim preLvl As Long
-        preLvl = para.OutlineLevel
-        If Err.Number <> 0 Then Err.Clear: GoTo NextPre
-        If preLvl <> wdOutlineLevelBodyText Then GoTo NextPre
-
-        Dim preInd As Single
-        preInd = para.Format.LeftIndent
-        If Err.Number <> 0 Then preInd = 0: Err.Clear
-
-        Dim preSize As Single
-        preSize = para.Range.Font.Size
-        If Err.Number <> 0 Then preSize = 0: Err.Clear
-        If preSize <= 0 Or preSize > 1000 Then GoTo NextPre
-
-        ' Tally indent (round to nearest pt)
-        Dim indKey As String
-        indKey = CStr(CLng(preInd))
-        If bodyIndents.Exists(indKey) Then
-            bodyIndents(indKey) = bodyIndents(indKey) + 1
-        Else
-            bodyIndents.Add indKey, 1
-        End If
-
-        ' Tally font size
-        Dim szKey As String
-        szKey = CStr(CLng(preSize * 10))  ' tenths of a point for precision
-        If bodySizes.Exists(szKey) Then
-            bodySizes(szKey) = bodySizes(szKey) + 1
-        Else
-            bodySizes.Add szKey, 1
-        End If
-NextPre:
+NextScanPara:
     Next para
+    Dim totalParas As Long
+    totalParas = paraIdx
 
     ' Determine dominant body indent and font size
     Dim domBodyIndent As Single
@@ -437,179 +554,62 @@ NextPre:
     If Len(tmpDomKey) > 0 Then domBodySizeTenths = CLng(tmpDomKey) Else domBodySizeTenths = 0
     domBodySize = CSng(domBodySizeTenths) / 10#
 
-    ' ==========================================================
-    '  PASS 1b: Classify each paragraph into a type and collect
-    '  font tallies per type.
-    '  Types: "heading", "body", "block_quote"
-    ' ==========================================================
-    Dim headingFonts As Object
-    Set headingFonts = CreateObject("Scripting.Dictionary")
-    Dim bodyFonts As Object
-    Set bodyFonts = CreateObject("Scripting.Dictionary")
-    Dim bqFonts As Object
-    Set bqFonts = CreateObject("Scripting.Dictionary")
-    Dim footnoteFonts As Object
-    Set footnoteFonts = CreateObject("Scripting.Dictionary")
+    ' -- Classify paragraphs and tally fonts (in memory, no doc access) --
+    Dim pi As Long
+    For pi = 0 To totalParas - 1
+        If Not pInRange(pi) Then GoTo NextClassify
 
-    ' Store each paragraph's assigned type for Pass 3
-    ' Key = paraIndex (1-based), Value = "heading"/"body"/"block_quote"/""
-    Dim paraTypes As Object
-    Set paraTypes = CreateObject("Scripting.Dictionary")
-
-    paraIdx = 0
-    For Each para In doc.Paragraphs
-        paraIdx = paraIdx + 1
-        paraTypes.Add CStr(paraIdx), ""
-
-        If Not EngineIsInPageRange(para.Range) Then GoTo NextParaFont1
-
-        Dim lvl As Long
-        lvl = para.OutlineLevel
-        If Err.Number <> 0 Then Err.Clear: GoTo NextParaFont1
-
-        ' --- Determine type ---
         Dim paraType As String
         paraType = ""
-
         Dim isHeading As Boolean
-        isHeading = (lvl >= wdOutlineLevel1 And lvl <= wdOutlineLevel9)
+        isHeading = (pLevels(pi) >= wdOutlineLevel1 And pLevels(pi) <= wdOutlineLevel9)
 
         If isHeading Then
             paraType = "heading"
-        Else
-            ' Check if this is a block quote (style-based or metric-based)
-            Dim bqByStyle As Boolean
-            bqByStyle = False
-            Dim sn As String
-            sn = ""
-            sn = LCase(para.Style.NameLocal)
-            If Err.Number <> 0 Then sn = "": Err.Clear
-            If InStr(sn, "quote") > 0 Or InStr(sn, "block") > 0 Or _
-               InStr(sn, "extract") > 0 Then
-                bqByStyle = True
-            End If
+        ElseIf pLevels(pi) = wdOutlineLevelBodyText Then
+            ' Classify as body or block_quote using cached metrics
+            Dim isExtraIndented As Boolean
+            isExtraIndented = (pIndents(pi) > domBodyIndent + 18)
+            Dim isSmallerFont As Boolean
+            isSmallerFont = (pFontSizes(pi) > 0 And domBodySize > 0 And pFontSizes(pi) < domBodySize - 0.5)
 
-            If bqByStyle Then
+            If isExtraIndented And isSmallerFont Then
                 paraType = "block_quote"
-            ElseIf lvl = wdOutlineLevelBodyText Then
-                ' Check relative indentation and font size vs body dominant
-                Dim pInd As Single
-                pInd = para.Format.LeftIndent
-                If Err.Number <> 0 Then pInd = 0: Err.Clear
-
-                Dim pSize As Single
-                pSize = para.Range.Font.Size
-                If Err.Number <> 0 Then pSize = 0: Err.Clear
-                ' Handle mixed formatting — sample first character
-                If pSize <= 0 Or pSize > 1000 Then
-                    Dim smpRng As Range
-                    Set smpRng = para.Range.Duplicate
-                    If Err.Number = 0 Then
-                        smpRng.Collapse wdCollapseStart
-                        smpRng.MoveEnd wdCharacter, 1
-                        pSize = smpRng.Font.Size
-                        If Err.Number <> 0 Then pSize = 0: Err.Clear
-                        If pSize > 1000 Then pSize = 0
-                    Else
-                        Err.Clear
-                    End If
-                End If
-
-                ' Block quote if: indented beyond body median + 18pt
-                ' AND font smaller than body dominant font size
-                Dim isExtraIndented As Boolean
-                isExtraIndented = (pInd > domBodyIndent + 18)
-
-                Dim isSmallerFont As Boolean
-                isSmallerFont = (pSize > 0 And domBodySize > 0 And pSize < domBodySize - 0.5)
-
-                ' Also check quotation marks (with tab stripping)
-                Dim pText As String
-                pText = ""
-                pText = para.Range.Text
-                If Err.Number <> 0 Then pText = "": Err.Clear
-                pText = Replace(Replace(Replace(pText, vbCr, ""), vbTab, ""), ChrW(160), "")
-                pText = Trim$(pText)
-                Dim hasSmartQuotes As Boolean
-                hasSmartQuotes = False
-                If Len(pText) > 2 Then
-                    Dim fcCh As String
-                    Dim lcCh As String
-                    fcCh = Left$(pText, 1)
-                    lcCh = Right$(pText, 1)
-                    If (fcCh = ChrW(8220) Or fcCh = Chr(34)) And _
-                       (lcCh = ChrW(8221) Or lcCh = Chr(34)) Then
-                        hasSmartQuotes = True
-                    End If
-                End If
-
-                ' Check if paragraph is entirely italic
-                Dim pIsItalic As Boolean
-                pIsItalic = False
-                Dim pItalVal As Long
-                pItalVal = para.Range.Font.Italic
-                If Err.Number <> 0 Then pItalVal = 0: Err.Clear
-                If pItalVal = -1 Then pIsItalic = True  ' wdTrue = -1
-
-                If isExtraIndented And isSmallerFont Then
-                    paraType = "block_quote"
-                ElseIf isExtraIndented And hasSmartQuotes Then
-                    paraType = "block_quote"
-                ElseIf isExtraIndented And pIsItalic Then
-                    paraType = "block_quote"
-                ElseIf isSmallerFont And hasSmartQuotes And pInd > domBodyIndent Then
-                    paraType = "block_quote"
-                ElseIf pInd > domBodyIndent + 54 Then
-                    ' Heavy indentation: only block quote if quotes, italic,
-                    ' or smaller font (plain indented body-size text = list)
-                    If pIsItalic Or hasSmartQuotes Or isSmallerFont Then
-                        paraType = "block_quote"
-                    Else
-                        paraType = "body"
-                    End If
-                Else
-                    paraType = "body"
-                End If
+            ElseIf pIndents(pi) > domBodyIndent + 54 And isSmallerFont Then
+                paraType = "block_quote"
+            Else
+                paraType = "body"
             End If
         End If
 
-        paraTypes(CStr(paraIdx)) = paraType
+        pTypes(pi) = paraType
 
-        ' --- Collect font tally for this type ---
-        Dim paraFontName As String
-        Dim paraFontSize As Single
-        paraFontName = para.Range.Font.Name
-        If Err.Number <> 0 Then paraFontName = "": Err.Clear
-        paraFontSize = para.Range.Font.Size
-        If Err.Number <> 0 Then paraFontSize = 0: Err.Clear
-
-        ' Skip if font info is indeterminate (mixed within paragraph)
-        If Len(paraFontName) = 0 Or paraFontSize <= 0 Or paraFontSize > 1000 Then GoTo NextParaFont1
-
-        fk = FontKey(paraFontName, paraFontSize)
-
-        Select Case paraType
-            Case "heading"
-                If headingFonts.Exists(fk) Then
-                    headingFonts(fk) = headingFonts(fk) + 1
-                Else
-                    headingFonts.Add fk, 1
-                End If
-            Case "body"
-                If bodyFonts.Exists(fk) Then
-                    bodyFonts(fk) = bodyFonts(fk) + 1
-                Else
-                    bodyFonts.Add fk, 1
-                End If
-            Case "block_quote"
-                If bqFonts.Exists(fk) Then
-                    bqFonts(fk) = bqFonts(fk) + 1
-                Else
-                    bqFonts.Add fk, 1
-                End If
-        End Select
-NextParaFont1:
-    Next para
+        ' Tally font for this type
+        If Len(pFontNames(pi)) > 0 And pFontSizes(pi) > 0 Then
+            fk = FontKey(pFontNames(pi), pFontSizes(pi))
+            Select Case paraType
+                Case "heading"
+                    If headingFonts.Exists(fk) Then
+                        headingFonts(fk) = headingFonts(fk) + 1
+                    Else
+                        headingFonts.Add fk, 1
+                    End If
+                Case "body"
+                    If bodyFonts.Exists(fk) Then
+                        bodyFonts(fk) = bodyFonts(fk) + 1
+                    Else
+                        bodyFonts.Add fk, 1
+                    End If
+                Case "block_quote"
+                    If bqFonts.Exists(fk) Then
+                        bqFonts(fk) = bqFonts(fk) + 1
+                    Else
+                        bqFonts.Add fk, 1
+                    End If
+            End Select
+        End If
+NextClassify:
+    Next pi
 
     ' -- Footnotes ------------------------------------------
     Dim fn As Footnote
@@ -656,25 +656,24 @@ NextFootnote:
     If bqTotalCount < 2 Then domBQ = ""
 
     ' ==========================================================
-    '  PASS 3: Flag deviations at paragraph and run level
+    '  PASS 3: Flag deviations using cached data.
+    '  Paragraph-level checks use cached font info (no doc access).
+    '  Run-level checks only done when paragraph font is mixed
+    '  (indicated by empty/zero cached font info).
     ' ==========================================================
-    paraIdx = 0
-    For Each para In doc.Paragraphs
-        paraIdx = paraIdx + 1
+    Dim paraFontName As String
+    Dim paraFontSize As Single
 
-        If Not EngineIsInPageRange(para.Range) Then GoTo NextParaFont2
-
-        Dim curType As String
-        curType = ""
-        If paraTypes.Exists(CStr(paraIdx)) Then curType = paraTypes(CStr(paraIdx))
-        If Len(curType) = 0 Then GoTo NextParaFont2
+    For pi = 0 To totalParas - 1
+        If Not pInRange(pi) Then GoTo NextParaFont2
+        If Len(pTypes(pi)) = 0 Then GoTo NextParaFont2
 
         Dim expectedFont As String
         Dim context As String
         expectedFont = ""
         context = ""
 
-        Select Case curType
+        Select Case pTypes(pi)
             Case "heading"
                 If Len(domHeading) > 0 Then
                     expectedFont = domHeading
@@ -694,92 +693,91 @@ NextFootnote:
 
         If Len(expectedFont) = 0 Then GoTo NextParaFont2
 
-        ' -- Check at paragraph level -----------------------
-        paraFontName = para.Range.Font.Name
-        If Err.Number <> 0 Then paraFontName = "": Err.Clear
-        paraFontSize = para.Range.Font.Size
-        If Err.Number <> 0 Then paraFontSize = 0: Err.Clear
+        ' -- Check at paragraph level using cached data ----
+        paraFontName = pFontNames(pi)
+        paraFontSize = pFontSizes(pi)
 
-        If Len(paraFontName) > 0 And paraFontSize > 0 And paraFontSize < 1000 Then
+        If Len(paraFontName) > 0 And paraFontSize > 0 Then
             fk = FontKey(paraFontName, paraFontSize)
             If fk <> expectedFont Then
                 Dim findingPara As Object
                 Dim locP As String
-                locP = EngineGetLocationString(para.Range, doc)
+                Dim paraRng As Range
+                Set paraRng = doc.Range(pStarts(pi), pEnds(pi))
+                locP = EngineGetLocationString(paraRng, doc)
 
                 Dim cleanParaText As String
-                cleanParaText = Trim$(Replace(Left$(para.Range.Text, 60), vbCr, ""))
+                cleanParaText = Trim$(Replace(Left$(paraRng.Text, 60), vbCr, ""))
 
                 Set findingPara = CreateIssueDict(RULE_NAME_FONT, locP, _
                     "Font inconsistency in " & context & ": '" & cleanParaText & _
                     "...' uses " & FontDescription(fk) & " but dominant " & _
                     context & " font is " & FontDescription(expectedFont), _
                     "Change to " & FontDescription(expectedFont), _
-                    para.Range.Start, para.Range.End, "error")
+                    pStarts(pi), pEnds(pi), "error")
                 issues.Add findingPara
-                ' Skip run-level check if paragraph-level already flagged
                 GoTo NextParaFont2
             End If
         End If
 
-        ' -- Check at run level for mid-paragraph changes ---
-        ' Walk formatting runs using wdCharacterFormatting (fast)
-        Dim runRange As Range
-        Dim runText As String
-        Dim isField As Boolean
+        ' -- Run-level check only for mixed-font paragraphs --
+        ' (Font info was 0/empty = mixed formatting detected in scan)
+        If Len(paraFontName) = 0 Or paraFontSize <= 0 Then
+            If pEnds(pi) - pStarts(pi) > 1 Then
+                Dim runRange As Range
+                Dim runText As String
+                Dim isField As Boolean
 
-        If para.Range.End - para.Range.Start > 1 Then
-            Set runRange = para.Range.Duplicate
-            runRange.Collapse wdCollapseStart
+                Set runRange = doc.Range(pStarts(pi), pEnds(pi))
+                runRange.Collapse wdCollapseStart
 
-            On Error Resume Next
-            Do While runRange.Start < para.Range.End
-                runRange.MoveEnd wdCharacterFormatting, 1
-                If runRange.Start >= para.Range.End Then Exit Do
+                On Error Resume Next
+                Do While runRange.Start < pEnds(pi)
+                    runRange.MoveEnd wdCharacterFormatting, 1
+                    If runRange.Start >= pEnds(pi) Then Exit Do
 
-                Err.Clear
-                runText = runRange.Text
-                If Err.Number <> 0 Then Err.Clear: GoTo AdvanceFontRun
+                    Err.Clear
+                    runText = runRange.Text
+                    If Err.Number <> 0 Then Err.Clear: GoTo AdvanceFontRun
 
-                ' Skip whitespace-only runs
-                If Len(Trim$(Replace(Replace(runText, vbCr, ""), vbLf, ""))) = 0 Then
-                    GoTo AdvanceFontRun
-                End If
-
-                ' Skip field codes
-                isField = False
-                If runRange.Fields.Count > 0 Then isField = True
-                If Err.Number <> 0 Then Err.Clear: isField = False
-
-                If Not isField Then
-                    fk = FontKey(runRange.Font.Name, runRange.Font.Size)
-                    If fk <> expectedFont And Len(runRange.Font.Name) > 0 And _
-                       runRange.Font.Size > 0 And runRange.Font.Size < 1000 Then
-                        Dim findingRun As Object
-                        Dim locR As String
-                        Dim cleanRunText As String
-                        locR = EngineGetLocationString(runRange, doc)
-                        cleanRunText = Trim$(Replace(Left$(runText, 40), vbCr, ""))
-
-                        Set findingRun = CreateIssueDict(RULE_NAME_FONT, locR, _
-                            "Mid-paragraph font change in " & context & ": '" & cleanRunText & _
-                            "' uses " & FontDescription(fk) & " instead of " & FontDescription(expectedFont), _
-                            "Change to " & FontDescription(expectedFont), _
-                            runRange.Start, runRange.End, "error")
-                        issues.Add findingRun
-                        On Error GoTo 0
-                        GoTo NextParaFont2
+                    If Len(Trim$(Replace(Replace(runText, vbCr, ""), vbLf, ""))) = 0 Then
+                        GoTo AdvanceFontRun
                     End If
-                End If
+
+                    isField = False
+                    If runRange.Fields.Count > 0 Then isField = True
+                    If Err.Number <> 0 Then Err.Clear: isField = False
+
+                    If Not isField Then
+                        fk = FontKey(runRange.Font.Name, runRange.Font.Size)
+                        If fk <> expectedFont And Len(runRange.Font.Name) > 0 And _
+                           runRange.Font.Size > 0 And runRange.Font.Size < 1000 Then
+                            Dim findingRun As Object
+                            Dim locR As String
+                            Dim cleanRunText As String
+                            locR = EngineGetLocationString(runRange, doc)
+                            cleanRunText = Trim$(Replace(Left$(runText, 40), vbCr, ""))
+
+                            Set findingRun = CreateIssueDict(RULE_NAME_FONT, locR, _
+                                "Mid-paragraph font change in " & context & ": '" & cleanRunText & _
+                                "' uses " & FontDescription(fk) & " instead of " & FontDescription(expectedFont), _
+                                "Change to " & FontDescription(expectedFont), _
+                                runRange.Start, runRange.End, "error")
+                            issues.Add findingRun
+                            On Error GoTo 0
+                            GoTo NextParaFont2
+                        End If
+                    End If
 
 AdvanceFontRun:
-                runRange.Collapse wdCollapseEnd
-            Loop
-            On Error GoTo 0
+                    runRange.Collapse wdCollapseEnd
+                Loop
+                On Error GoTo 0
+            End If
         End If
 
 NextParaFont2:
-    Next para
+    Next pi
 
     ' ==========================================================
     '  PASS 4: Check footnote font deviations

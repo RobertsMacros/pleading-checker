@@ -444,6 +444,10 @@ Public Function Check_BracketIntegrity(doc As Document) As Collection
 
         If LenB(paraText) = 0 Then GoTo NxtPara
 
+        ' Compute list prefix length for position correction
+        Dim bktListPrefixLen As Long
+        bktListPrefixLen = GetDashListPrefixLen(para, paraText)
+
         ' Reset counters
         parenOpen = 0: parenClose = 0
         sqOpen = 0: sqClose = 0
@@ -455,7 +459,7 @@ Public Function Check_BracketIntegrity(doc As Document) As Collection
 
         For i = 0 To bMax Step 2
             code = b(i) Or (CLng(b(i + 1)) * 256&)
-            pos = paraStart + (i \ 2)
+            pos = paraStart + (i \ 2) - bktListPrefixLen
 
             Select Case code
                 Case 40   ' (

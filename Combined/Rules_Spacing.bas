@@ -66,12 +66,10 @@ Public Function Check_DoubleSpaces(doc As Document) As Collection
 
         If Not EngineIsInPageRange(paraRange) Then GoTo NextParaDS
 
-        ' Skip block quotes / indented extracts
-        Dim isBlockQ As Boolean
-        isBlockQ = False
-        isBlockQ = Application.Run("Rules_Formatting.IsBlockQuotePara", para)
-        If Err.Number <> 0 Then isBlockQ = False: Err.Clear
-        If isBlockQ Then GoTo NextParaDS
+        ' Block quotes are filtered at engine level by FilterBlockQuoteIssues.
+        ' Removed per-paragraph Application.Run("IsBlockQuotePara") call here
+        ' to eliminate heavy object-model traffic (font/italic/text/style
+        ' per paragraph via cross-module dispatch was a major regression cause).
 
         paraText = StripParaMarkChar(paraRange.Text)
         If Err.Number <> 0 Then Err.Clear: GoTo NextParaDS

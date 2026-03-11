@@ -472,6 +472,15 @@ Private Sub UserForm_Initialize()
 
     ' -- Load brand list ---------------------------------------
     RefreshBrandList
+
+    ' -- Hardcoded form size: 1000 x 1000 points ---------------
+    ' VBA UserForm Width/Height are in points.
+    ' Set explicitly here as a defensive override in case the
+    ' .frm persisted ClientWidth/ClientHeight values are ignored
+    ' or overridden by control layout.
+    Me.Width = 1000
+    Me.Height = 1000
+    Debug.Print "UserForm_Initialize: Width=" & Me.Width & " Height=" & Me.Height
 End Sub
 
 ' ============================================================
@@ -602,6 +611,15 @@ Private Sub btnRun_Click()
     DoEvents
 
     Set lastResults = PleadingsEngine.RunAllPleadingsRules(ActiveDocument, ruleConfig)
+
+    ' Show performance summary in Immediate window
+    If PleadingsEngine.ENABLE_PROFILING Then
+        Dim perfSummary As String
+        perfSummary = PleadingsEngine.GetPerformanceSummary()
+        ' Performance summary is already printed by the engine to Debug.Print
+        ' Also show final form dimensions for diagnostics
+        Debug.Print "UserForm final: Width=" & Me.Width & " Height=" & Me.Height
+    End If
 
     ' Show summary
     Dim summary As String

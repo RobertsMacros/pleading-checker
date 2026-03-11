@@ -246,6 +246,10 @@ Public Function Check_SingleQuotesDefault( _
         b = pText
         bMax = UBound(b) - 1
 
+        ' Compute list prefix length for position correction
+        Dim r32ListPrefixLen As Long
+        r32ListPrefixLen = GetQListPrefixLen(para, pText)
+
         ' Byte-array scan: flag the wrong quote type
         For i = 0 To bMax Step 2
             code = b(i) Or (CLng(b(i + 1)) * 256&)
@@ -268,7 +272,7 @@ Public Function Check_SingleQuotesDefault( _
             End If
 
             If isWrongQuote Then
-                pos = pStart + (i \ 2)
+                pos = pStart + (i \ 2) - r32ListPrefixLen
                 Err.Clear
                 locRng.SetRange pos, pos + 1
                 If Err.Number <> 0 Then
@@ -345,6 +349,10 @@ Public Function Check_SmartQuoteConsistency( _
         b = pText
         bMax = UBound(b) - 1
 
+        ' Compute list prefix length for position correction
+        Dim r33ListPrefixLen As Long
+        r33ListPrefixLen = GetQListPrefixLen(para, pText)
+
         For i = 0 To bMax Step 2
             code = b(i) Or (CLng(b(i + 1)) * 256&)
 
@@ -354,21 +362,21 @@ Public Function Check_SmartQuoteConsistency( _
                 If Not preferSmart Then GoTo NxtCode33
                 ' Prefer smart -> collect straight positions
                 If fCnt >= fCap Then fCap = fCap * 2: ReDim Preserve fPos(0 To fCap - 1)
-                fPos(fCnt) = pStart + (i \ 2): fCnt = fCnt + 1
+                fPos(fCnt) = pStart + (i \ 2) - r33ListPrefixLen: fCnt = fCnt + 1
 
             Case QDO, QDC
                 cSmart = cSmart + 1
                 If preferSmart Then GoTo NxtCode33
                 ' Prefer straight -> collect smart positions
                 If fCnt >= fCap Then fCap = fCap * 2: ReDim Preserve fPos(0 To fCap - 1)
-                fPos(fCnt) = pStart + (i \ 2): fCnt = fCnt + 1
+                fPos(fCnt) = pStart + (i \ 2) - r33ListPrefixLen: fCnt = fCnt + 1
 
             Case QS
                 If Not ByteIsApostrophe(b, i, bMax) Then
                     cStraight = cStraight + 1
                     If preferSmart Then
                         If fCnt >= fCap Then fCap = fCap * 2: ReDim Preserve fPos(0 To fCap - 1)
-                        fPos(fCnt) = pStart + (i \ 2): fCnt = fCnt + 1
+                        fPos(fCnt) = pStart + (i \ 2) - r33ListPrefixLen: fCnt = fCnt + 1
                     End If
                 End If
 
@@ -376,7 +384,7 @@ Public Function Check_SmartQuoteConsistency( _
                 cSmart = cSmart + 1
                 If Not preferSmart Then
                     If fCnt >= fCap Then fCap = fCap * 2: ReDim Preserve fPos(0 To fCap - 1)
-                    fPos(fCnt) = pStart + (i \ 2): fCnt = fCnt + 1
+                    fPos(fCnt) = pStart + (i \ 2) - r33ListPrefixLen: fCnt = fCnt + 1
                 End If
 
             Case QSC
@@ -384,7 +392,7 @@ Public Function Check_SmartQuoteConsistency( _
                     cSmart = cSmart + 1
                     If Not preferSmart Then
                         If fCnt >= fCap Then fCap = fCap * 2: ReDim Preserve fPos(0 To fCap - 1)
-                        fPos(fCnt) = pStart + (i \ 2): fCnt = fCnt + 1
+                        fPos(fCnt) = pStart + (i \ 2) - r33ListPrefixLen: fCnt = fCnt + 1
                     End If
                 End If
             End Select
@@ -574,6 +582,33 @@ Private Function EngineGetLocationString(rng As Object, _
         EngineGetLocationString = "unknown location"
         Err.Clear
     End If
+    On Error GoTo 0
+End Function
+
+' ------------------------------------------------------------
+'  List prefix length for byte-array position correction.
+'  para.Range.Text includes auto-generated list numbering
+'  (e.g. "1." & vbTab) but para.Range.Start does NOT account
+'  for it, so byte-array positions must subtract this offset.
+' ------------------------------------------------------------
+Private Function GetQListPrefixLen(para As Paragraph, ByVal paraText As String) As Long
+    GetQListPrefixLen = 0
+    On Error Resume Next
+    Dim lStr As String
+    lStr = para.Range.ListFormat.ListString
+    If Err.Number <> 0 Then Err.Clear: On Error GoTo 0: Exit Function
+    If Len(lStr) = 0 Then On Error GoTo 0: Exit Function
+    ' Verify the text actually starts with the list string
+    If Len(paraText) > Len(lStr) Then
+        If Left$(paraText, Len(lStr)) = lStr Then
+            GetQListPrefixLen = Len(lStr)
+            ' Account for tab separator after list number
+            If Mid$(paraText, GetQListPrefixLen + 1, 1) = vbTab Then
+                GetQListPrefixLen = GetQListPrefixLen + 1
+            End If
+        End If
+    End If
+    Err.Clear
     On Error GoTo 0
 End Function
 

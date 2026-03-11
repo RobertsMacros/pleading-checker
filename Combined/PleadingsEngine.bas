@@ -52,6 +52,18 @@ Private spaceStylePref As String   ' "ONE" or "TWO"
 Private ruleErrorCount  As Long
 Private ruleErrorLog    As String
 
+' -- Profiling infrastructure --
+Public Const ENABLE_PROFILING As Boolean = True
+Private perfTimings     As Object   ' Dictionary: label -> elapsed Single
+Private perfCounters    As Object   ' Dictionary: label -> Long count
+Private perfStarts      As Object   ' Dictionary: label -> start Timer value
+Private totalStartTime  As Single
+
+' -- Paragraph position cache (built once per run for O(log N) lookups) --
+Private paraStartPos()  As Long
+Private paraStartCount  As Long
+Private paraCacheValid  As Boolean
+
 ' ============================================================
 '  ENTRY POINT
 ' ============================================================
@@ -232,6 +244,191 @@ Public Function InitRuleConfig() As Object
 End Function
 
 ' ============================================================
+'  PROFILING INFRASTRUCTURE
+' ============================================================
+Public Sub PerfTimerStart(ByVal label As String)
+    If Not ENABLE_PROFILING Then Exit Sub
+    On Error Resume Next
+    If perfStarts Is Nothing Then Set perfStarts = CreateObject("Scripting.Dictionary")
+    perfStarts(label) = Timer
+    On Error GoTo 0
+End Sub
+
+Public Sub PerfTimerEnd(ByVal label As String)
+    If Not ENABLE_PROFILING Then Exit Sub
+    On Error Resume Next
+    If perfTimings Is Nothing Then Set perfTimings = CreateObject("Scripting.Dictionary")
+    Dim elapsed As Single
+    elapsed = Timer - CSng(perfStarts(label))
+    If elapsed < 0 Then elapsed = elapsed + 86400  ' midnight rollover
+    If perfTimings.Exists(label) Then
+        perfTimings(label) = CSng(perfTimings(label)) + elapsed
+    Else
+        perfTimings(label) = elapsed
+    End If
+    On Error GoTo 0
+End Sub
+
+Public Sub PerfCount(ByVal label As String, Optional ByVal increment As Long = 1)
+    If Not ENABLE_PROFILING Then Exit Sub
+    On Error Resume Next
+    If perfCounters Is Nothing Then Set perfCounters = CreateObject("Scripting.Dictionary")
+    If perfCounters.Exists(label) Then
+        perfCounters(label) = CLng(perfCounters(label)) + increment
+    Else
+        perfCounters(label) = increment
+    End If
+    On Error GoTo 0
+End Sub
+
+Private Sub ResetProfiling()
+    Set perfTimings = CreateObject("Scripting.Dictionary")
+    Set perfCounters = CreateObject("Scripting.Dictionary")
+    Set perfStarts = CreateObject("Scripting.Dictionary")
+    totalStartTime = Timer
+    paraCacheValid = False
+End Sub
+
+Public Function GetPerformanceSummary() As String
+    If Not ENABLE_PROFILING Then
+        GetPerformanceSummary = "(Profiling disabled)"
+        Exit Function
+    End If
+
+    Dim totalElapsed As Single
+    totalElapsed = Timer - totalStartTime
+    If totalElapsed < 0 Then totalElapsed = totalElapsed + 86400
+
+    Dim result As String
+    result = "=== PERFORMANCE SUMMARY ===" & vbCrLf
+    result = result & "Total runtime: " & Format(totalElapsed, "0.00") & "s" & vbCrLf & vbCrLf
+
+    ' Sort timings by descending elapsed time
+    If Not perfTimings Is Nothing Then
+        If perfTimings.Count > 0 Then
+            Dim labels() As String
+            Dim times() As Single
+            Dim n As Long
+            n = perfTimings.Count
+            ReDim labels(0 To n - 1)
+            ReDim times(0 To n - 1)
+            Dim keys As Variant
+            keys = perfTimings.keys
+            Dim idx As Long
+            For idx = 0 To n - 1
+                labels(idx) = CStr(keys(idx))
+                times(idx) = CSng(perfTimings(keys(idx)))
+            Next idx
+
+            ' Bubble sort descending by time (small N)
+            Dim swapped As Boolean
+            Dim tmpS As String
+            Dim tmpF As Single
+            Do
+                swapped = False
+                Dim si As Long
+                For si = 0 To n - 2
+                    If times(si) < times(si + 1) Then
+                        tmpF = times(si): times(si) = times(si + 1): times(si + 1) = tmpF
+                        tmpS = labels(si): labels(si) = labels(si + 1): labels(si + 1) = tmpS
+                        swapped = True
+                    End If
+                Next si
+            Loop While swapped
+
+            result = result & "-- Timings (slowest first) --" & vbCrLf
+            For idx = 0 To n - 1
+                result = result & "  " & labels(idx) & ": " & Format(times(idx), "0.000") & "s"
+                If Not perfCounters Is Nothing Then
+                    If perfCounters.Exists(labels(idx) & "_count") Then
+                        result = result & " (" & perfCounters(labels(idx) & "_count") & " items)"
+                    End If
+                End If
+                result = result & vbCrLf
+            Next idx
+        End If
+    End If
+
+    ' Counters section
+    If Not perfCounters Is Nothing Then
+        If perfCounters.Count > 0 Then
+            result = result & vbCrLf & "-- Counters --" & vbCrLf
+            keys = perfCounters.keys
+            For idx = 0 To perfCounters.Count - 1
+                result = result & "  " & CStr(keys(idx)) & ": " & perfCounters(keys(idx)) & vbCrLf
+            Next idx
+        End If
+    End If
+
+    GetPerformanceSummary = result
+End Function
+
+' ============================================================
+'  PARAGRAPH CACHE (built once per run for O(log N) lookups)
+' ============================================================
+Private Sub BuildParagraphCache(doc As Document)
+    If paraCacheValid Then Exit Sub
+    PerfTimerStart "BuildParagraphCache"
+
+    Dim para As Paragraph
+    Dim cap As Long
+    cap = 512
+    ReDim paraStartPos(0 To cap - 1)
+    paraStartCount = 0
+
+    On Error Resume Next
+    For Each para In doc.Paragraphs
+        If paraStartCount >= cap Then
+            cap = cap * 2
+            ReDim Preserve paraStartPos(0 To cap - 1)
+        End If
+        paraStartPos(paraStartCount) = para.Range.Start
+        paraStartCount = paraStartCount + 1
+    Next para
+    On Error GoTo 0
+
+    paraCacheValid = True
+    PerfTimerEnd "BuildParagraphCache"
+    PerfCount "paragraphs_cached", paraStartCount
+End Sub
+
+Private Function FindParagraphIndex(ByVal pos As Long) As Long
+    If Not paraCacheValid Or paraStartCount = 0 Then
+        FindParagraphIndex = 0
+        Exit Function
+    End If
+
+    ' Binary search for paragraph containing this position
+    Dim lo As Long, hi As Long, mid As Long
+    lo = 0
+    hi = paraStartCount - 1
+
+    Do While lo <= hi
+        mid = (lo + hi) \ 2
+        If mid < paraStartCount - 1 Then
+            If paraStartPos(mid) <= pos And paraStartPos(mid + 1) > pos Then
+                FindParagraphIndex = mid + 1  ' 1-based
+                Exit Function
+            ElseIf paraStartPos(mid) > pos Then
+                hi = mid - 1
+            Else
+                lo = mid + 1
+            End If
+        Else
+            ' Last paragraph
+            If paraStartPos(mid) <= pos Then
+                FindParagraphIndex = mid + 1
+            Else
+                FindParagraphIndex = mid
+            End If
+            Exit Function
+        End If
+    Loop
+
+    FindParagraphIndex = lo + 1  ' 1-based
+End Function
+
+' ============================================================
 '  APPLICATION.RUN DISPATCHER
 '  Calls a public function by string name. Returns a
 '  Collection of issue dictionary, or an empty Collection if
@@ -274,6 +471,12 @@ Public Function RunAllPleadingsRules(doc As Document, _
     ruleErrorCount = 0
     ruleErrorLog = ""
 
+    ' -- Initialise profiling --
+    ResetProfiling
+
+    ' -- Build paragraph position cache (one scan, enables O(log N) lookups) --
+    BuildParagraphCache doc
+
     ' -- Suppress screen redraws for performance ----
     Application.ScreenUpdating = False
 
@@ -281,85 +484,113 @@ Public Function RunAllPleadingsRules(doc As Document, _
 
     ' -- Whitelist rule first (populates whitelistDict) --
     If IsRuleEnabled(config, "custom_term_whitelist") Then
+        PerfTimerStart "custom_term_whitelist"
         AddIssuesToCollection allIssues, _
             TryRunRule("Rules_Terms.Check_CustomTermWhitelist", doc)
+        PerfTimerEnd "custom_term_whitelist"
     End If
     DoEvents
 
     ' -- Spelling (bidirectional UK/US) --
     If IsRuleEnabled(config, "spelling") Then
+        PerfTimerStart "spelling"
         AddIssuesToCollection allIssues, _
             TryRunRule("Rules_Spelling.Check_Spelling", doc)
+        PerfTimerEnd "spelling"
     End If
 
     DoEvents
     ' -- Text scanning rules --
     If IsRuleEnabled(config, "repeated_words") Then
+        PerfTimerStart "repeated_words"
         AddIssuesToCollection allIssues, _
             TryRunRule("Rules_TextScan.Check_RepeatedWords", doc)
+        PerfTimerEnd "repeated_words"
     End If
 
     If IsRuleEnabled(config, "spell_out_under_ten") Then
+        PerfTimerStart "spell_out_under_ten"
         AddIssuesToCollection allIssues, _
             TryRunRule("Rules_TextScan.Check_SpellOutUnderTen", doc)
+        PerfTimerEnd "spell_out_under_ten"
     End If
 
     DoEvents
     ' -- Spacing rules --
     If IsRuleEnabled(config, "double_spaces") Then
+        PerfTimerStart "double_spaces"
         AddIssuesToCollection allIssues, _
             TryRunRule("Rules_Spacing.Check_DoubleSpaces", doc)
+        PerfTimerEnd "double_spaces"
     End If
 
     If IsRuleEnabled(config, "double_commas") Then
+        PerfTimerStart "double_commas"
         AddIssuesToCollection allIssues, _
             TryRunRule("Rules_Spacing.Check_DoubleCommas", doc)
+        PerfTimerEnd "double_commas"
     End If
 
     If IsRuleEnabled(config, "space_before_punct") Then
+        PerfTimerStart "space_before_punct"
         AddIssuesToCollection allIssues, _
             TryRunRule("Rules_Spacing.Check_SpaceBeforePunct", doc)
+        PerfTimerEnd "space_before_punct"
     End If
 
     If IsRuleEnabled(config, "missing_space_after_dot") Then
+        PerfTimerStart "missing_space_after_dot"
         AddIssuesToCollection allIssues, _
             TryRunRule("Rules_Spacing.Check_MissingSpaceAfterDot", doc)
+        PerfTimerEnd "missing_space_after_dot"
     End If
 
     If IsRuleEnabled(config, "trailing_spaces") Then
+        PerfTimerStart "trailing_spaces"
         AddIssuesToCollection allIssues, _
             TryRunRule("Rules_Spacing.Check_TrailingSpaces", doc)
+        PerfTimerEnd "trailing_spaces"
     End If
 
     DoEvents
     ' -- Numbering rules --
     If IsRuleEnabled(config, "sequential_numbering") Then
+        PerfTimerStart "sequential_numbering"
         AddIssuesToCollection allIssues, _
             TryRunRule("Rules_Numbering.Check_SequentialNumbering", doc)
+        PerfTimerEnd "sequential_numbering"
     End If
 
     If IsRuleEnabled(config, "clause_number_format") Then
+        PerfTimerStart "clause_number_format"
         AddIssuesToCollection allIssues, _
             TryRunRule("Rules_Numbering.Check_ClauseNumberFormat", doc)
+        PerfTimerEnd "clause_number_format"
     End If
 
     DoEvents
     ' -- Heading rules --
     If IsRuleEnabled(config, "heading_capitalisation") Then
+        PerfTimerStart "heading_capitalisation"
         AddIssuesToCollection allIssues, _
             TryRunRule("Rules_Headings.Check_HeadingCapitalisation", doc)
+        PerfTimerEnd "heading_capitalisation"
     End If
 
     If IsRuleEnabled(config, "title_formatting") Then
+        PerfTimerStart "title_formatting"
         AddIssuesToCollection allIssues, _
             TryRunRule("Rules_Headings.Check_TitleFormatting", doc)
+        PerfTimerEnd "title_formatting"
     End If
 
     DoEvents
     ' -- Term rules --
     If IsRuleEnabled(config, "defined_terms") Then
+        PerfTimerStart "defined_terms"
         AddIssuesToCollection allIssues, _
             TryRunRule("Rules_Terms.Check_DefinedTerms", doc)
+        PerfTimerEnd "defined_terms"
     End If
 
     ' phrase_consistency removed (false positives on words with different meanings)
@@ -367,84 +598,109 @@ Public Function RunAllPleadingsRules(doc As Document, _
     DoEvents
     ' -- Formatting consistency (combined: paragraph breaks, font, colour) --
     If IsRuleEnabled(config, "formatting_consistency") Then
+        PerfTimerStart "formatting_consistency"
         AddIssuesToCollection allIssues, _
             TryRunRule("Rules_Formatting.Check_ParagraphBreakConsistency", doc)
         AddIssuesToCollection allIssues, _
             TryRunRule("Rules_Formatting.Check_FontConsistency", doc)
         AddIssuesToCollection allIssues, _
             TryRunRule("Rules_Spelling.Check_ColourFormatting", doc)
+        PerfTimerEnd "formatting_consistency"
     End If
 
     DoEvents
     ' -- Number format rules --
     If IsRuleEnabled(config, "date_time_format") Then
+        PerfTimerStart "date_time_format"
         AddIssuesToCollection allIssues, _
             TryRunRule("Rules_NumberFormats.Check_DateTimeFormat", doc)
+        PerfTimerEnd "date_time_format"
     End If
 
     If IsRuleEnabled(config, "currency_number_format") Then
+        PerfTimerStart "currency_number_format"
         AddIssuesToCollection allIssues, _
             TryRunRule("Rules_NumberFormats.Check_CurrencyNumberFormat", doc)
+        PerfTimerEnd "currency_number_format"
     End If
 
     DoEvents
     ' -- List rules (combined: inline format, punctuation) --
     If IsRuleEnabled(config, "list_rules") Then
+        PerfTimerStart "list_rules"
         AddIssuesToCollection allIssues, _
             TryRunRule("Rules_Lists.Check_InlineListFormat", doc)
         AddIssuesToCollection allIssues, _
             TryRunRule("Rules_Lists.Check_ListPunctuation", doc)
+        PerfTimerEnd "list_rules"
     End If
 
     DoEvents
     ' -- UK/US variant rules (in Rules_Spelling) --
     If IsRuleEnabled(config, "licence_license") Then
+        PerfTimerStart "licence_license"
         AddIssuesToCollection allIssues, _
             TryRunRule("Rules_Spelling.Check_LicenceLicense", doc)
+        PerfTimerEnd "licence_license"
     End If
 
     If IsRuleEnabled(config, "check_cheque") Then
+        PerfTimerStart "check_cheque"
         AddIssuesToCollection allIssues, _
             TryRunRule("Rules_Spelling.Check_CheckCheque", doc)
+        PerfTimerEnd "check_cheque"
     End If
 
     DoEvents
     ' -- Punctuation rules --
     If IsRuleEnabled(config, "slash_style") Then
+        PerfTimerStart "slash_style"
         AddIssuesToCollection allIssues, _
             TryRunRule("Rules_Punctuation.Check_SlashStyle", doc)
+        PerfTimerEnd "slash_style"
     End If
 
     If IsRuleEnabled(config, "bracket_integrity") Then
+        PerfTimerStart "bracket_integrity"
         AddIssuesToCollection allIssues, _
             TryRunRule("Rules_Punctuation.Check_BracketIntegrity", doc)
+        PerfTimerEnd "bracket_integrity"
     End If
 
     If IsRuleEnabled(config, "dash_usage") Then
+        PerfTimerStart "dash_usage"
         AddIssuesToCollection allIssues, _
             TryRunRule("Rules_Punctuation.Check_DashUsage", doc)
+        PerfTimerEnd "dash_usage"
     End If
 
     DoEvents
     ' -- Quote rules --
     If IsRuleEnabled(config, "quotation_mark_consistency") Then
+        PerfTimerStart "quotation_mark_consistency"
         AddIssuesToCollection allIssues, _
             TryRunRule("Rules_Quotes.Check_QuotationMarkConsistency", doc)
+        PerfTimerEnd "quotation_mark_consistency"
     End If
 
     If IsRuleEnabled(config, "single_quotes_default") Then
+        PerfTimerStart "single_quotes_default"
         AddIssuesToCollection allIssues, _
             TryRunRule("Rules_Quotes.Check_SingleQuotesDefault", doc)
+        PerfTimerEnd "single_quotes_default"
     End If
 
     If IsRuleEnabled(config, "smart_quote_consistency") Then
+        PerfTimerStart "smart_quote_consistency"
         AddIssuesToCollection allIssues, _
             TryRunRule("Rules_Quotes.Check_SmartQuoteConsistency", doc)
+        PerfTimerEnd "smart_quote_consistency"
     End If
 
     DoEvents
     ' -- Footnote rules (combined: integrity, not-endnotes, Hart's rules) --
     If IsRuleEnabled(config, "footnote_rules") Then
+        PerfTimerStart "footnote_rules"
         AddIssuesToCollection allIssues, _
             TryRunRule("Rules_FootnoteIntegrity.Check_FootnoteIntegrity", doc)
         AddIssuesToCollection allIssues, _
@@ -455,37 +711,48 @@ Public Function RunAllPleadingsRules(doc As Document, _
             TryRunRule("Rules_FootnoteHarts.Check_FootnoteInitialCapital", doc)
         AddIssuesToCollection allIssues, _
             TryRunRule("Rules_FootnoteHarts.Check_FootnoteAbbreviationDictionary", doc)
+        PerfTimerEnd "footnote_rules"
     End If
 
     DoEvents
     ' -- Brand names --
     If IsRuleEnabled(config, "brand_name_enforcement") Then
+        PerfTimerStart "brand_name_enforcement"
         AddIssuesToCollection allIssues, _
             TryRunRule("Rules_Brands.Check_BrandNameEnforcement", doc)
+        PerfTimerEnd "brand_name_enforcement"
     End If
 
     DoEvents
     ' -- Legal term rules --
     If IsRuleEnabled(config, "mandated_legal_term_forms") Then
+        PerfTimerStart "mandated_legal_term_forms"
         AddIssuesToCollection allIssues, _
             TryRunRule("Rules_LegalTerms.Check_MandatedLegalTermForms", doc)
+        PerfTimerEnd "mandated_legal_term_forms"
     End If
 
     If IsRuleEnabled(config, "always_capitalise_terms") Then
+        PerfTimerStart "always_capitalise_terms"
         AddIssuesToCollection allIssues, _
             TryRunRule("Rules_LegalTerms.Check_AlwaysCapitaliseTerms", doc)
+        PerfTimerEnd "always_capitalise_terms"
     End If
 
     DoEvents
     ' -- Italic rules --
     If IsRuleEnabled(config, "known_anglicised_terms_not_italic") Then
+        PerfTimerStart "anglicised_terms_not_italic"
         AddIssuesToCollection allIssues, _
             TryRunRule("Rules_Italics.Check_AnglicisedTermsNotItalic", doc)
+        PerfTimerEnd "anglicised_terms_not_italic"
     End If
 
     If IsRuleEnabled(config, "foreign_names_not_italic") Then
+        PerfTimerStart "foreign_names_not_italic"
         AddIssuesToCollection allIssues, _
             TryRunRule("Rules_Italics.Check_ForeignNamesNotItalic", doc)
+        PerfTimerEnd "foreign_names_not_italic"
     End If
 
 RunnerCleanup:
@@ -494,9 +761,16 @@ RunnerCleanup:
     Application.StatusBar = ""
 
     ' -- Filter out issues inside block quotes / quoted text -----
-    ' Quoted text may contain errors but they belong to the source,
-    ' not the author, so no rules should flag them.
+    PerfTimerStart "FilterBlockQuoteIssues"
     Set allIssues = FilterBlockQuoteIssues(doc, allIssues)
+    PerfTimerEnd "FilterBlockQuoteIssues"
+
+    ' -- Print performance summary --------------------------------
+    If ENABLE_PROFILING Then
+        Dim perfSummary As String
+        perfSummary = GetPerformanceSummary()
+        Debug.Print perfSummary
+    End If
 
     Set RunAllPleadingsRules = allIssues
 End Function
@@ -840,6 +1114,11 @@ Public Sub ApplyHighlights(doc As Document, _
     Dim rng As Range
     Dim i As Long
 
+    ' Suppress screen updates during batch comment insertion
+    Dim wasScreenUpdating As Boolean
+    wasScreenUpdating = Application.ScreenUpdating
+    Application.ScreenUpdating = False
+
     For i = 1 To issues.Count
         Set finding = issues(i)
         If GetIssueProp(finding, "RangeStart") >= 0 And GetIssueProp(finding, "RangeEnd") > GetIssueProp(finding, "RangeStart") Then
@@ -853,6 +1132,8 @@ Public Sub ApplyHighlights(doc As Document, _
             On Error GoTo 0
         End If
     Next i
+
+    Application.ScreenUpdating = wasScreenUpdating
 End Sub
 
 ' ============================================================
@@ -866,6 +1147,12 @@ Public Sub ApplySuggestionsAsTrackedChanges(doc As Document, _
     Dim i As Long
     Dim wasTrackingChanges As Boolean
     wasTrackingChanges = doc.TrackRevisions
+
+    ' Suppress screen updates during batch application to prevent
+    ' Word from repaginating/redrawing after each comment/tracked change
+    Dim wasScreenUpdating As Boolean
+    wasScreenUpdating = Application.ScreenUpdating
+    Application.ScreenUpdating = False
 
     ' Process from end of document backwards so tracked-change
     ' insertions / deletions do not shift positions of later issues
@@ -883,6 +1170,79 @@ Public Sub ApplySuggestionsAsTrackedChanges(doc As Document, _
                     origStart = rng.Start
                     origLen = rng.End - rng.Start
                     sugText = GetIssueProp(finding, "Suggestion")
+
+                    ' --- WHITESPACE VALIDATION GATE ---
+                    ' Before amending any tracked deletion, verify the
+                    ' deleted content is actually whitespace, not substantive text.
+                    ' This prevents accidental deletion of letters, digits,
+                    ' periods, or other punctuation.
+                    Dim origText As String
+                    origText = rng.Text
+                    If Err.Number <> 0 Then origText = "": Err.Clear
+
+                    Dim skipAmendment As Boolean
+                    skipAmendment = False
+
+                    ' For deletions (empty suggestion = delete the range)
+                    If Len(sugText) = 0 And Len(origText) > 0 Then
+                        Dim chIdx As Long
+                        Dim ch As String
+                        For chIdx = 1 To Len(origText)
+                            ch = Mid$(origText, chIdx, 1)
+                            ' Refuse to delete letters, digits, periods, or non-space punctuation
+                            If (ch >= "A" And ch <= "Z") Or _
+                               (ch >= "a" And ch <= "z") Or _
+                               (ch >= "0" And ch <= "9") Or _
+                               ch = "." Then
+                                skipAmendment = True
+                                Debug.Print "WHITESPACE VALIDATION: Skipped deletion of '" & origText & "' -- contains substantive character '" & ch & "'"
+                                Exit For
+                            End If
+                        Next chIdx
+                    End If
+
+                    ' For replacements, verify we are only changing whitespace
+                    ' (e.g. double space to single space)
+                    If Len(sugText) > 0 And Len(origText) > 0 Then
+                        ' Check that what we're replacing is only spaces/whitespace
+                        Dim isOnlyWhitespace As Boolean
+                        isOnlyWhitespace = True
+                        For chIdx = 1 To Len(origText)
+                            ch = Mid$(origText, chIdx, 1)
+                            If ch <> " " And ch <> vbTab And ch <> ChrW(160) Then
+                                isOnlyWhitespace = False
+                                Exit For
+                            End If
+                        Next chIdx
+
+                        ' If original is only whitespace, allow the replacement
+                        ' If original contains non-whitespace, check it's not
+                        ' trying to remove periods/letters
+                        If Not isOnlyWhitespace Then
+                            ' Allow the replacement (it's a text correction, not whitespace fix)
+                            ' But still refuse if we'd be deleting a period
+                            If Len(sugText) < Len(origText) Then
+                                ' Shrinking text - verify we're not losing periods
+                                Dim origHasPeriod As Boolean
+                                origHasPeriod = (InStr(1, origText, ".") > 0)
+                                Dim sugHasPeriod As Boolean
+                                sugHasPeriod = (InStr(1, sugText, ".") > 0)
+                                If origHasPeriod And Not sugHasPeriod Then
+                                    skipAmendment = True
+                                    Debug.Print "WHITESPACE VALIDATION: Skipped replacement '" & origText & "' -> '" & sugText & "' -- would remove period"
+                                End If
+                            End If
+                        End If
+                    End If
+
+                    If skipAmendment Then
+                        ' Still add comment to explain the issue, but don't auto-fix
+                        If addComments Then
+                            doc.Comments.Add Range:=rng, Text:=BuildCommentText(finding)
+                            Err.Clear
+                        End If
+                        GoTo NextApplyIssue
+                    End If
 
                     ' Apply tracked change
                     doc.TrackRevisions = True
@@ -916,6 +1276,7 @@ Public Sub ApplySuggestionsAsTrackedChanges(doc As Document, _
                     End If
                 End If
             End If
+NextApplyIssue:
             On Error GoTo 0
         ElseIf addComments Then
             On Error Resume Next: Err.Clear
@@ -928,6 +1289,9 @@ Public Sub ApplySuggestionsAsTrackedChanges(doc As Document, _
             On Error GoTo 0
         End If
     Next i
+
+    ' Restore screen updating
+    Application.ScreenUpdating = wasScreenUpdating
 End Sub
 
 ' ============================================================
@@ -1216,22 +1580,15 @@ End Sub
 Public Function GetLocationString(rng As Range, doc As Document) As String
     Dim pageNum As Long
     Dim paraNum As Long
-    Dim para As Paragraph
-    Dim paraIdx As Long
 
     On Error Resume Next
     pageNum = rng.Information(wdActiveEndAdjustedPageNumber)
-
-    paraIdx = 0
-    For Each para In doc.Paragraphs
-        paraIdx = paraIdx + 1
-        If para.Range.Start >= rng.Start Then
-            paraNum = paraIdx
-            Exit For
-        End If
-    Next para
-    If paraNum = 0 Then paraNum = paraIdx
+    If Err.Number <> 0 Then pageNum = 0: Err.Clear
     On Error GoTo 0
+
+    ' Use cached paragraph positions for O(log N) lookup
+    ' instead of iterating all paragraphs (O(N) per call)
+    paraNum = FindParagraphIndex(rng.Start)
 
     GetLocationString = "page " & pageNum & " paragraph " & paraNum
 End Function
