@@ -249,9 +249,15 @@ Private Sub CheckManualNumbering(doc As Document, _
     Dim locStr As String
     Dim issueText As String
     Dim suggestion As String
+    Dim seqFontSize As Single   ' font size of the tracked sequence
+    Dim seqIndent As Single     ' left indent of the tracked sequence
+    Dim curFontSize As Single
+    Dim curIndent As Single
 
     expectedNext = 0
     tracking = False
+    seqFontSize = 0
+    seqIndent = 0
 
     On Error Resume Next
 
@@ -291,6 +297,8 @@ Private Sub CheckManualNumbering(doc As Document, _
         If listType <> 0 Then
             tracking = False
             expectedNext = 0
+            seqFontSize = 0
+            seqIndent = 0
             GoTo NextManualPara
         End If
 
@@ -305,6 +313,8 @@ Private Sub CheckManualNumbering(doc As Document, _
             If Len(paraText) > 1 Then
                 tracking = False
                 expectedNext = 0
+                seqFontSize = 0
+                seqIndent = 0
             End If
             GoTo NextManualPara
         End If
@@ -314,11 +324,33 @@ Private Sub CheckManualNumbering(doc As Document, _
             GoTo NextManualPara
         End If
 
+        ' -- Detect context change (block quote / different list) --
+        ' If this numbered paragraph has a significantly different
+        ' font size or indentation from the current sequence, it
+        ' belongs to a different numbering context (e.g. a block
+        ' quote with its own numbering). Skip it without breaking
+        ' the tracking chain.
+        curFontSize = 0
+        curFontSize = paraRange.Font.Size
+        If Err.Number <> 0 Then curFontSize = 0: Err.Clear
+        curIndent = 0
+        curIndent = para.Format.LeftIndent
+        If Err.Number <> 0 Then curIndent = 0: Err.Clear
+
+        If tracking And curFontSize > 0 And seqFontSize > 0 Then
+            ' Font size differs by more than 1pt = different context
+            If Abs(curFontSize - seqFontSize) > 1 Then GoTo NextManualPara
+            ' Indentation differs by more than 36pt (0.5 inch) = different context
+            If Abs(curIndent - seqIndent) > 36 Then GoTo NextManualPara
+        End If
+
         ' -- Start or continue tracking -------------------
         If Not tracking Then
             ' First manually numbered paragraph in a sequence
             tracking = True
             expectedNext = manualNum + 1
+            seqFontSize = curFontSize
+            seqIndent = curIndent
             GoTo NextManualPara
         End If
 
