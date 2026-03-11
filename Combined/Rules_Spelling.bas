@@ -4,7 +4,7 @@ Attribute VB_Name = "Rules_Spelling"
 ' Combined proofreading rules for UK/US English spelling.
 '
 ' Rule 1 -- British/US Spelling:
-'   Detects ~95 spelling differences between US and UK English,
+'   Detects ~133 spelling differences between US and UK English,
 '   with a configurable direction (UK or US mode).
 '   Categories: -or/-our, -ize/-ise, -ization/-isation,
 '   -er/-re, -se/-ce, -og/-ogue, -ment variants, misc.
@@ -258,7 +258,7 @@ End Function
 ' ============================================================
 Private Sub BuildSpellingArrays(ByRef usWords() As String, _
                                  ByRef ukWords() As String)
-    Const PAIR_COUNT As Long = 95
+    Const PAIR_COUNT As Long = 133
 
     ReDim usWords(0 To PAIR_COUNT - 1)
     ReDim ukWords(0 To PAIR_COUNT - 1)
@@ -293,7 +293,7 @@ Private Sub BuildSpellingArrays(ByRef usWords() As String, _
     usWords(idx) = "armor":       ukWords(idx) = "armour":       idx = idx + 1
     usWords(idx) = "flavor":      ukWords(idx) = "flavour":      idx = idx + 1
 
-    ' -- -ize -> -ise (20 pairs) ---------------------------
+    ' -- -ize -> -ise (30 pairs) ---------------------------
     usWords(idx) = "organize":      ukWords(idx) = "organise":      idx = idx + 1
     usWords(idx) = "realize":       ukWords(idx) = "realise":       idx = idx + 1
     usWords(idx) = "recognize":     ukWords(idx) = "recognise":     idx = idx + 1
@@ -314,8 +314,18 @@ Private Sub BuildSpellingArrays(ByRef usWords() As String, _
     usWords(idx) = "apologize":     ukWords(idx) = "apologise":     idx = idx + 1
     usWords(idx) = "capitalize":    ukWords(idx) = "capitalise":    idx = idx + 1
     usWords(idx) = "criticize":     ukWords(idx) = "criticise":     idx = idx + 1
+    usWords(idx) = "legalize":      ukWords(idx) = "legalise":      idx = idx + 1
+    usWords(idx) = "memorize":      ukWords(idx) = "memorise":      idx = idx + 1
+    usWords(idx) = "patronize":     ukWords(idx) = "patronise":     idx = idx + 1
+    usWords(idx) = "penalize":      ukWords(idx) = "penalise":      idx = idx + 1
+    usWords(idx) = "privatize":     ukWords(idx) = "privatise":     idx = idx + 1
+    usWords(idx) = "harmonize":     ukWords(idx) = "harmonise":     idx = idx + 1
+    usWords(idx) = "economize":     ukWords(idx) = "economise":     idx = idx + 1
+    usWords(idx) = "immunize":      ukWords(idx) = "immunise":      idx = idx + 1
+    usWords(idx) = "neutralize":    ukWords(idx) = "neutralise":    idx = idx + 1
+    usWords(idx) = "stabilize":     ukWords(idx) = "stabilise":     idx = idx + 1
 
-    ' -- -ization -> -isation (10 pairs) -------------------
+    ' -- -ization -> -isation (15 pairs) -------------------
     usWords(idx) = "organization":     ukWords(idx) = "organisation":     idx = idx + 1
     usWords(idx) = "authorization":    ukWords(idx) = "authorisation":    idx = idx + 1
     usWords(idx) = "characterization": ukWords(idx) = "characterisation": idx = idx + 1
@@ -326,20 +336,32 @@ Private Sub BuildSpellingArrays(ByRef usWords() As String, _
     usWords(idx) = "utilization":      ukWords(idx) = "utilisation":      idx = idx + 1
     usWords(idx) = "specialization":   ukWords(idx) = "specialisation":   idx = idx + 1
     usWords(idx) = "globalization":    ukWords(idx) = "globalisation":    idx = idx + 1
+    usWords(idx) = "legalization":     ukWords(idx) = "legalisation":     idx = idx + 1
+    usWords(idx) = "privatization":    ukWords(idx) = "privatisation":    idx = idx + 1
+    usWords(idx) = "harmonization":    ukWords(idx) = "harmonisation":    idx = idx + 1
+    usWords(idx) = "neutralization":   ukWords(idx) = "neutralisation":   idx = idx + 1
+    usWords(idx) = "stabilization":    ukWords(idx) = "stabilisation":    idx = idx + 1
 
-    ' -- -er -> -re (10 pairs) -----------------------------
-    usWords(idx) = "center":   ukWords(idx) = "centre":   idx = idx + 1
-    usWords(idx) = "fiber":    ukWords(idx) = "fibre":    idx = idx + 1
-    usWords(idx) = "liter":    ukWords(idx) = "litre":    idx = idx + 1
-    usWords(idx) = "meter":    ukWords(idx) = "metre":    idx = idx + 1
-    usWords(idx) = "theater":  ukWords(idx) = "theatre":  idx = idx + 1
-    usWords(idx) = "somber":   ukWords(idx) = "sombre":   idx = idx + 1
-    usWords(idx) = "caliber":  ukWords(idx) = "calibre":  idx = idx + 1
-    usWords(idx) = "saber":    ukWords(idx) = "sabre":    idx = idx + 1
-    usWords(idx) = "specter":  ukWords(idx) = "spectre":  idx = idx + 1
-    usWords(idx) = "meager":   ukWords(idx) = "meagre":   idx = idx + 1
+    ' -- -er -> -re (15 pairs) -----------------------------
+    usWords(idx) = "center":    ukWords(idx) = "centre":    idx = idx + 1
+    usWords(idx) = "fiber":     ukWords(idx) = "fibre":     idx = idx + 1
+    usWords(idx) = "liter":     ukWords(idx) = "litre":     idx = idx + 1
+    usWords(idx) = "meter":     ukWords(idx) = "metre":     idx = idx + 1
+    usWords(idx) = "theater":   ukWords(idx) = "theatre":   idx = idx + 1
+    usWords(idx) = "somber":    ukWords(idx) = "sombre":    idx = idx + 1
+    usWords(idx) = "caliber":   ukWords(idx) = "calibre":   idx = idx + 1
+    usWords(idx) = "saber":     ukWords(idx) = "sabre":     idx = idx + 1
+    usWords(idx) = "specter":   ukWords(idx) = "spectre":   idx = idx + 1
+    usWords(idx) = "meager":    ukWords(idx) = "meagre":    idx = idx + 1
+    usWords(idx) = "luster":    ukWords(idx) = "lustre":    idx = idx + 1
+    usWords(idx) = "maneuver":  ukWords(idx) = "manoeuvre":  idx = idx + 1
+    usWords(idx) = "reconnoiter": ukWords(idx) = "reconnoitre": idx = idx + 1
+    usWords(idx) = "goiter":    ukWords(idx) = "goitre":    idx = idx + 1
+    usWords(idx) = "ocher":     ukWords(idx) = "ochre":     idx = idx + 1
 
     ' -- -se -> -ce (3 pairs) ------------------------------
+    ' Note: license/licence handled by separate Rule 12
+    ' Note: practice/practise excepted (noun vs verb distinction)
     usWords(idx) = "defense":   ukWords(idx) = "defence":   idx = idx + 1
     usWords(idx) = "offense":   ukWords(idx) = "offence":   idx = idx + 1
     usWords(idx) = "pretense":  ukWords(idx) = "pretence":  idx = idx + 1
@@ -359,27 +381,45 @@ Private Sub BuildSpellingArrays(ByRef usWords() As String, _
     usWords(idx) = "enrollment":      ukWords(idx) = "enrolment":        idx = idx + 1
     usWords(idx) = "installment":     ukWords(idx) = "instalment":       idx = idx + 1
 
-    ' -- Other / miscellaneous (16 pairs) -----------------
-    usWords(idx) = "gray":        ukWords(idx) = "grey":        idx = idx + 1
-    usWords(idx) = "plow":        ukWords(idx) = "plough":      idx = idx + 1
-    usWords(idx) = "tire":        ukWords(idx) = "tyre":        idx = idx + 1
-    ' "check/cheque" omitted: "check" as a verb (to verify) is valid UK English;
-    ' only the financial-instrument noun means "cheque", which is too context-
-    ' dependent to flag reliably.
-    usWords(idx) = "skeptic":     ukWords(idx) = "sceptic":     idx = idx + 1
-    usWords(idx) = "aluminum":    ukWords(idx) = "aluminium":   idx = idx + 1
-    usWords(idx) = "maneuver":    ukWords(idx) = "manoeuvre":    idx = idx + 1
-    usWords(idx) = "artifact":    ukWords(idx) = "artefact":    idx = idx + 1
-    usWords(idx) = "pediatric":   ukWords(idx) = "paediatric":  idx = idx + 1
-    usWords(idx) = "anesthetic":  ukWords(idx) = "anaesthetic": idx = idx + 1
-    usWords(idx) = "estrogen":    ukWords(idx) = "oestrogen":   idx = idx + 1
-    usWords(idx) = "aging":       ukWords(idx) = "ageing":      idx = idx + 1
-    usWords(idx) = "ax":          ukWords(idx) = "axe":         idx = idx + 1
-    usWords(idx) = "program":     ukWords(idx) = "programme":   idx = idx + 1
-    usWords(idx) = "curb":        ukWords(idx) = "kerb":        idx = idx + 1
-    usWords(idx) = "draft":       ukWords(idx) = "draught":     idx = idx + 1
+    ' -- -l -> -ll / -ll -> -l (doubled consonants) -------
+    usWords(idx) = "traveled":     ukWords(idx) = "travelled":     idx = idx + 1
+    usWords(idx) = "traveling":    ukWords(idx) = "travelling":    idx = idx + 1
+    usWords(idx) = "traveler":     ukWords(idx) = "traveller":     idx = idx + 1
+    usWords(idx) = "canceled":     ukWords(idx) = "cancelled":     idx = idx + 1
+    usWords(idx) = "canceling":    ukWords(idx) = "cancelling":    idx = idx + 1
+    usWords(idx) = "labeled":      ukWords(idx) = "labelled":      idx = idx + 1
+    usWords(idx) = "labeling":     ukWords(idx) = "labelling":     idx = idx + 1
+    usWords(idx) = "modeled":      ukWords(idx) = "modelled":      idx = idx + 1
+    usWords(idx) = "modeling":     ukWords(idx) = "modelling":     idx = idx + 1
+    usWords(idx) = "counselor":    ukWords(idx) = "counsellor":    idx = idx + 1
+    usWords(idx) = "counseling":   ukWords(idx) = "counselling":   idx = idx + 1
+    usWords(idx) = "signaled":     ukWords(idx) = "signalled":     idx = idx + 1
+    usWords(idx) = "signaling":    ukWords(idx) = "signalling":    idx = idx + 1
+    usWords(idx) = "fueled":       ukWords(idx) = "fuelled":       idx = idx + 1
+    usWords(idx) = "fueling":      ukWords(idx) = "fuelling":      idx = idx + 1
 
-    ' idx should now equal PAIR_COUNT (95)
+    ' -- Other / miscellaneous (19 pairs) -----------------
+    usWords(idx) = "gray":          ukWords(idx) = "grey":          idx = idx + 1
+    usWords(idx) = "plow":          ukWords(idx) = "plough":        idx = idx + 1
+    usWords(idx) = "tire":          ukWords(idx) = "tyre":          idx = idx + 1
+    usWords(idx) = "skeptic":       ukWords(idx) = "sceptic":       idx = idx + 1
+    usWords(idx) = "aluminum":      ukWords(idx) = "aluminium":     idx = idx + 1
+    usWords(idx) = "artifact":      ukWords(idx) = "artefact":      idx = idx + 1
+    usWords(idx) = "pediatric":     ukWords(idx) = "paediatric":    idx = idx + 1
+    usWords(idx) = "anesthetic":    ukWords(idx) = "anaesthetic":   idx = idx + 1
+    usWords(idx) = "estrogen":      ukWords(idx) = "oestrogen":     idx = idx + 1
+    usWords(idx) = "aging":         ukWords(idx) = "ageing":        idx = idx + 1
+    usWords(idx) = "ax":            ukWords(idx) = "axe":           idx = idx + 1
+    usWords(idx) = "program":       ukWords(idx) = "programme":     idx = idx + 1
+    usWords(idx) = "curb":          ukWords(idx) = "kerb":          idx = idx + 1
+    usWords(idx) = "draft":         ukWords(idx) = "draught":       idx = idx + 1
+    usWords(idx) = "mom":           ukWords(idx) = "mum":           idx = idx + 1
+    usWords(idx) = "pajamas":       ukWords(idx) = "pyjamas":       idx = idx + 1
+    usWords(idx) = "cozy":          ukWords(idx) = "cosy":          idx = idx + 1
+    usWords(idx) = "donut":         ukWords(idx) = "doughnut":      idx = idx + 1
+    usWords(idx) = "skeptical":     ukWords(idx) = "sceptical":     idx = idx + 1
+
+    ' idx should now equal PAIR_COUNT (150)
 End Sub
 
 ' ============================================================
@@ -918,6 +958,223 @@ End Function
 Private Function ReplaceCWithS(ByVal word As String) As String
     ReplaceCWithS = Replace(word, "licence", "license", , , vbTextCompare)
     ReplaceCWithS = Replace(ReplaceCWithS, "Licence", "License", , , vbBinaryCompare)
+End Function
+
+' ================================================================
+' ================================================================
+'  RULE 14 -- CHECK / CHEQUE (UK mode only)
+'  "check" as a verb (to verify) is valid UK English.
+'  Only the financial-instrument noun should be "cheque" in UK.
+'  Detects "check" when used as a noun (not a verb) and suggests
+'  "cheque". Verb detection uses preceding word context.
+' ================================================================
+' ================================================================
+Private Const RULE_NAME_CHECK As String = "check_cheque"
+
+Public Function Check_CheckCheque(doc As Document) As Collection
+    Dim issues As New Collection
+    Dim spellingMode As String
+    spellingMode = EngineGetSpellingMode()
+
+    ' Only applies in UK mode (US uses "check" for everything)
+    If spellingMode <> "UK" Then
+        Set Check_CheckCheque = issues
+        Exit Function
+    End If
+
+    ' Search body text for "check" / "checks"
+    SearchCheckCheque doc.Content, doc, issues
+
+    ' Search footnotes
+    On Error Resume Next
+    Dim fn As Footnote
+    For Each fn In doc.Footnotes
+        Err.Clear
+        SearchCheckCheque fn.Range, doc, issues
+        If Err.Number <> 0 Then Err.Clear
+    Next fn
+    On Error GoTo 0
+
+    Set Check_CheckCheque = issues
+End Function
+
+Private Sub SearchCheckCheque(searchRange As Range, doc As Document, _
+                               ByRef issues As Collection)
+    Dim rng As Range
+    Dim foundText As String
+    Dim finding As Object
+    Dim locStr As String
+
+    ' Search for "check" as whole word
+    Dim searchTerms As Variant
+    searchTerms = Array("check", "checks")
+
+    Dim si As Long
+    For si = LBound(searchTerms) To UBound(searchTerms)
+        On Error Resume Next
+        Set rng = searchRange.Duplicate
+        If Err.Number <> 0 Then Err.Clear: GoTo NextSearchTerm
+        On Error GoTo 0
+
+        With rng.Find
+            .ClearFormatting
+            .Text = CStr(searchTerms(si))
+            .MatchWholeWord = True
+            .MatchCase = False
+            .MatchWildcards = False
+            .Wrap = wdFindStop
+            .Forward = True
+        End With
+
+        Dim lastPos As Long
+        lastPos = -1
+        Do
+            On Error Resume Next
+            Dim foundIt As Boolean
+            foundIt = rng.Find.Execute
+            If Err.Number <> 0 Then Err.Clear: Exit Do
+            On Error GoTo 0
+
+            If Not foundIt Then Exit Do
+            If rng.Start <= lastPos Then Exit Do
+            lastPos = rng.Start
+
+            If Not EngineIsInPageRange(rng) Then
+                rng.Collapse wdCollapseEnd
+                GoTo NextCheckMatch
+            End If
+
+            foundText = rng.Text
+
+            ' Determine if this is a verb usage (skip) or noun (flag)
+            If IsCheckUsedAsVerb(rng, doc) Then
+                rng.Collapse wdCollapseEnd
+                GoTo NextCheckMatch
+            End If
+
+            On Error Resume Next
+            locStr = EngineGetLocationString(rng, doc)
+            If Err.Number <> 0 Then locStr = "unknown location": Err.Clear
+            On Error GoTo 0
+
+            Dim suggestion As String
+            If LCase(foundText) = "checks" Then
+                suggestion = "cheques"
+            Else
+                suggestion = "cheque"
+            End If
+
+            Set finding = CreateIssueDict(RULE_NAME_CHECK, locStr, _
+                "UK spelling: '" & foundText & "' appears to be a noun (financial instrument). Use '" & suggestion & "' in UK English.", _
+                suggestion, rng.Start, rng.End, "possible_error")
+            issues.Add finding
+
+NextCheckMatch:
+            On Error Resume Next
+            rng.Collapse wdCollapseEnd
+            If Err.Number <> 0 Then Err.Clear: Exit Do
+            On Error GoTo 0
+        Loop
+NextSearchTerm:
+    Next si
+End Sub
+
+' Determine if "check" is used as a verb by looking at surrounding context.
+' Returns True if likely a verb (should NOT be flagged).
+Private Function IsCheckUsedAsVerb(rng As Range, doc As Document) As Boolean
+    IsCheckUsedAsVerb = False
+
+    On Error Resume Next
+    ' Get up to 30 chars before the word
+    Dim lookStart As Long
+    lookStart = rng.Start - 30
+    If lookStart < 0 Then lookStart = 0
+    Dim beforeText As String
+    beforeText = ""
+    If rng.Start > lookStart Then
+        beforeText = LCase(doc.Range(lookStart, rng.Start).Text)
+    End If
+    If Err.Number <> 0 Then beforeText = "": Err.Clear
+
+    ' Get up to 20 chars after the word
+    Dim afterText As String
+    afterText = ""
+    Dim lookEnd As Long
+    lookEnd = rng.End + 20
+    If lookEnd > doc.Content.End Then lookEnd = doc.Content.End
+    If lookEnd > rng.End Then
+        afterText = LCase(doc.Range(rng.End, lookEnd).Text)
+    End If
+    If Err.Number <> 0 Then afterText = "": Err.Clear
+    On Error GoTo 0
+
+    ' Extract last word before "check"
+    beforeText = Trim(beforeText)
+    Dim lastWord As String
+    Dim sp As Long
+    sp = InStrRev(beforeText, " ")
+    If sp > 0 Then
+        lastWord = Mid$(beforeText, sp + 1)
+    Else
+        lastWord = beforeText
+    End If
+
+    ' Verb indicators: preceded by "to", "will", "shall", "must",
+    ' "should", "would", "could", "can", "may", "might", "please",
+    ' "let", "did", "does", "do", "not", "always", "also", "then"
+    Dim verbPrecedes As Variant
+    verbPrecedes = Array("to", "will", "shall", "must", "should", _
+                         "would", "could", "can", "may", "might", _
+                         "please", "let", "did", "does", "do", _
+                         "not", "always", "also", "then", "and", _
+                         "or", "we", "they", "you", "i")
+    Dim vi As Long
+    For vi = LBound(verbPrecedes) To UBound(verbPrecedes)
+        If lastWord = CStr(verbPrecedes(vi)) Then
+            IsCheckUsedAsVerb = True
+            Exit Function
+        End If
+    Next vi
+
+    ' Verb indicator: followed by "that", "whether", "if", "the",
+    ' "this", "for", "with", "on", "your", "our", "his", "her"
+    Dim firstWordAfter As String
+    afterText = Trim(afterText)
+    sp = InStr(1, afterText, " ")
+    If sp > 0 Then
+        firstWordAfter = Left$(afterText, sp - 1)
+    Else
+        firstWordAfter = afterText
+    End If
+
+    Dim verbFollows As Variant
+    verbFollows = Array("that", "whether", "if", "the", "this", _
+                        "for", "with", "on", "your", "our", _
+                        "his", "her", "its", "their", "my", _
+                        "each", "every", "all", "any")
+    For vi = LBound(verbFollows) To UBound(verbFollows)
+        If firstWordAfter = CStr(verbFollows(vi)) Then
+            IsCheckUsedAsVerb = True
+            Exit Function
+        End If
+    Next vi
+
+    ' Noun indicators: preceded by "a", "the", "this", "that",
+    ' "each", "every", "your", "our", "his", "her", "my", "by"
+    Dim nounPrecedes As Variant
+    nounPrecedes = Array("a", "the", "this", "that", "each", _
+                         "every", "your", "our", "his", "her", _
+                         "my", "its", "their", "by", "per", _
+                         "no", "any", "one", "blank")
+    For vi = LBound(nounPrecedes) To UBound(nounPrecedes)
+        If lastWord = CStr(nounPrecedes(vi)) Then
+            IsCheckUsedAsVerb = False
+            Exit Function
+        End If
+    Next vi
+
+    ' Default: treat as possible noun (flag it as possible_error for review)
+    IsCheckUsedAsVerb = False
 End Function
 
 ' ================================================================

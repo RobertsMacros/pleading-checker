@@ -291,6 +291,13 @@ Public Function Check_SpellOutUnderTen(doc As Document) As Collection
                     GoTo NextChar
                 End If
 
+                ' -- Check: conjunction-linked structural ref --
+                ' e.g. "paragraphs 4 and 5" — the "5" is preceded by "and"
+                ' but the "4" before it has a structural ref
+                If IsConjunctionLinkedRef(paraText, i) Then
+                    GoTo NextChar
+                End If
+
                 ' -- All checks passed: flag this digit ------
                 Dim rangeStart As Long
                 Dim rangeEnd As Long
@@ -696,6 +703,86 @@ Private Function IsPrecededByCurrencyOrUnit(ByRef txt As String, _
             nextChar = Mid(txt, pos + 1, 1)
             If nextChar = "%" Then
                 IsPrecededByCurrencyOrUnit = True
+            End If
+        End If
+    End If
+End Function
+
+' ------------------------------------------------------------
+'  PRIVATE: Check if digit is linked via conjunction (and/or/to)
+'  to another digit that IS preceded by a structural reference.
+'  Catches patterns like "paragraphs 4 and 5", "rules 3 to 7",
+'  "sections 2 or 3", "paragraphs 4, 5 and 6".
+' ------------------------------------------------------------
+Private Function IsConjunctionLinkedRef(ByRef txt As String, _
+                                         ByVal pos As Long) As Boolean
+    IsConjunctionLinkedRef = False
+
+    ' Get the word before this digit
+    Dim prevWord As String
+    prevWord = LCase(GetPrecedingWord(txt, pos))
+    If Len(prevWord) = 0 Then Exit Function
+
+    ' Must be preceded by "and", "or", "to", or a comma
+    Dim isConj As Boolean
+    isConj = (prevWord = "and" Or prevWord = "or" Or prevWord = "to")
+
+    ' Also handle comma-separated: "paragraphs 4, 5 and 6"
+    If Not isConj Then
+        ' Check if preceded by comma (skip spaces)
+        Dim k As Long
+        k = pos - 1
+        Do While k >= 1
+            Dim c As String
+            c = Mid$(txt, k, 1)
+            If c = " " Or c = vbTab Then
+                k = k - 1
+            Else
+                Exit Do
+            End If
+        Loop
+        If k >= 1 And Mid$(txt, k, 1) = "," Then
+            isConj = True
+        End If
+    End If
+
+    If Not isConj Then Exit Function
+
+    ' Now scan backwards past the conjunction to find a preceding digit
+    ' For "and"/"or"/"to": skip back past the conjunction word + spaces + the digit
+    ' For comma: already at the comma, skip back past it + spaces + the digit
+    Dim scanPos As Long
+    scanPos = pos
+
+    ' Skip back to before the preceding word / comma
+    scanPos = scanPos - 1  ' space before digit
+    Do While scanPos >= 1 And (Mid$(txt, scanPos, 1) = " " Or Mid$(txt, scanPos, 1) = vbTab)
+        scanPos = scanPos - 1
+    Loop
+    ' Skip back past the conjunction word or comma
+    If isConj And (prevWord = "and" Or prevWord = "or" Or prevWord = "to") Then
+        scanPos = scanPos - Len(prevWord)
+    ElseIf isConj Then
+        ' comma case — scanPos is already past the comma
+    End If
+    ' Skip spaces before the conjunction
+    Do While scanPos >= 1 And (Mid$(txt, scanPos, 1) = " " Or Mid$(txt, scanPos, 1) = vbTab)
+        scanPos = scanPos - 1
+    Loop
+
+    ' Check if there's a digit at scanPos
+    If scanPos >= 1 Then
+        Dim prevCh As String
+        prevCh = Mid$(txt, scanPos, 1)
+        If prevCh >= "0" And prevCh <= "9" Then
+            ' Found a digit — check if THAT digit is preceded by a structural ref
+            If IsPrecededByStructuralRef(txt, scanPos) Then
+                IsConjunctionLinkedRef = True
+                Exit Function
+            End If
+            ' Or if THAT digit is also conjunction-linked (recursive chain)
+            If IsConjunctionLinkedRef(txt, scanPos) Then
+                IsConjunctionLinkedRef = True
             End If
         End If
     End If

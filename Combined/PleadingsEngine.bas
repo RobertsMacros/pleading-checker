@@ -205,6 +205,7 @@ Public Function InitRuleConfig() As Object
     cfg.Add "list_rules", True
     cfg.Add "formatting_consistency", True
     cfg.Add "licence_license", True
+    cfg.Add "check_cheque", True
     cfg.Add "slash_style", True
     cfg.Add "list_punctuation", True
     cfg.Add "bracket_integrity", True
@@ -401,6 +402,11 @@ Public Function RunAllPleadingsRules(doc As Document, _
             TryRunRule("Rules_Spelling.Check_LicenceLicense", doc)
     End If
 
+    If IsRuleEnabled(config, "check_cheque") Then
+        AddIssuesToCollection allIssues, _
+            TryRunRule("Rules_Spelling.Check_CheckCheque", doc)
+    End If
+
     DoEvents
     ' -- Punctuation rules --
     If IsRuleEnabled(config, "slash_style") Then
@@ -514,56 +520,38 @@ Private Function FilterBlockQuoteIssues(doc As Document, _
     Dim i As Long
 
     ' -- Determine cover page end position -------------------------
+    ' Skip all content before the first "body text" paragraph,
+    ' defined as the first paragraph whose plain text (without line
+    ' breaks) exceeds BODY_TEXT_MIN_LEN characters.  Everything
+    ' before that is treated as cover / title page.
+    Const BODY_TEXT_MIN_LEN As Long = 200
     Dim coverPageEnd As Long
     coverPageEnd = -1  ' -1 means no cover page detected
 
     On Error Resume Next
-
-    ' Method 1: First section break position
-    If doc.Sections.Count > 1 Then
-        coverPageEnd = doc.Sections(1).Range.End
-        If Err.Number <> 0 Then coverPageEnd = -1: Err.Clear
-    End If
-
-    ' Method 2: If no section breaks, check if page 1 looks like
-    ' a cover page (centered, no numbered paragraphs, short text)
-    If coverPageEnd < 0 Then
-        Dim totalPages As Long
-        totalPages = doc.ComputeStatistics(wdStatisticPages)
-        If Err.Number <> 0 Then totalPages = 1: Err.Clear
-
-        If totalPages > 1 Then
-            ' Walk paragraphs on page 1 to see if any are numbered
-            Dim hasNumberedPara As Boolean
-            hasNumberedPara = False
-            Dim coverPara As Paragraph
-            For Each coverPara In doc.Paragraphs
-                Err.Clear
-                Dim cpPage As Long
-                cpPage = coverPara.Range.Information(wdActiveEndAdjustedPageNumber)
-                If Err.Number <> 0 Then Err.Clear: Exit For
-                If cpPage > 1 Then
-                    ' Record where page 1 ends
-                    coverPageEnd = coverPara.Range.Start
-                    Exit For
-                End If
-                ' Check if paragraph starts with a number + period/tab
-                Dim cpText As String
-                cpText = ""
-                cpText = Left(coverPara.Range.Text, 5)
-                If Err.Number <> 0 Then cpText = "": Err.Clear
-                If Len(cpText) > 0 Then
-                    If cpText Like "#[.)*" & vbTab & "]#*" Or _
-                       cpText Like "##[.)*" & vbTab & "]#*" Then
-                        hasNumberedPara = True
-                    End If
-                End If
-            Next coverPara
-
-            ' If page 1 has numbered paragraphs, it's not a cover page
-            If hasNumberedPara Then coverPageEnd = -1
+    Dim coverPara As Paragraph
+    For Each coverPara In doc.Paragraphs
+        Err.Clear
+        Dim cpText As String
+        cpText = ""
+        cpText = coverPara.Range.Text
+        If Err.Number <> 0 Then Err.Clear: GoTo NextCoverPara
+        ' Strip paragraph mark
+        If Len(cpText) > 0 Then
+            If Right$(cpText, 1) = vbCr Or Right$(cpText, 1) = Chr(13) Then
+                cpText = Left$(cpText, Len(cpText) - 1)
+            End If
         End If
-    End If
+        ' Strip any internal line breaks (vbLf, vertical tab, manual line break)
+        Dim cleanCpText As String
+        cleanCpText = Replace(Replace(Replace(cpText, vbLf, ""), vbVerticalTab, ""), Chr(11), "")
+        If Len(cleanCpText) > BODY_TEXT_MIN_LEN Then
+            ' This paragraph is the start of body text
+            coverPageEnd = coverPara.Range.Start
+            Exit For
+        End If
+NextCoverPara:
+    Next coverPara
     On Error GoTo 0
 
     ' -- Determine TOC / contents page ranges -----------------------
@@ -650,12 +638,18 @@ Private Function FilterBlockQuoteIssues(doc As Document, _
     On Error GoTo 0
 
     ' -- Build list of block-quote paragraph ranges ----------------
+    ' Detects block quotes via style name, indentation+smaller font,
+    ' or multi-paragraph curly-quote spans (open " on first para,
+    ' close " on last para — all paras in between are block-quoted).
     Dim bqStarts() As Long, bqEnds() As Long
     Dim bqCount As Long, bqCap As Long
     bqCap = 64
     ReDim bqStarts(0 To bqCap - 1)
     ReDim bqEnds(0 To bqCap - 1)
     bqCount = 0
+
+    Dim insideMultiParaQuote As Boolean
+    insideMultiParaQuote = False
 
     On Error Resume Next
     Dim para As Paragraph
@@ -679,7 +673,7 @@ Private Function FilterBlockQuoteIssues(doc As Document, _
             isBQ = True
         End If
 
-        ' Check 2: Indentation + smaller font
+        ' Check 2: Indentation + smaller font (relaxed thresholds)
         If Not isBQ Then
             Dim leftInd As Single
             leftInd = para.Format.LeftIndent
@@ -687,29 +681,63 @@ Private Function FilterBlockQuoteIssues(doc As Document, _
             Dim fontSize As Single
             fontSize = para.Range.Font.Size
             If Err.Number <> 0 Then fontSize = 0: Err.Clear
-            If leftInd > 36 And fontSize > 0 And fontSize < 11 Then
+            ' Moderate indent with clearly smaller font
+            If leftInd > 18 And fontSize > 0 And fontSize < 11 Then
                 isBQ = True
             End If
+            ' Heavy indentation alone (72pt = ~1 inch)
+            If leftInd > 72 Then isBQ = True
         End If
 
-        ' Check 3: Paragraph wrapped in quotation marks
+        ' Check 3: Multi-paragraph curly-quote detection
+        Dim pText As String
+        pText = ""
+        pText = para.Range.Text
+        If Err.Number <> 0 Then pText = "": Err.Clear
         If Not isBQ Then
-            Dim pText As String
-            pText = ""
-            pText = para.Range.Text
-            If Err.Number <> 0 Then pText = "": Err.Clear
             If Len(pText) > 2 Then
                 Dim firstCh As Long, lastCh As Long
-                firstCh = AscW(Left(pText, 1))
                 Dim trimmed As String
+                firstCh = AscW(Left(pText, 1))
                 trimmed = pText
                 If Right(trimmed, 1) = vbCr Or Right(trimmed, 1) = vbLf Then
                     trimmed = Left(trimmed, Len(trimmed) - 1)
                 End If
+
                 If Len(trimmed) > 1 Then
                     lastCh = AscW(Right(trimmed, 1))
+                    ' Single-paragraph quote
                     If (firstCh = 8220 And lastCh = 8221) Then isBQ = True
                     If (firstCh = 34 And lastCh = 34) Then isBQ = True
+                    ' Start of multi-paragraph quote (opens but doesn't close)
+                    If Not isBQ And Not insideMultiParaQuote Then
+                        If (firstCh = 8220 And lastCh <> 8221) Or _
+                           (firstCh = 34 And lastCh <> 34) Then
+                            insideMultiParaQuote = True
+                            isBQ = True
+                        End If
+                    End If
+                End If
+            End If
+        End If
+
+        ' If inside a multi-paragraph quote, mark as block quote
+        If insideMultiParaQuote And Not isBQ Then
+            isBQ = True
+        End If
+
+        ' Check if this paragraph ends the multi-paragraph quote
+        If insideMultiParaQuote And Len(pText) > 1 Then
+            Dim endTrimmed As String
+            endTrimmed = pText
+            If Right(endTrimmed, 1) = vbCr Or Right(endTrimmed, 1) = vbLf Then
+                endTrimmed = Left(endTrimmed, Len(endTrimmed) - 1)
+            End If
+            If Len(endTrimmed) > 0 Then
+                Dim endCh As Long
+                endCh = AscW(Right(endTrimmed, 1))
+                If endCh = 8221 Or endCh = 34 Then
+                    insideMultiParaQuote = False
                 End If
             End If
         End If
@@ -766,16 +794,8 @@ NxtBQ:
                 Exit For
             End If
         Next j
-        If inBQ Then
-            Dim ruleName As String
-            ruleName = GetIssueProp(finding, "RuleName")
-            ' Allow formatting rules through in block quotes
-            If ruleName <> "font_consistency" And _
-               ruleName <> "paragraph_break_consistency" And _
-               ruleName <> "colour_formatting" Then
-                GoTo SkipIssue
-            End If
-        End If
+        ' Suppress ALL rules in block quotes
+        If inBQ Then GoTo SkipIssue
 
         filtered.Add finding
         GoTo NextIssue
@@ -823,16 +843,24 @@ Public Sub ApplySuggestionsAsTrackedChanges(doc As Document, _
     Dim wasTrackingChanges As Boolean
     wasTrackingChanges = doc.TrackRevisions
 
-    For i = 1 To issues.Count
+    ' Process from end of document backwards so tracked-change
+    ' insertions / deletions do not shift positions of later issues
+    For i = issues.Count To 1 Step -1
         Set finding = issues(i)
         If GetIssueProp(finding, "RangeStart") >= 0 And GetIssueProp(finding, "RangeEnd") > GetIssueProp(finding, "RangeStart") Then
             On Error Resume Next: Err.Clear
             Set rng = doc.Range(GetIssueProp(finding, "RangeStart"), GetIssueProp(finding, "RangeEnd"))
             If Err.Number = 0 Then
                 If GetIssueProp(finding, "AutoFixSafe") And Len(GetIssueProp(finding, "Suggestion")) > 0 Then
+                    ' Apply tracked change
                     doc.TrackRevisions = True
                     rng.Text = GetIssueProp(finding, "Suggestion")
                     doc.TrackRevisions = wasTrackingChanges
+                    ' Add comment anchored on the (now-modified) rng object
+                    If addComments Then
+                        doc.Comments.Add Range:=rng, Text:=GetIssueProp(finding, "Issue")
+                        Err.Clear
+                    End If
                 Else
                     If addComments Then
                         doc.Comments.Add Range:=rng, Text:=BuildCommentText(finding)
@@ -859,8 +887,11 @@ End Sub
 Private Function BuildCommentText(finding As Object) As String
     Dim txt As String
     txt = GetIssueProp(finding, "Issue")
-    If Len(GetIssueProp(finding, "Suggestion")) > 0 Then
-        txt = txt & " -- Suggestion: " & GetIssueProp(finding, "Suggestion")
+    Dim sug As String
+    sug = GetIssueProp(finding, "Suggestion")
+    ' Only append suggestion text if it's human-readable (not a literal replacement)
+    If Len(sug) > 0 And Len(Trim(sug)) > 1 Then
+        txt = txt & " -- Suggestion: " & sug
     End If
     BuildCommentText = txt
 End Function
@@ -987,6 +1018,7 @@ Public Function GetRuleDisplayNames() As Object
     d.Add "list_rules", "List Format & Punctuation"
     d.Add "formatting_consistency", "Formatting Consistency"
     d.Add "licence_license", "Licence/License Rule"
+    d.Add "check_cheque", "Check/Cheque Rule"
     d.Add "slash_style", "Slash Style Checker"
     d.Add "bracket_integrity", "Bracket Integrity"
     d.Add "quotation_mark_consistency", "Quotation Mark Consistency"

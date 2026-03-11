@@ -3,7 +3,7 @@ Attribute VB_Name = "Rules_Spacing"
 ' Rules_Spacing.bas
 ' Spacing and whitespace proofreading rules:
 '   - Check_DoubleSpaces      : Flag runs of 2+ spaces
-'                                (mode-aware: ONE space or TWO after period)
+'                                (mode-aware: ONE space or TWO after full stop)
 '   - Check_DoubleCommas      : Flag ",," sequences
 '   - Check_SpaceBeforePunct  : Flag "word ," patterns
 '   - Check_MissingSpaceAfterDot : Flag ".X" (missing space)
@@ -35,7 +35,7 @@ Private Const ABBREV_LIST As String = _
 ' ============================================================
 '  PUBLIC: Check_DoubleSpaces
 '  Flags runs of 2+ spaces. In TWO mode, allows double space
-'  after sentence-ending periods (but not after abbreviations).
+'  after sentence-ending full stops (but not after abbreviations).
 ' ============================================================
 Public Function Check_DoubleSpaces(doc As Document) As Collection
     Dim issues As New Collection
@@ -79,12 +79,12 @@ Public Function Check_DoubleSpaces(doc As Document) As Collection
             mStart = md.FirstIndex   ' 0-based
 
             If spaceStyle = "TWO" And mStart > 0 Then
-                ' In two-space mode, double space is correct after sentence-end period
+                ' In two-space mode, double space is correct after sentence-end full stop
                 Dim charBefore As String
                 charBefore = Mid(paraText, mStart, 1)   ' char at 0-based mStart-1
                 If charBefore = "." Then
                     Dim dotPos As Long
-                    dotPos = mStart - 1   ' 0-based index of the period
+                    dotPos = mStart - 1   ' 0-based index of the full stop
                     Dim wb As String
                     wb = GetWordBeforePos(paraText, dotPos)
                     If Not IsLikelyAbbreviation(paraText, dotPos, wb) Then
@@ -117,7 +117,7 @@ Public Function Check_DoubleSpaces(doc As Document) As Collection
             End If
 
             Set finding = CreateIssueDict(RULE_DOUBLE_SPACES, locStr, _
-                dsMsg, "Reduce to a single space.", dsStart, dsEnd, "error", True)
+                dsMsg, " ", dsStart, dsEnd, "error", True)
             issues.Add finding
 
 NextDoubleMatch:
@@ -130,15 +130,16 @@ NextDoubleMatch:
             Dim ms As Object
             For Each ms In mSingles
                 Dim sdotPos As Long
-                sdotPos = ms.FirstIndex   ' 0-based index of the period
+                sdotPos = ms.FirstIndex   ' 0-based index of the full stop
                 Dim swb As String
                 swb = GetWordBeforePos(paraText, sdotPos)
                 If Not IsLikelyAbbreviation(paraText, sdotPos, swb) Then
                     ' Sentence-end with only one space -- flag it
+                    ' Anchor the issue on the full stop + single space
                     Dim msStart As Long
                     msStart = paraRange.Start + sdotPos
                     Dim msEnd As Long
-                    msEnd = msStart + 3  ' period + space + capital
+                    msEnd = msStart + 2  ' full stop + space
 
                     Err.Clear
                     Dim msRng As Range
@@ -150,10 +151,11 @@ NextDoubleMatch:
                         locStr = EngineGetLocationString(msRng, doc)
                     End If
 
+                    ' Suggestion replaces ". " with ".  " (insert extra space)
                     Set finding = CreateIssueDict(RULE_DOUBLE_SPACES, locStr, _
-                        "Missing second space after sentence-ending period.", _
-                        "Add a second space after the period.", msStart, msEnd, _
-                        "warning", False)
+                        "Missing second space after sentence-ending full stop.", _
+                        ".  ", msStart, msEnd, _
+                        "warning", True)
                     issues.Add finding
                 End If
             Next ms
@@ -278,7 +280,7 @@ End Function
 ' ============================================================
 '  PUBLIC: Check_MissingSpaceAfterDot
 '  Flags ".X" where X is uppercase and the dot is not an
-'  abbreviation period. Uses per-paragraph regex scanning.
+'  abbreviation full stop. Uses per-paragraph regex scanning.
 ' ============================================================
 Public Function Check_MissingSpaceAfterDot(doc As Document) As Collection
     Dim issues As New Collection
@@ -311,7 +313,7 @@ Public Function Check_MissingSpaceAfterDot(doc As Document) As Collection
         Dim m As Object
         For Each m In matches
             Dim dotIdx As Long
-            dotIdx = m.FirstIndex   ' 0-based position of the period
+            dotIdx = m.FirstIndex   ' 0-based position of the full stop
             Dim wordBefore As String
             wordBefore = GetWordBeforePos(paraText, dotIdx)
             If Not IsLikelyAbbreviation(paraText, dotIdx, wordBefore) Then
@@ -333,7 +335,7 @@ Public Function Check_MissingSpaceAfterDot(doc As Document) As Collection
                 Set finding = CreateIssueDict(RULE_MISSING_SPACE_DOT, locStr, _
                     "Missing space after full stop before '" & _
                     Mid(paraText, dotIdx + 2, 1) & "'.", _
-                    "Insert a space after the period.", _
+                    "Insert a space after the full stop.", _
                     msdStart, msdEnd, "error", False)
                 issues.Add finding
             End If

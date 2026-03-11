@@ -294,16 +294,16 @@ Private Sub UserForm_Initialize()
 
     yPos = yPos + CHK_H + ITEM_GAP
 
-    ' -- Defined term formatting style dropdown --
-    Set lbl = Me.Controls.Add("Forms.Label.1", "lblTermFormat")
+    ' -- Defined Terms: [format dropdown] and [quotes dropdown] --
+    Set lbl = Me.Controls.Add("Forms.Label.1", "lblDefinedTerms")
     With lbl
-        .Caption = "Defined term format:"
-        .Left = colRight: .Top = yPos + 2: .Width = 110: .Height = LBL_H
+        .Caption = "Defined Terms:"
+        .Left = colRight: .Top = yPos + 2: .Width = 80: .Height = LBL_H
     End With
 
     Set cboTermFormat = Me.Controls.Add("Forms.ComboBox.1", "cboTermFormat")
     With cboTermFormat
-        .Left = colRight + 112: .Top = yPos: .Width = 120: .Height = TXT_H
+        .Left = colRight + 82: .Top = yPos: .Width = 90: .Height = TXT_H
         .Style = fmStyleDropDownList
         .AddItem "Bold"
         .AddItem "Bold Italics"
@@ -311,18 +311,17 @@ Private Sub UserForm_Initialize()
         .AddItem "None"
         .ListIndex = 0
     End With
-    yPos = yPos + TXT_H + ITEM_GAP
 
-    ' -- Defined term quote style dropdown --
-    Set lbl = Me.Controls.Add("Forms.Label.1", "lblTermQuotes")
-    With lbl
-        .Caption = "Term quotes:"
-        .Left = colRight: .Top = yPos + 2: .Width = 80: .Height = LBL_H
+    Dim lblAnd As MSForms.Label
+    Set lblAnd = Me.Controls.Add("Forms.Label.1", "lblTermAnd")
+    With lblAnd
+        .Caption = "and"
+        .Left = colRight + 175: .Top = yPos + 2: .Width = 22: .Height = LBL_H
     End With
 
     Set cboTermQuotes = Me.Controls.Add("Forms.ComboBox.1", "cboTermQuotes")
     With cboTermQuotes
-        .Left = colRight + 82: .Top = yPos: .Width = 120: .Height = TXT_H
+        .Left = colRight + 198: .Top = yPos: .Width = 100: .Height = TXT_H
         .Style = fmStyleDropDownList
         .AddItem "Single quotes"
         .AddItem "Double quotes"
