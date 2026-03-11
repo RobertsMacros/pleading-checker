@@ -578,6 +578,26 @@ Private Function IsCodeFontName(ByVal fontName As String) As Boolean
 End Function
 
 
+' Calculate the length of auto-generated list numbering text
+Private Function GetDashListPrefixLen(para As Paragraph, ByVal paraText As String) As Long
+    GetDashListPrefixLen = 0
+    On Error Resume Next
+    Dim lStr As String
+    lStr = para.Range.ListFormat.ListString
+    If Err.Number <> 0 Then Err.Clear: On Error GoTo 0: Exit Function
+    If Len(lStr) = 0 Then On Error GoTo 0: Exit Function
+    If Len(paraText) > Len(lStr) Then
+        If Left$(paraText, Len(lStr)) = lStr Then
+            GetDashListPrefixLen = Len(lStr)
+            If Mid$(paraText, GetDashListPrefixLen + 1, 1) = vbTab Then
+                GetDashListPrefixLen = GetDashListPrefixLen + 1
+            End If
+        End If
+    End If
+    Err.Clear
+    On Error GoTo 0
+End Function
+
 ' ----------------------------------------------------------------
 '  PRIVATE: Create a dictionary-based finding (no class dependency)
 ' ----------------------------------------------------------------
@@ -656,13 +676,17 @@ Public Function Check_DashUsage(doc As Document) As Collection
         End If
         If Len(paraText) < 2 Then GoTo NextParaDash
 
+        ' Calculate auto-number prefix offset
+        Dim dashListPrefixLen As Long
+        dashListPrefixLen = GetDashListPrefixLen(para, paraText)
+
         ' --- Check 1: Hyphen in number ranges (digit-digit) ---
         Dim mHR As Object
         Set mHR = reHyphenRange.Execute(paraText)
         Dim hm As Object
         For Each hm In mHR
             Dim hrStart As Long
-            hrStart = paraRange.Start + hm.FirstIndex
+            hrStart = paraRange.Start + hm.FirstIndex - dashListPrefixLen
             ' The hyphen is at offset +length_of_first_digit
             ' In pattern (\d)-(\d), hyphen is at FirstIndex + 1
             Dim hyphenPos As Long
@@ -692,7 +716,7 @@ Public Function Check_DashUsage(doc As Document) As Collection
         Dim dhm As Object
         For Each dhm In mDH
             Dim dhStart As Long
-            dhStart = paraRange.Start + dhm.FirstIndex
+            dhStart = paraRange.Start + dhm.FirstIndex - dashListPrefixLen
             Dim dhEnd As Long
             dhEnd = dhStart + 2
 
@@ -732,7 +756,7 @@ Public Function Check_DashUsage(doc As Document) As Collection
 
                 If beforeIsLetter And afterIsLetter Then
                     Dim enStart As Long
-                    enStart = paraRange.Start + enPos - 1
+                    enStart = paraRange.Start + enPos - 1 - dashListPrefixLen
                     Dim enEnd As Long
                     enEnd = enStart + 1
 
@@ -753,14 +777,29 @@ Public Function Check_DashUsage(doc As Document) As Collection
                 End If
 
                 ' Check 4: Spaced en-dash (" – ") -> should be em-dash (" — ")
+                ' Exception: spaced en-dash between numbers is correct for ranges
                 Dim beforeIsSpace As Boolean
                 Dim afterIsSpace As Boolean
                 beforeIsSpace = (chBefore = " ")
                 afterIsSpace = (chAfter = " ")
 
                 If beforeIsSpace And afterIsSpace Then
+                    ' Check if this is a number range (digit before space and digit after space)
+                    Dim isNumberRange As Boolean
+                    isNumberRange = False
+                    If enPos > 2 And enPos + 1 < Len(paraText) Then
+                        Dim charBeforeSpace As String
+                        Dim charAfterSpace As String
+                        charBeforeSpace = Mid$(paraText, enPos - 2, 1)
+                        charAfterSpace = Mid$(paraText, enPos + 2, 1)
+                        If (charBeforeSpace >= "0" And charBeforeSpace <= "9") And _
+                           (charAfterSpace >= "0" And charAfterSpace <= "9") Then
+                            isNumberRange = True
+                        End If
+                    End If
+                    If isNumberRange Then GoTo NextEnDashPos
                     Dim snStart As Long
-                    snStart = paraRange.Start + enPos - 1
+                    snStart = paraRange.Start + enPos - 1 - dashListPrefixLen
                     Dim snEnd As Long
                     snEnd = snStart + 1
 
@@ -781,6 +820,7 @@ Public Function Check_DashUsage(doc As Document) As Collection
                 End If
             End If
 
+NextEnDashPos:
             enPos = InStr(enPos + 1, paraText, enDash)
         Loop
 

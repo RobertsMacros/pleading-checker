@@ -370,8 +370,8 @@ Public Function Check_DefinedTerms(doc As Document) As Collection
                And Not LooksLikeSentence(termText) Then
                 ReDim defInfo(0 To 2)
                 defInfo(0) = 0 ' paragraph index (approximate)
-                defInfo(1) = startPos + 1  ' range start of term
-                defInfo(2) = startPos + CLng(closePos) - 1  ' range end of term
+                defInfo(1) = startPos  ' range start (includes opening quote)
+                defInfo(2) = startPos + CLng(closePos)  ' range end (includes closing quote)
                 definedTerms.Add termText, defInfo
             End If
         End If
@@ -552,7 +552,7 @@ NextParenFind:
             Set unusedRng = doc.Range(CLng(tInfo(1)), CLng(tInfo(2)))
             Dim locUnused As String
             locUnused = EngineGetLocationString(unusedRng, doc)
-            Set findingUnused = CreateIssueDict(RULE07_NAME, locUnused, "Defined term never referenced: '" & term & "' is defined but not used elsewhere in the document", "Remove the definition or use the term in the document", CLng(tInfo(1)), CLng(tInfo(2)), "possible_error")
+            Set findingUnused = CreateIssueDict(RULE07_NAME, locUnused, "Defined term never referenced: '" & term & "' is defined but not used elsewhere in the document.", "", CLng(tInfo(1)), CLng(tInfo(2)), "possible_error")
             issues.Add findingUnused
         End If
     Next termKey

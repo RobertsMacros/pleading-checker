@@ -66,9 +66,20 @@ Public Function Check_DoubleSpaces(doc As Document) As Collection
 
         If Not EngineIsInPageRange(paraRange) Then GoTo NextParaDS
 
+        ' Skip block quotes / indented extracts
+        Dim isBlockQ As Boolean
+        isBlockQ = False
+        isBlockQ = Application.Run("Rules_Formatting.IsBlockQuotePara", para)
+        If Err.Number <> 0 Then isBlockQ = False: Err.Clear
+        If isBlockQ Then GoTo NextParaDS
+
         paraText = StripParaMarkChar(paraRange.Text)
         If Err.Number <> 0 Then Err.Clear: GoTo NextParaDS
         If Len(paraText) < 2 Then GoTo NextParaDS
+
+        ' Calculate auto-number prefix offset
+        Dim listPrefixLen As Long
+        listPrefixLen = GetListPrefixLen(para, paraText)
 
         ' --- Pass 1: Flag runs of 2+ spaces ---
         Dim mDoubles As Object
@@ -96,7 +107,7 @@ Public Function Check_DoubleSpaces(doc As Document) As Collection
             ' Flag this double space
             Dim dsStart As Long
             Dim dsEnd As Long
-            dsStart = paraRange.Start + mStart
+            dsStart = paraRange.Start + mStart - listPrefixLen
             dsEnd = dsStart + md.Length
 
             Err.Clear
@@ -137,7 +148,7 @@ NextDoubleMatch:
                     ' Sentence-end with only one space -- flag it
                     ' Anchor the issue on the full stop + single space
                     Dim msStart As Long
-                    msStart = paraRange.Start + sdotPos
+                    msStart = paraRange.Start + sdotPos - listPrefixLen
                     Dim msEnd As Long
                     msEnd = msStart + 2  ' full stop + space
 
@@ -192,10 +203,13 @@ Public Function Check_DoubleCommas(doc As Document) As Collection
         paraText = paraRange.Text
         If Err.Number <> 0 Then Err.Clear: GoTo NextParaDC
 
+        Dim dcListPrefixLen As Long
+        dcListPrefixLen = GetListPrefixLen(para, paraText)
+
         pos = InStr(1, paraText, ",,")
         Do While pos > 0
             Dim dcStart As Long
-            dcStart = paraRange.Start + pos - 1
+            dcStart = paraRange.Start + pos - 1 - dcListPrefixLen
             Dim dcEnd As Long
             dcEnd = dcStart + 2
 
@@ -308,6 +322,9 @@ Public Function Check_MissingSpaceAfterDot(doc As Document) As Collection
         If Err.Number <> 0 Then Err.Clear: GoTo NextParaMSD
         If Len(paraText) < 2 Then GoTo NextParaMSD
 
+        Dim msdListPrefixLen As Long
+        msdListPrefixLen = GetListPrefixLen(para, paraText)
+
         Dim matches As Object
         Set matches = re.Execute(paraText)
         Dim m As Object
@@ -318,7 +335,7 @@ Public Function Check_MissingSpaceAfterDot(doc As Document) As Collection
             wordBefore = GetWordBeforePos(paraText, dotIdx)
             If Not IsLikelyAbbreviation(paraText, dotIdx, wordBefore) Then
                 Dim msdStart As Long
-                msdStart = paraRange.Start + dotIdx
+                msdStart = paraRange.Start + dotIdx - msdListPrefixLen
                 Dim msdEnd As Long
                 msdEnd = msdStart + 2   ' "." + capital letter
 
@@ -409,7 +426,7 @@ Public Function Check_TrailingSpaces(doc As Document) As Collection
                 End If
 
                 Set finding = CreateIssueDict(RULE_TRAILING_SPACES, locStr, _
-                    tsMsg, "Remove trailing space(s).", _
+                    tsMsg, "", _
                     tsStart, tsEnd, "warning", True)
                 issues.Add finding
             End If
@@ -425,6 +442,30 @@ End Function
 ' ============================================================
 '  PRIVATE HELPERS
 ' ============================================================
+
+' Calculate the length of auto-generated list numbering text
+' that appears in Range.Text but doesn't map to document positions.
+' Returns 0 for non-list paragraphs.
+Private Function GetListPrefixLen(para As Paragraph, ByVal paraText As String) As Long
+    GetListPrefixLen = 0
+    On Error Resume Next
+    Dim lStr As String
+    lStr = para.Range.ListFormat.ListString
+    If Err.Number <> 0 Then Err.Clear: On Error GoTo 0: Exit Function
+    If Len(lStr) = 0 Then On Error GoTo 0: Exit Function
+    ' Verify the text actually starts with the list string
+    If Len(paraText) > Len(lStr) Then
+        If Left$(paraText, Len(lStr)) = lStr Then
+            GetListPrefixLen = Len(lStr)
+            ' Account for tab separator after list number
+            If Mid$(paraText, GetListPrefixLen + 1, 1) = vbTab Then
+                GetListPrefixLen = GetListPrefixLen + 1
+            End If
+        End If
+    End If
+    Err.Clear
+    On Error GoTo 0
+End Function
 
 ' Strip the trailing paragraph mark (vbCr / Chr(13)) from text
 Private Function StripParaMarkChar(ByVal txt As String) As String

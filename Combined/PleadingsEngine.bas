@@ -857,7 +857,7 @@ Public Sub ApplySuggestionsAsTrackedChanges(doc As Document, _
             On Error Resume Next: Err.Clear
             Set rng = doc.Range(GetIssueProp(finding, "RangeStart"), GetIssueProp(finding, "RangeEnd"))
             If Err.Number = 0 Then
-                If GetIssueProp(finding, "AutoFixSafe") And Len(GetIssueProp(finding, "Suggestion")) > 0 Then
+                If GetIssueProp(finding, "AutoFixSafe") Then
                     ' Apply tracked change
                     doc.TrackRevisions = True
                     rng.Text = GetIssueProp(finding, "Suggestion")

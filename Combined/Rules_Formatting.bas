@@ -83,7 +83,7 @@ End Function
 '  PRIVATE: Detect block quote / indented extract paragraphs.
 '  Checks style name and left indentation.
 ' ------------------------------------------------------------
-Private Function IsBlockQuotePara(para As Paragraph) As Boolean
+Public Function IsBlockQuotePara(para As Paragraph) As Boolean
     IsBlockQuotePara = False
     On Error Resume Next
 
@@ -104,11 +104,43 @@ Private Function IsBlockQuotePara(para As Paragraph) As Boolean
     leftInd = para.Format.LeftIndent
     If Err.Number <> 0 Then leftInd = 0: Err.Clear
 
-    ' Also check if font size is noticeably smaller than 12pt body
-    ' (block quotes often use smaller font)
+    ' Get font size — for mixed-format paragraphs, Font.Size returns
+    ' wdUndefined (9999999). In that case, sample the first run's font size.
     Dim fontSize As Single
     fontSize = para.Range.Font.Size
     If Err.Number <> 0 Then fontSize = 0: Err.Clear
+    If fontSize <= 0 Or fontSize > 1000 Then
+        ' Mixed formatting — sample first character's font size
+        Dim sampleRng As Range
+        Set sampleRng = para.Range.Duplicate
+        If Err.Number = 0 Then
+            sampleRng.Collapse wdCollapseStart
+            sampleRng.MoveEnd wdCharacter, 1
+            fontSize = sampleRng.Font.Size
+            If Err.Number <> 0 Then fontSize = 0: Err.Clear
+            If fontSize > 1000 Then fontSize = 0
+        Else
+            Err.Clear
+        End If
+    End If
+
+    ' Check if paragraph text starts/ends with quotation marks
+    ' (strong block-quote indicator when combined with indentation)
+    Dim pText As String
+    pText = Trim$(Replace(para.Range.Text, vbCr, ""))
+    If Err.Number <> 0 Then pText = "": Err.Clear
+    Dim startsWithQuote As Boolean
+    Dim endsWithQuote As Boolean
+    startsWithQuote = False
+    endsWithQuote = False
+    If Len(pText) > 1 Then
+        Dim fc As String
+        Dim lc As String
+        fc = Left$(pText, 1)
+        lc = Right$(pText, 1)
+        startsWithQuote = (fc = Chr(34) Or fc = ChrW(8220) Or fc = ChrW(8216))
+        endsWithQuote = (lc = Chr(34) Or lc = ChrW(8221) Or lc = ChrW(8217))
+    End If
 
     ' Block quote if significantly indented AND smaller font
     If leftInd > 36 And fontSize > 0 And fontSize < 11 Then
@@ -118,8 +150,22 @@ Private Function IsBlockQuotePara(para As Paragraph) As Boolean
     End If
 
     ' Block quote if indented at all and font is noticeably smaller
-    ' (some block quotes use moderate indent with clearly smaller font)
     If leftInd > 18 And fontSize > 0 And fontSize < 10 Then
+        IsBlockQuotePara = True
+        On Error GoTo 0
+        Exit Function
+    End If
+
+    ' Block quote if indented and wrapped in quotation marks
+    If leftInd > 18 And startsWithQuote And endsWithQuote Then
+        IsBlockQuotePara = True
+        On Error GoTo 0
+        Exit Function
+    End If
+
+    ' Block quote if indented and wrapped in quotation marks with smaller font
+    If leftInd > 18 And fontSize > 0 And fontSize < 12 And _
+       (startsWithQuote Or endsWithQuote) Then
         IsBlockQuotePara = True
         On Error GoTo 0
         Exit Function

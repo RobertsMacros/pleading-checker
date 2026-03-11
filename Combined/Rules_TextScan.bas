@@ -72,6 +72,10 @@ Public Function Check_RepeatedWords(doc As Document) As Collection
             GoTo NextParagraph_RW
         End If
 
+        ' Calculate auto-number prefix offset
+        Dim rwListPrefixLen As Long
+        rwListPrefixLen = GetSOListPrefixLen(para, paraText)
+
         ' -- Split paragraph into words --------------------
         words = Split(paraText, " ")
         wordCount = UBound(words) - LBound(words) + 1
@@ -129,7 +133,7 @@ Public Function Check_RepeatedWords(doc As Document) As Collection
 
                 ' Map to document-level character positions
                 If secondPos > 0 Then
-                    rangeStart = paraRange.Start + secondPos - 1
+                    rangeStart = paraRange.Start + secondPos - 1 - rwListPrefixLen
                     rangeEnd = rangeStart + Len(words(i))
                 Else
                     ' Fallback: use paragraph start
@@ -228,6 +232,13 @@ Public Function Check_SpellOutUnderTen(doc As Document) As Collection
             GoTo NextParagraph_SO
         End If
 
+        ' -- Skip block quotes / indented extracts ----------
+        Dim isBlockQ As Boolean
+        isBlockQ = False
+        isBlockQ = Application.Run("Rules_Formatting.IsBlockQuotePara", para)
+        If Err.Number <> 0 Then isBlockQ = False: Err.Clear
+        If isBlockQ Then GoTo NextParagraph_SO
+
         ' -- Get paragraph text ------------------------------
         paraText = paraRange.Text
         If Err.Number <> 0 Then
@@ -237,6 +248,10 @@ Public Function Check_SpellOutUnderTen(doc As Document) As Collection
 
         textLen = Len(paraText)
         If textLen = 0 Then GoTo NextParagraph_SO
+
+        ' -- Calculate auto-number prefix offset -------------
+        Dim soListPrefixLen As Long
+        soListPrefixLen = GetSOListPrefixLen(para, paraText)
 
         ' -- Scan character by character for digits 0-9 ------
         For i = 1 To textLen
@@ -302,7 +317,7 @@ Public Function Check_SpellOutUnderTen(doc As Document) As Collection
                 Dim rangeStart As Long
                 Dim rangeEnd As Long
 
-                rangeStart = paraRange.Start + i - 1
+                rangeStart = paraRange.Start + i - 1 - soListPrefixLen
                 rangeEnd = rangeStart + 1
 
                 Err.Clear
@@ -417,6 +432,27 @@ End Function
 '  PRIVATE: Check if paragraph style should be excluded
 '  Excludes: Table, Code, Data, Technical, Footnote
 ' ------------------------------------------------------------
+' Calculate the length of auto-generated list numbering text
+' that appears in Range.Text but doesn't map to document positions.
+Private Function GetSOListPrefixLen(para As Paragraph, ByVal paraText As String) As Long
+    GetSOListPrefixLen = 0
+    On Error Resume Next
+    Dim lStr As String
+    lStr = para.Range.ListFormat.ListString
+    If Err.Number <> 0 Then Err.Clear: On Error GoTo 0: Exit Function
+    If Len(lStr) = 0 Then On Error GoTo 0: Exit Function
+    If Len(paraText) > Len(lStr) Then
+        If Left$(paraText, Len(lStr)) = lStr Then
+            GetSOListPrefixLen = Len(lStr)
+            If Mid$(paraText, GetSOListPrefixLen + 1, 1) = vbTab Then
+                GetSOListPrefixLen = GetSOListPrefixLen + 1
+            End If
+        End If
+    End If
+    Err.Clear
+    On Error GoTo 0
+End Function
+
 Private Function IsExcludedStyle(ByVal styleName As String) As Boolean
     Dim lStyle As String
     lStyle = LCase(styleName)

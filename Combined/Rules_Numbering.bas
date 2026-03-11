@@ -270,6 +270,15 @@ Private Sub CheckManualNumbering(doc As Document, _
             GoTo NextManualPara
         End If
 
+        ' -- Skip block quotes (they have their own numbering) --
+        Dim isBlockQ As Boolean
+        isBlockQ = False
+        On Error Resume Next
+        isBlockQ = Application.Run("Rules_Formatting.IsBlockQuotePara", para)
+        If Err.Number <> 0 Then isBlockQ = False: Err.Clear
+        On Error Resume Next
+        If isBlockQ Then GoTo NextManualPara
+
         ' -- Only process non-list paragraphs -------------
         listType = paraRange.ListFormat.listType
         If Err.Number <> 0 Then
