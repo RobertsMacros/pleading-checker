@@ -35,6 +35,7 @@ Option Explicit
 Private Const RULE_NAME As String = "spelling"
 Private Const RULE_NAME_LICENCE As String = "licence_license"
 Private Const RULE_NAME_COLOUR As String = "colour_formatting"
+Private Const RULE_NAME_CHECK As String = "check_cheque"
 
 ' ============================================================
 '  MAIN ENTRY POINT
@@ -969,7 +970,6 @@ End Function
 '  "cheque". Verb detection uses preceding word context.
 ' ================================================================
 ' ================================================================
-Private Const RULE_NAME_CHECK As String = "check_cheque"
 
 Public Function Check_CheckCheque(doc As Document) As Collection
     Dim issues As New Collection
