@@ -1,4 +1,4 @@
-# CLAUDE.md — Word VBA Macro Development Guide
+# VBA_learnings.md — Word VBA Macro Development Guide
 
 ## Project overview
 
@@ -203,6 +203,74 @@ If rule modules type variables `As SomeClass`, they won't compile unless that `.
 
 `Range.MoveEnd wdCharacterFormatting, 1` can return 0 (no movement) on certain paragraph structures without raising an error. Always check the return value or add a position guard to prevent infinite loops.
 
+### 24. `AutoFixSafe = True` with descriptive Suggestion corrupts documents
+
+When `AutoFixSafe = True`, the engine applies the `Suggestion` field as a tracked change via `rng.Text = sugText`. If the Suggestion is a human-readable message like `"Add a full stop at the end."`, that literal text replaces the target range, corrupting the document. **Suggestions for auto-fixable issues must be literal replacement values** (e.g. `","`, `ChrW(8211)`, `""` for deletions) — never descriptive text. If the fix is complex, set `AutoFixSafe = False`.
+
+```vba
+' WRONG — applies message text as tracked change
+Set finding = CreateIssueDict(rule, loc, msg, _
+    "Replace ',,' with a single ','.", start, end, "error", True)
+
+' RIGHT — literal replacement value
+Set finding = CreateIssueDict(rule, loc, msg, _
+    ",", start, end, "error", True)
+
+' RIGHT — descriptive suggestion, not auto-fixable
+Set finding = CreateIssueDict(rule, loc, msg, _
+    "Add a full stop at the end.", start, end, "warning", False)
+```
+
+### 25. Tracked change comment anchoring on deletions
+
+When a tracked change deletes text (empty suggestion), the range collapses to zero length after `rng.Text = ""`. Word then anchors any subsequent comment on the nearest word instead of the deletion mark. Preserve the original range length before the tracked change and re-anchor:
+
+```vba
+origStart = rng.Start
+origLen = rng.End - rng.Start
+doc.TrackRevisions = True
+rng.Text = sugText
+doc.TrackRevisions = wasTracking
+' For comment anchor:
+If Len(sugText) > 0 Then
+    Set commentRng = doc.Range(origStart, origStart + Len(sugText))
+Else
+    Set commentRng = doc.Range(origStart, origStart + origLen)
+End If
+```
+
+### 26. Space-targeting rules must only affect spaces
+
+Rules that fix spaces (double spaces, trailing spaces, space-before-punctuation) must:
+- Set range to cover **only the spaces**, not surrounding text
+- Set suggestion to `""` (empty = delete) — never to a descriptive message
+- For double spaces: target `dsStart + 1` to `dsEnd` (keep first space, delete extras)
+- For trailing spaces: target `paraRange.End - 1 - numSpaces` to `paraRange.End - 1`
+- For space-before-punct: target `rng.Start` to `rng.Start + 1` (just the space)
+
+### 27. Block quote detection must not catch lists
+
+Indented paragraphs are not necessarily block quotes. Numbered/bulleted lists in legal documents are often heavily indented. Block quote detection requires **at least one** of:
+- A quote/block/extract style name (definitive)
+- Quotation marks at start or end of the indented text
+- Entirely italic formatting
+- Font size clearly smaller than body text (e.g. 9pt vs 12pt body)
+
+**Pure indentation alone — even heavy (>72pt / 1 inch) — is NOT sufficient.** If the paragraph has body-sized font, is not italic, and has no quotation marks, it is a list or other indented content, not a block quote.
+
+### 28. VBA `Trim` does not strip tabs or non-breaking spaces
+
+`Trim$()` only removes ASCII spaces (Chr(32)). Tabs (`vbTab`), non-breaking spaces (`ChrW(160)`), and other whitespace survive. When checking if paragraph text starts/ends with specific characters (like quotation marks), strip these first:
+
+```vba
+pText = Replace(Replace(Replace(para.Range.Text, vbCr, ""), vbTab, ""), ChrW(160), "")
+pText = Trim$(pText)
+```
+
+### 29. `.MatchWholeWord` treats hyphens as word boundaries
+
+Word's `Find.MatchWholeWord` considers hyphens as word separators. Searching for "check" with `MatchWholeWord = True` will match "double-check" (finding "check" after the hyphen). Build exception arrays for compound words and check before/after context manually.
+
 ---
 
 ## Filtering false positives
@@ -216,7 +284,7 @@ Page 1 of a multi-page document when it has no numbered paragraphs (tribunal cov
 Detected via Word's built-in `TablesOfContents` collection, TOC-styled paragraphs, or dot/tab leader patterns (text followed by `....` or tabs then a page number). **All rules suppressed.**
 
 ### Block quotes / quoted text
-Detected by style name ("quote", "block", "extract"), significant left indentation with smaller font, or text wrapped in quotation marks. **Content rules suppressed** (spelling, grammar, numbers, quotes) but **formatting rules still apply** (font consistency, colour formatting, paragraph breaks) because formatting belongs to the author, not the source.
+Detected by style name ("quote", "block", "extract"), or by a combination of indentation with at least one distinguishing feature: smaller font than body, italic formatting, or quotation marks at start/end. **Indentation alone is not sufficient** — heavily indented paragraphs at body font size without quotes or italics are lists, not block quotes. **Content rules suppressed** (spelling, grammar, numbers, quotes) but **formatting rules still apply** (font consistency, colour formatting, paragraph breaks) because formatting belongs to the author, not the source.
 
 ### Footnotes and endnotes
 Have their own dedicated rule set. Body-text rules should not flag footnote content; footnote rules should not flag body text.
@@ -226,7 +294,9 @@ Have their own dedicated rule set. Body-text rules should not flag footnote cont
 ## Code style conventions
 
 - All rule functions return a `Collection` of `Dictionary` objects (created via `CreateIssueDict` / `CreateIssue`)
-- Each issue dictionary has keys: `RuleName`, `Message`, `Suggestion`, `RangeStart`, `RangeEnd`, `Severity`
+- Each issue dictionary has keys: `RuleName`, `Location`, `Issue`, `Suggestion`, `RangeStart`, `RangeEnd`, `Severity`, `AutoFixSafe`
+- **AutoFixSafe rule:** When `AutoFixSafe = True`, `Suggestion` must be a **literal replacement value** (or `""` for deletion). Never a human-readable description. When the fix is too complex for a literal, use `AutoFixSafe = False`.
+- **Range targeting:** `RangeStart`/`RangeEnd` must target exactly the text being flagged or replaced — spaces target only spaces, dashes target only the dash character, etc.
 - Use `On Error Resume Next` with `Err.Clear` around any Range/Paragraph property access (documents can have corrupt ranges)
 - Prefer `LCase()` comparisons over case-sensitive string matching
 - Keep individual rule modules independent — no cross-rule imports
