@@ -207,6 +207,7 @@ Public Function InitRuleConfig() As Object
     cfg.Add "licence_license", True
     cfg.Add "check_cheque", True
     cfg.Add "slash_style", True
+    cfg.Add "dash_usage", True
     cfg.Add "list_punctuation", True
     cfg.Add "bracket_integrity", True
     cfg.Add "quotation_mark_consistency", True
@@ -417,6 +418,11 @@ Public Function RunAllPleadingsRules(doc As Document, _
     If IsRuleEnabled(config, "bracket_integrity") Then
         AddIssuesToCollection allIssues, _
             TryRunRule("Rules_Punctuation.Check_BracketIntegrity", doc)
+    End If
+
+    If IsRuleEnabled(config, "dash_usage") Then
+        AddIssuesToCollection allIssues, _
+            TryRunRule("Rules_Punctuation.Check_DashUsage", doc)
     End If
 
     DoEvents
@@ -1020,6 +1026,7 @@ Public Function GetRuleDisplayNames() As Object
     d.Add "licence_license", "Licence/License Rule"
     d.Add "check_cheque", "Check/Cheque Rule"
     d.Add "slash_style", "Slash Style Checker"
+    d.Add "dash_usage", "En-dash/Em-dash/Hyphen"
     d.Add "bracket_integrity", "Bracket Integrity"
     d.Add "quotation_mark_consistency", "Quotation Mark Consistency"
     d.Add "currency_number_format", "Currency/Number Formatting"

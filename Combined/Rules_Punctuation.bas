@@ -14,6 +14,7 @@ Option Explicit
 
 Private Const RULE_NAME_SLASH As String = "slash_style"
 Private Const RULE_NAME_BRACKET As String = "bracket_integrity"
+Private Const RULE_NAME_DASH As String = "dash_usage"
 
 ' ?==============================================================?
 ' ?  SLASH STYLE (Rule14)                                       ?
@@ -601,6 +602,194 @@ Private Function CreateIssueDict(ByVal ruleName_ As String, _
     Set CreateIssueDict = d
 End Function
 
+
+' ================================================================
+' ================================================================
+'  DASH USAGE (en-dash / em-dash / hyphen)
+'  Context-dependent checks:
+'   1. Hyphen in number ranges -> should be en-dash
+'   2. Double-hyphen "--" -> should be em-dash
+'   3. En-dash between words (compound) -> should be hyphen
+'   4. Spaced en-dash -> should probably be em-dash
+' ================================================================
+' ================================================================
+
+Public Function Check_DashUsage(doc As Document) As Collection
+    Dim issues As New Collection
+    Dim para As Paragraph
+    Dim paraText As String
+    Dim paraRange As Range
+    Dim finding As Object
+    Dim locStr As String
+
+    Dim reHyphenRange As Object
+    Set reHyphenRange = CreateObject("VBScript.RegExp")
+    reHyphenRange.Global = True
+    ' Matches digit(s) - hyphen - digit(s) as a number range
+    reHyphenRange.Pattern = "(\d)-(\d)"
+
+    Dim reDoubleHyphen As Object
+    Set reDoubleHyphen = CreateObject("VBScript.RegExp")
+    reDoubleHyphen.Global = True
+    reDoubleHyphen.Pattern = "--"
+
+    Dim enDash As String
+    enDash = ChrW(8211)
+    Dim emDash As String
+    emDash = ChrW(8212)
+
+    On Error Resume Next
+    For Each para In doc.Paragraphs
+        Err.Clear
+        Set paraRange = para.Range
+        If Err.Number <> 0 Then Err.Clear: GoTo NextParaDash
+
+        If Not EngineIsInPageRange(paraRange) Then GoTo NextParaDash
+
+        paraText = paraRange.Text
+        If Err.Number <> 0 Then Err.Clear: GoTo NextParaDash
+        ' Strip para mark
+        If Len(paraText) > 0 Then
+            If Right$(paraText, 1) = vbCr Or Right$(paraText, 1) = Chr(13) Then
+                paraText = Left$(paraText, Len(paraText) - 1)
+            End If
+        End If
+        If Len(paraText) < 2 Then GoTo NextParaDash
+
+        ' --- Check 1: Hyphen in number ranges (digit-digit) ---
+        Dim mHR As Object
+        Set mHR = reHyphenRange.Execute(paraText)
+        Dim hm As Object
+        For Each hm In mHR
+            Dim hrStart As Long
+            hrStart = paraRange.Start + hm.FirstIndex
+            ' The hyphen is at offset +length_of_first_digit
+            ' In pattern (\d)-(\d), hyphen is at FirstIndex + 1
+            Dim hyphenPos As Long
+            hyphenPos = hrStart + 1
+            Dim hrEnd As Long
+            hrEnd = hyphenPos + 1  ' just the hyphen
+
+            Err.Clear
+            Dim hrRng As Range
+            Set hrRng = doc.Range(hyphenPos, hrEnd)
+            If Err.Number <> 0 Then
+                locStr = "unknown location"
+                Err.Clear
+            Else
+                locStr = EngineGetLocationString(hrRng, doc)
+            End If
+
+            Set finding = CreateIssueDict(RULE_NAME_DASH, locStr, _
+                "Hyphen used in number range. Use an en-dash for ranges.", _
+                enDash, hyphenPos, hrEnd, "error", True)
+            issues.Add finding
+        Next hm
+
+        ' --- Check 2: Double-hyphen "--" should be em-dash ---
+        Dim mDH As Object
+        Set mDH = reDoubleHyphen.Execute(paraText)
+        Dim dhm As Object
+        For Each dhm In mDH
+            Dim dhStart As Long
+            dhStart = paraRange.Start + dhm.FirstIndex
+            Dim dhEnd As Long
+            dhEnd = dhStart + 2
+
+            Err.Clear
+            Dim dhRng As Range
+            Set dhRng = doc.Range(dhStart, dhEnd)
+            If Err.Number <> 0 Then
+                locStr = "unknown location"
+                Err.Clear
+            Else
+                locStr = EngineGetLocationString(dhRng, doc)
+            End If
+
+            Set finding = CreateIssueDict(RULE_NAME_DASH, locStr, _
+                "Double-hyphen found. Use an em-dash instead.", _
+                emDash, dhStart, dhEnd, "error", True)
+            issues.Add finding
+        Next dhm
+
+        ' --- Check 3: En-dash between letters (compound word) ---
+        ' Pattern: letter + en-dash + letter (no spaces) = should be hyphen
+        Dim enPos As Long
+        enPos = InStr(1, paraText, enDash)
+        Do While enPos > 0
+            If enPos > 1 And enPos < Len(paraText) Then
+                Dim chBefore As String
+                Dim chAfter As String
+                chBefore = Mid$(paraText, enPos - 1, 1)
+                chAfter = Mid$(paraText, enPos + 1, 1)
+
+                Dim beforeIsLetter As Boolean
+                Dim afterIsLetter As Boolean
+                beforeIsLetter = (chBefore >= "A" And chBefore <= "Z") Or _
+                                 (chBefore >= "a" And chBefore <= "z")
+                afterIsLetter = (chAfter >= "A" And chAfter <= "Z") Or _
+                                (chAfter >= "a" And chAfter <= "z")
+
+                If beforeIsLetter And afterIsLetter Then
+                    Dim enStart As Long
+                    enStart = paraRange.Start + enPos - 1
+                    Dim enEnd As Long
+                    enEnd = enStart + 1
+
+                    Err.Clear
+                    Dim enRng As Range
+                    Set enRng = doc.Range(enStart, enEnd)
+                    If Err.Number <> 0 Then
+                        locStr = "unknown location"
+                        Err.Clear
+                    Else
+                        locStr = EngineGetLocationString(enRng, doc)
+                    End If
+
+                    Set finding = CreateIssueDict(RULE_NAME_DASH, locStr, _
+                        "En-dash used between words. Use a hyphen for compound words.", _
+                        "-", enStart, enEnd, "error", True)
+                    issues.Add finding
+                End If
+
+                ' Check 4: Spaced en-dash (" – ") -> should be em-dash (" — ")
+                Dim beforeIsSpace As Boolean
+                Dim afterIsSpace As Boolean
+                beforeIsSpace = (chBefore = " ")
+                afterIsSpace = (chAfter = " ")
+
+                If beforeIsSpace And afterIsSpace Then
+                    Dim snStart As Long
+                    snStart = paraRange.Start + enPos - 1
+                    Dim snEnd As Long
+                    snEnd = snStart + 1
+
+                    Err.Clear
+                    Dim snRng As Range
+                    Set snRng = doc.Range(snStart, snEnd)
+                    If Err.Number <> 0 Then
+                        locStr = "unknown location"
+                        Err.Clear
+                    Else
+                        locStr = EngineGetLocationString(snRng, doc)
+                    End If
+
+                    Set finding = CreateIssueDict(RULE_NAME_DASH, locStr, _
+                        "Spaced en-dash found. Consider using an em-dash for parenthetical interruptions.", _
+                        emDash, snStart, snEnd, "warning", False)
+                    issues.Add finding
+                End If
+            End If
+
+            enPos = InStr(enPos + 1, paraText, enDash)
+        Loop
+
+NextParaDash:
+    Next para
+    On Error GoTo 0
+
+    Set Check_DashUsage = issues
+End Function
 
 ' ----------------------------------------------------------------
 '  Late-bound wrapper: PleadingsEngine.IsInPageRange
