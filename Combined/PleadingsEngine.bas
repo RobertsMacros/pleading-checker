@@ -40,8 +40,7 @@ Option Explicit
 
 ' -- Module-level state --
 Private ruleConfig      As Object
-Private PAGE_RANGE_START As Long
-Private PAGE_RANGE_END   As Long
+Private pageRangeSet    As Object   ' Dictionary of page numbers (Long -> True)
 Private whitelistDict   As Object
 Private spellingMode    As String   ' "UK" or "US"
 Private quoteNesting   As String   ' "SINGLE" or "DOUBLE" (outer marks)
@@ -200,29 +199,20 @@ Public Function InitRuleConfig() As Object
     cfg.Add "sequential_numbering", True
     cfg.Add "heading_capitalisation", True
     cfg.Add "custom_term_whitelist", True
-    cfg.Add "paragraph_break_consistency", True
     cfg.Add "defined_terms", True
     cfg.Add "clause_number_format", True
     cfg.Add "date_time_format", True
-    cfg.Add "inline_list_format", True
-    cfg.Add "font_consistency", True
+    cfg.Add "list_rules", True
+    cfg.Add "formatting_consistency", True
     cfg.Add "licence_license", True
-    cfg.Add "colour_formatting", True
     cfg.Add "slash_style", True
     cfg.Add "list_punctuation", True
     cfg.Add "bracket_integrity", True
     cfg.Add "quotation_mark_consistency", True
-    cfg.Add "page_range", True
     cfg.Add "currency_number_format", True
-    cfg.Add "footnote_integrity", True
+    cfg.Add "footnote_rules", True
     cfg.Add "title_formatting", True
     cfg.Add "brand_name_enforcement", True
-    ' "phrase_consistency" removed: too many false positives on words
-    ' with different meanings (e.g. "where" vs "if")
-    cfg.Add "footnotes_not_endnotes", True
-    cfg.Add "footnote_terminal_full_stop", True
-    cfg.Add "footnote_initial_capital", True
-    cfg.Add "footnote_abbreviation_dictionary", True
     cfg.Add "mandated_legal_term_forms", True
     cfg.Add "always_capitalise_terms", True
     cfg.Add "known_anglicised_terms_not_italic", True
@@ -373,15 +363,14 @@ Public Function RunAllPleadingsRules(doc As Document, _
     ' phrase_consistency removed (false positives on words with different meanings)
 
     DoEvents
-    ' -- Formatting rules --
-    If IsRuleEnabled(config, "paragraph_break_consistency") Then
+    ' -- Formatting consistency (combined: paragraph breaks, font, colour) --
+    If IsRuleEnabled(config, "formatting_consistency") Then
         AddIssuesToCollection allIssues, _
             TryRunRule("Rules_Formatting.Check_ParagraphBreakConsistency", doc)
-    End If
-
-    If IsRuleEnabled(config, "font_consistency") Then
         AddIssuesToCollection allIssues, _
             TryRunRule("Rules_Formatting.Check_FontConsistency", doc)
+        AddIssuesToCollection allIssues, _
+            TryRunRule("Rules_Spelling.Check_ColourFormatting", doc)
     End If
 
     DoEvents
@@ -391,24 +380,16 @@ Public Function RunAllPleadingsRules(doc As Document, _
             TryRunRule("Rules_NumberFormats.Check_DateTimeFormat", doc)
     End If
 
-    If IsRuleEnabled(config, "page_range") Then
-        AddIssuesToCollection allIssues, _
-            TryRunRule("Rules_NumberFormats.Check_PageRange", doc)
-    End If
-
     If IsRuleEnabled(config, "currency_number_format") Then
         AddIssuesToCollection allIssues, _
             TryRunRule("Rules_NumberFormats.Check_CurrencyNumberFormat", doc)
     End If
 
     DoEvents
-    ' -- List rules --
-    If IsRuleEnabled(config, "inline_list_format") Then
+    ' -- List rules (combined: inline format, punctuation) --
+    If IsRuleEnabled(config, "list_rules") Then
         AddIssuesToCollection allIssues, _
             TryRunRule("Rules_Lists.Check_InlineListFormat", doc)
-    End If
-
-    If IsRuleEnabled(config, "list_punctuation") Then
         AddIssuesToCollection allIssues, _
             TryRunRule("Rules_Lists.Check_ListPunctuation", doc)
     End If
@@ -418,11 +399,6 @@ Public Function RunAllPleadingsRules(doc As Document, _
     If IsRuleEnabled(config, "licence_license") Then
         AddIssuesToCollection allIssues, _
             TryRunRule("Rules_Spelling.Check_LicenceLicense", doc)
-    End If
-
-    If IsRuleEnabled(config, "colour_formatting") Then
-        AddIssuesToCollection allIssues, _
-            TryRunRule("Rules_Spelling.Check_ColourFormatting", doc)
     End If
 
     DoEvents
@@ -455,10 +431,18 @@ Public Function RunAllPleadingsRules(doc As Document, _
     End If
 
     DoEvents
-    ' -- Footnote integrity --
-    If IsRuleEnabled(config, "footnote_integrity") Then
+    ' -- Footnote rules (combined: integrity, not-endnotes, Hart's rules) --
+    If IsRuleEnabled(config, "footnote_rules") Then
         AddIssuesToCollection allIssues, _
             TryRunRule("Rules_FootnoteIntegrity.Check_FootnoteIntegrity", doc)
+        AddIssuesToCollection allIssues, _
+            TryRunRule("Rules_FootnoteHarts.Check_FootnotesNotEndnotes", doc)
+        AddIssuesToCollection allIssues, _
+            TryRunRule("Rules_FootnoteHarts.Check_FootnoteTerminalFullStop", doc)
+        AddIssuesToCollection allIssues, _
+            TryRunRule("Rules_FootnoteHarts.Check_FootnoteInitialCapital", doc)
+        AddIssuesToCollection allIssues, _
+            TryRunRule("Rules_FootnoteHarts.Check_FootnoteAbbreviationDictionary", doc)
     End If
 
     DoEvents
@@ -466,28 +450,6 @@ Public Function RunAllPleadingsRules(doc As Document, _
     If IsRuleEnabled(config, "brand_name_enforcement") Then
         AddIssuesToCollection allIssues, _
             TryRunRule("Rules_Brands.Check_BrandNameEnforcement", doc)
-    End If
-
-    DoEvents
-    ' -- Hart footnote rules --
-    If IsRuleEnabled(config, "footnotes_not_endnotes") Then
-        AddIssuesToCollection allIssues, _
-            TryRunRule("Rules_FootnoteHarts.Check_FootnotesNotEndnotes", doc)
-    End If
-
-    If IsRuleEnabled(config, "footnote_terminal_full_stop") Then
-        AddIssuesToCollection allIssues, _
-            TryRunRule("Rules_FootnoteHarts.Check_FootnoteTerminalFullStop", doc)
-    End If
-
-    If IsRuleEnabled(config, "footnote_initial_capital") Then
-        AddIssuesToCollection allIssues, _
-            TryRunRule("Rules_FootnoteHarts.Check_FootnoteInitialCapital", doc)
-    End If
-
-    If IsRuleEnabled(config, "footnote_abbreviation_dictionary") Then
-        AddIssuesToCollection allIssues, _
-            TryRunRule("Rules_FootnoteHarts.Check_FootnoteAbbreviationDictionary", doc)
     End If
 
     DoEvents
@@ -1019,28 +981,19 @@ Public Function GetRuleDisplayNames() As Object
     d.Add "sequential_numbering", "Sequential Numbering"
     d.Add "heading_capitalisation", "Heading Capitalisation"
     d.Add "custom_term_whitelist", "Custom Term Whitelist"
-    d.Add "paragraph_break_consistency", "Paragraph Break Consistency"
     d.Add "defined_terms", "Defined Term Checker"
     d.Add "clause_number_format", "Clause Number Format"
     d.Add "date_time_format", "Date/Time Format Consistency"
-    d.Add "inline_list_format", "Inline List Format"
-    d.Add "font_consistency", "Font Consistency"
+    d.Add "list_rules", "List Format & Punctuation"
+    d.Add "formatting_consistency", "Formatting Consistency"
     d.Add "licence_license", "Licence/License Rule"
-    d.Add "colour_formatting", "Colour Formatting Consistency"
     d.Add "slash_style", "Slash Style Checker"
-    d.Add "list_punctuation", "List Punctuation Consistency"
     d.Add "bracket_integrity", "Bracket Integrity"
     d.Add "quotation_mark_consistency", "Quotation Mark Consistency"
-    d.Add "page_range", "Page Range Filter"
     d.Add "currency_number_format", "Currency/Number Formatting"
-    d.Add "footnote_integrity", "Footnote Integrity"
+    d.Add "footnote_rules", "Footnote Rules"
     d.Add "title_formatting", "Title Formatting Consistency"
     d.Add "brand_name_enforcement", "Brand Name Enforcement"
-    ' "phrase_consistency" removed
-    d.Add "footnotes_not_endnotes", "Footnotes Not Endnotes"
-    d.Add "footnote_terminal_full_stop", "Footnote Terminal Full Stop"
-    d.Add "footnote_initial_capital", "Footnote Initial Capital"
-    d.Add "footnote_abbreviation_dictionary", "Footnote Abbreviation Dictionary"
     d.Add "mandated_legal_term_forms", "Mandated Legal Term Forms"
     d.Add "always_capitalise_terms", "Always Capitalise Terms"
     d.Add "known_anglicised_terms_not_italic", "Anglicised Terms Not Italic"
@@ -1059,20 +1012,97 @@ End Function
 
 ' ============================================================
 '  HELPERS: PAGE RANGE
+'  Accepts flexible page specifications:
+'    "5"         - single page
+'    "3-7"       - range (also supports en-dash and colon)
+'    "1,3,5"     - comma-separated pages
+'    "1,3-5,8"   - mixed
+'    ""          - all pages (no filter)
 ' ============================================================
 Public Function IsInPageRange(rng As Range) As Boolean
-    If PAGE_RANGE_START = 0 And PAGE_RANGE_END = 0 Then
+    If pageRangeSet Is Nothing Then
+        IsInPageRange = True
+        Exit Function
+    End If
+    If pageRangeSet.Count = 0 Then
         IsInPageRange = True
         Exit Function
     End If
     Dim pageNum As Long
     pageNum = rng.Information(wdActiveEndAdjustedPageNumber)
-    IsInPageRange = (pageNum >= PAGE_RANGE_START And pageNum <= PAGE_RANGE_END)
+    IsInPageRange = pageRangeSet.Exists(pageNum)
 End Function
 
 Public Sub SetPageRange(startPage As Long, endPage As Long)
-    PAGE_RANGE_START = startPage
-    PAGE_RANGE_END = endPage
+    ' Legacy compatibility: convert start/end to page set
+    If startPage = 0 And endPage = 0 Then
+        Set pageRangeSet = Nothing
+        Exit Sub
+    End If
+    Set pageRangeSet = CreateObject("Scripting.Dictionary")
+    Dim pg As Long
+    For pg = startPage To endPage
+        pageRangeSet(pg) = True
+    Next pg
+End Sub
+
+Public Sub SetPageRangeFromString(ByVal spec As String)
+    ' Parse flexible page range specification
+    spec = Trim(spec)
+    If Len(spec) = 0 Then
+        Set pageRangeSet = Nothing
+        Exit Sub
+    End If
+
+    Set pageRangeSet = CreateObject("Scripting.Dictionary")
+
+    ' Normalise separators: en-dash (8211) and colon to hyphen
+    spec = Replace(spec, ChrW(8211), "-")
+    spec = Replace(spec, ":", "-")
+
+    ' Split on comma
+    Dim parts() As String
+    parts = Split(spec, ",")
+
+    Dim i As Long
+    For i = LBound(parts) To UBound(parts)
+        Dim part As String
+        part = Trim(parts(i))
+        If Len(part) = 0 Then GoTo NextPart
+
+        Dim dashPos As Long
+        dashPos = InStr(1, part, "-")
+
+        If dashPos > 0 Then
+            ' Range: "3-7"
+            Dim rangeStart As Long
+            Dim rangeEnd As Long
+            Dim leftPart As String
+            Dim rightPart As String
+            leftPart = Trim(Left$(part, dashPos - 1))
+            rightPart = Trim(Mid$(part, dashPos + 1))
+
+            If IsNumeric(leftPart) And IsNumeric(rightPart) Then
+                rangeStart = CLng(leftPart)
+                rangeEnd = CLng(rightPart)
+                Dim pg As Long
+                For pg = rangeStart To rangeEnd
+                    pageRangeSet(pg) = True
+                Next pg
+            End If
+        Else
+            ' Single page: "5"
+            If IsNumeric(part) Then
+                pageRangeSet(CLng(part)) = True
+            End If
+        End If
+NextPart:
+    Next i
+
+    ' If nothing valid was parsed, clear the set
+    If pageRangeSet.Count = 0 Then
+        Set pageRangeSet = Nothing
+    End If
 End Sub
 
 Public Function GetRuleErrorCount() As Long

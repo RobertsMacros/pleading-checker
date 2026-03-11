@@ -43,8 +43,7 @@ Private WithEvents btnSaveBrands    As MSForms.CommandButton
 Private WithEvents btnLoadBrands    As MSForms.CommandButton
 
 Private fraRules        As MSForms.Frame
-Private txtStartPage    As MSForms.TextBox
-Private txtEndPage      As MSForms.TextBox
+Private txtPageRange    As MSForms.TextBox
 Private lstBrands       As MSForms.ListBox
 Private txtBrandCorrect As MSForms.TextBox
 Private txtBrandIncorrect As MSForms.TextBox
@@ -167,28 +166,16 @@ Private Sub UserForm_Initialize()
     End With
     yPos = yPos + LBL_H + ITEM_GAP
 
-    ' Page range fields
-    Set lbl = Me.Controls.Add("Forms.Label.1", "lblStartPage")
+    ' Page range field (flexible format: "5", "3-7", "1,3,5", "1,3-5,8")
+    Set lbl = Me.Controls.Add("Forms.Label.1", "lblPageRange")
     With lbl
-        .Caption = "Start Page:"
-        .Left = colLeft: .Top = yPos + 3: .Width = 66: .Height = LBL_H
+        .Caption = "Pages:"
+        .Left = colLeft: .Top = yPos + 3: .Width = 40: .Height = LBL_H
     End With
 
-    Set txtStartPage = Me.Controls.Add("Forms.TextBox.1", "txtStartPage")
-    With txtStartPage
-        .Left = colLeft + 66: .Top = yPos: .Width = 50: .Height = TXT_H
-        .Text = ""
-    End With
-
-    Set lbl = Me.Controls.Add("Forms.Label.1", "lblEndPage")
-    With lbl
-        .Caption = "End Page:"
-        .Left = colLeft + 126: .Top = yPos + 3: .Width = 60: .Height = LBL_H
-    End With
-
-    Set txtEndPage = Me.Controls.Add("Forms.TextBox.1", "txtEndPage")
-    With txtEndPage
-        .Left = colLeft + 186: .Top = yPos: .Width = 50: .Height = TXT_H
+    Set txtPageRange = Me.Controls.Add("Forms.TextBox.1", "txtPageRange")
+    With txtPageRange
+        .Left = colLeft + 40: .Top = yPos: .Width = 196: .Height = TXT_H
         .Text = ""
     End With
 
@@ -557,16 +544,8 @@ Private Sub btnRun_Click()
         End If
     Next i
 
-    ' Set page range if specified
-    Dim startPg As Long, endPg As Long
-    startPg = 0: endPg = 0
-    If IsNumeric(txtStartPage.Text) And Len(txtStartPage.Text) > 0 Then
-        startPg = CLng(txtStartPage.Text)
-    End If
-    If IsNumeric(txtEndPage.Text) And Len(txtEndPage.Text) > 0 Then
-        endPg = CLng(txtEndPage.Text)
-    End If
-    PleadingsEngine.SetPageRange startPg, endPg
+    ' Set page range from flexible input
+    PleadingsEngine.SetPageRangeFromString txtPageRange.Text
 
     ' Set mode toggles
     If optSpellingUS.Value Then
