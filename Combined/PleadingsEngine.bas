@@ -679,7 +679,7 @@ NextCoverPara:
             isBQ = True
         End If
 
-        ' Check 2: Indentation + smaller font (relaxed thresholds)
+        ' Check 2: Indentation + smaller font or italic
         If Not isBQ Then
             Dim leftInd As Single
             leftInd = para.Format.LeftIndent
@@ -687,12 +687,27 @@ NextCoverPara:
             Dim fontSize As Single
             fontSize = para.Range.Font.Size
             If Err.Number <> 0 Then fontSize = 0: Err.Clear
+            Dim bqItalic As Boolean
+            bqItalic = False
+            Dim bqItalVal As Long
+            bqItalVal = para.Range.Font.Italic
+            If Err.Number <> 0 Then bqItalVal = 0: Err.Clear
+            If bqItalVal = -1 Then bqItalic = True  ' wdTrue = -1
             ' Moderate indent with clearly smaller font
             If leftInd > 18 And fontSize > 0 And fontSize < 11 Then
                 isBQ = True
             End If
-            ' Heavy indentation alone (72pt = ~1 inch)
-            If leftInd > 72 Then isBQ = True
+            ' Moderate indent with italic
+            If leftInd > 18 And bqItalic Then
+                isBQ = True
+            End If
+            ' Heavy indentation: only if italic or smaller font
+            ' (plain indented body-size text = list, not quote)
+            If Not isBQ And leftInd > 72 Then
+                If bqItalic Or (fontSize > 0 And fontSize < 11) Then
+                    isBQ = True
+                End If
+            End If
         End If
 
         ' Check 3: Multi-paragraph smart-quote detection

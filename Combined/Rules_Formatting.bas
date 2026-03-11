@@ -143,6 +143,14 @@ Public Function IsBlockQuotePara(para As Paragraph) As Boolean
         endsWithQuote = (lc = Chr(34) Or lc = ChrW(8221) Or lc = ChrW(8217))
     End If
 
+    ' Check if paragraph is entirely italic (strong block-quote indicator)
+    Dim isItalic As Boolean
+    isItalic = False
+    Dim italVal As Long
+    italVal = para.Range.Font.Italic
+    If Err.Number <> 0 Then italVal = 0: Err.Clear
+    If italVal = -1 Then isItalic = True  ' wdTrue = -1
+
     ' Block quote if significantly indented AND smaller font
     If leftInd > 36 And fontSize > 0 And fontSize < 11 Then
         IsBlockQuotePara = True
@@ -158,24 +166,27 @@ Public Function IsBlockQuotePara(para As Paragraph) As Boolean
     End If
 
     ' Block quote if indented and wrapped in quotation marks
-    If leftInd > 18 And startsWithQuote And endsWithQuote Then
+    If leftInd > 18 And (startsWithQuote Or endsWithQuote) Then
         IsBlockQuotePara = True
         On Error GoTo 0
         Exit Function
     End If
 
-    ' Block quote if indented and wrapped in quotation marks with smaller font
-    If leftInd > 18 And fontSize > 0 And fontSize < 12 And _
-       (startsWithQuote Or endsWithQuote) Then
+    ' Block quote if indented and entirely italic
+    If leftInd > 18 And isItalic Then
         IsBlockQuotePara = True
         On Error GoTo 0
         Exit Function
     End If
 
-    ' Block quote if very significantly indented (>72pt = 1 inch),
-    ' regardless of font size — heavy indentation alone signals a quote
+    ' Heavy indentation (>72pt) but ONLY if quotes, italic, or smaller font
+    ' (plain indentation at body font size is likely a list, not a quote)
     If leftInd > 72 Then
-        IsBlockQuotePara = True
+        If isItalic Or startsWithQuote Or endsWithQuote Then
+            IsBlockQuotePara = True
+        ElseIf fontSize > 0 And fontSize < 11 Then
+            IsBlockQuotePara = True
+        End If
     End If
 
     On Error GoTo 0
@@ -532,15 +543,30 @@ NextPre:
                     End If
                 End If
 
+                ' Check if paragraph is entirely italic
+                Dim pIsItalic As Boolean
+                pIsItalic = False
+                Dim pItalVal As Long
+                pItalVal = para.Range.Font.Italic
+                If Err.Number <> 0 Then pItalVal = 0: Err.Clear
+                If pItalVal = -1 Then pIsItalic = True  ' wdTrue = -1
+
                 If isExtraIndented And isSmallerFont Then
                     paraType = "block_quote"
                 ElseIf isExtraIndented And hasSmartQuotes Then
                     paraType = "block_quote"
+                ElseIf isExtraIndented And pIsItalic Then
+                    paraType = "block_quote"
                 ElseIf isSmallerFont And hasSmartQuotes And pInd > domBodyIndent Then
                     paraType = "block_quote"
                 ElseIf pInd > domBodyIndent + 54 Then
-                    ' Very heavy indentation alone (>~0.75 inch beyond body)
-                    paraType = "block_quote"
+                    ' Heavy indentation: only block quote if quotes, italic,
+                    ' or smaller font (plain indented body-size text = list)
+                    If pIsItalic Or hasSmartQuotes Or isSmallerFont Then
+                        paraType = "block_quote"
+                    Else
+                        paraType = "body"
+                    End If
                 Else
                     paraType = "body"
                 End If

@@ -225,7 +225,7 @@ Public Function Check_DoubleCommas(doc As Document) As Collection
             End If
 
             Set finding = CreateIssueDict(RULE_DOUBLE_COMMAS, locStr, _
-                "Double comma found.", "Replace ',,' with a single ','.", _
+                "Double comma found.", ",", _
                 dcStart, dcEnd, "error", True)
             issues.Add finding
 
