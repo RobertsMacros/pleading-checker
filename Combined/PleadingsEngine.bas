@@ -700,6 +700,9 @@ NextCoverPara:
         pText = ""
         pText = para.Range.Text
         If Err.Number <> 0 Then pText = "": Err.Clear
+        ' Strip tabs, non-breaking spaces, CRs so quote marks are first/last
+        pText = Replace(Replace(Replace(pText, vbCr, ""), vbTab, ""), ChrW(160), "")
+        pText = Trim$(pText)
         If Not isBQ Then
             If Len(pText) > 2 Then
                 Dim firstCh As Long, lastCh As Long
@@ -858,13 +861,30 @@ Public Sub ApplySuggestionsAsTrackedChanges(doc As Document, _
             Set rng = doc.Range(GetIssueProp(finding, "RangeStart"), GetIssueProp(finding, "RangeEnd"))
             If Err.Number = 0 Then
                 If GetIssueProp(finding, "AutoFixSafe") Then
+                    ' Remember original position before modification
+                    Dim origStart As Long
+                    Dim sugText As String
+                    origStart = rng.Start
+                    sugText = GetIssueProp(finding, "Suggestion")
+
                     ' Apply tracked change
                     doc.TrackRevisions = True
-                    rng.Text = GetIssueProp(finding, "Suggestion")
+                    rng.Text = sugText
                     doc.TrackRevisions = wasTrackingChanges
-                    ' Add comment anchored on the (now-modified) rng object
+
+                    ' Re-anchor comment to the replacement text using
+                    ' a fresh range (rng may have shifted unpredictably
+                    ' after tracked-change insertion/deletion)
                     If addComments Then
-                        doc.Comments.Add Range:=rng, Text:=GetIssueProp(finding, "Issue")
+                        Dim commentRng As Range
+                        Set commentRng = doc.Range(origStart, _
+                            origStart + Len(sugText))
+                        If Err.Number <> 0 Then
+                            Err.Clear
+                            Set commentRng = rng
+                        End If
+                        doc.Comments.Add Range:=commentRng, _
+                            Text:=GetIssueProp(finding, "Issue")
                         Err.Clear
                     End If
                 Else

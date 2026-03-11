@@ -248,7 +248,7 @@ Private Sub UserForm_Initialize()
     ' -- Smart quotes toggle (Curly / Straight) --
     Set lbl = Me.Controls.Add("Forms.Label.1", "lblSmartQuotes")
     With lbl
-        .Caption = "Quote style:"
+        .Caption = "Smart quotes:"
         .Left = colRight: .Top = yPos + 2: .Width = 80: .Height = LBL_H
     End With
 

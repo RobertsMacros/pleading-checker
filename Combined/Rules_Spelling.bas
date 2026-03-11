@@ -982,8 +982,11 @@ Public Function Check_CheckCheque(doc As Document) As Collection
         Exit Function
     End If
 
-    ' Search body text for "check" / "checks"
+    ' Search body text for "check" / "checks" (context-aware)
     SearchCheckCheque doc.Content, doc, issues
+
+    ' Search body text for financial compound phrases
+    SearchFinancialCheckCompounds doc.Content, doc, issues
 
     ' Search footnotes
     On Error Resume Next
@@ -991,6 +994,9 @@ Public Function Check_CheckCheque(doc As Document) As Collection
     For Each fn In doc.Footnotes
         Err.Clear
         SearchCheckCheque fn.Range, doc, issues
+        If Err.Number <> 0 Then Err.Clear
+        Err.Clear
+        SearchFinancialCheckCompounds fn.Range, doc, issues
         If Err.Number <> 0 Then Err.Clear
     Next fn
     On Error GoTo 0
@@ -1119,16 +1125,101 @@ Private Function IsCheckUsedAsVerb(rng As Range, doc As Document) As Boolean
         lastWord = beforeText
     End If
 
-    ' Verb indicators: preceded by "to", "will", "shall", "must",
-    ' "should", "would", "could", "can", "may", "might", "please",
-    ' "let", "did", "does", "do", "not", "always", "also", "then"
+    ' --- Compound prefix check (before "check") ---
+    ' Words like "double-check", "cross-check", "spot-check" etc.
+    ' are NOT financial. Also handles "double check" (space-separated)
+    ' where lastWord = "double" via the space split above.
+    Dim compoundPrefixes As Variant
+    Dim cp1 As Variant, cp2 As Variant, cp3 As Variant
+    cp1 = Array("double", "triple", "quadruple", "spot", _
+        "fact", "reality", "re", "counter", "body", "rain")
+    cp2 = Array("sound", "spell", "health", "quality", "background", _
+        "reference", "security", "safety", "compliance", "system")
+    cp3 = Array("gut", "sense", "temperature", "sanity", "mic", _
+        "mike", "status", "progress", "wellness", "vibe", _
+        "stock", "price", "proof", "ground", "over", _
+        "under", "un", "pre", "self")
+    Dim vi As Long
+
+    ' Check if lastWord contains a hyphen (e.g. "double-")
+    Dim compPrefix As String
+    If InStr(lastWord, "-") > 0 Then
+        compPrefix = Left$(lastWord, InStr(lastWord, "-") - 1)
+    Else
+        compPrefix = lastWord
+    End If
+
+    ' Check against all compound prefix arrays
+    For vi = LBound(cp1) To UBound(cp1)
+        If compPrefix = CStr(cp1(vi)) Then
+            IsCheckUsedAsVerb = True  ' Not financial
+            Exit Function
+        End If
+    Next vi
+    For vi = LBound(cp2) To UBound(cp2)
+        If compPrefix = CStr(cp2(vi)) Then
+            IsCheckUsedAsVerb = True
+            Exit Function
+        End If
+    Next vi
+    For vi = LBound(cp3) To UBound(cp3)
+        If compPrefix = CStr(cp3(vi)) Then
+            IsCheckUsedAsVerb = True
+            Exit Function
+        End If
+    Next vi
+
+    ' --- Compound suffix check (after "check") ---
+    ' Words like "check-in", "check-out", "check-mate" etc.
+    ' are NOT financial. "check-book" IS financial (excluded).
+    Dim firstCharAfter As String
+    afterText = Trim(afterText)
+    firstCharAfter = ""
+    If Len(afterText) > 0 Then firstCharAfter = Left$(afterText, 1)
+
+    If firstCharAfter = "-" And Len(afterText) > 1 Then
+        ' Extract the word after the hyphen
+        Dim suffixWord As String
+        Dim restAfter As String
+        restAfter = Mid$(afterText, 2)
+        sp = InStr(1, restAfter, " ")
+        If sp > 0 Then
+            suffixWord = Left$(restAfter, sp - 1)
+        Else
+            suffixWord = restAfter
+        End If
+        suffixWord = LCase(suffixWord)
+
+        Dim nfSuffix1 As Variant, nfSuffix2 As Variant
+        nfSuffix1 = Array("in", "out", "up", "list", "mark", "mate", _
+            "point", "sum", "box", "off", "room", "er", "ers", "ed", "ing")
+        nfSuffix2 = Array("able", "board", "down", "through", "ride", _
+            "rein", "bone", "flag", "gate", "land", "line", _
+            "pattern", "piece", "rail", "row", "side", "weight", "work")
+        ' Note: "book" deliberately absent — check-book IS financial
+
+        For vi = LBound(nfSuffix1) To UBound(nfSuffix1)
+            If suffixWord = CStr(nfSuffix1(vi)) Then
+                IsCheckUsedAsVerb = True
+                Exit Function
+            End If
+        Next vi
+        For vi = LBound(nfSuffix2) To UBound(nfSuffix2)
+            If suffixWord = CStr(nfSuffix2(vi)) Then
+                IsCheckUsedAsVerb = True
+                Exit Function
+            End If
+        Next vi
+    End If
+
+    ' --- Standard verb/noun context analysis ---
+    ' Verb indicators: preceded by modal verbs, auxiliaries, etc.
     Dim verbPrecedes As Variant
     verbPrecedes = Array("to", "will", "shall", "must", "should", _
                          "would", "could", "can", "may", "might", _
                          "please", "let", "did", "does", "do", _
                          "not", "always", "also", "then", "and", _
                          "or", "we", "they", "you", "i")
-    Dim vi As Long
     For vi = LBound(verbPrecedes) To UBound(verbPrecedes)
         If lastWord = CStr(verbPrecedes(vi)) Then
             IsCheckUsedAsVerb = True
@@ -1136,16 +1227,16 @@ Private Function IsCheckUsedAsVerb(rng As Range, doc As Document) As Boolean
         End If
     Next vi
 
-    ' Verb indicator: followed by "that", "whether", "if", "the",
-    ' "this", "for", "with", "on", "your", "our", "his", "her"
+    ' Verb indicator: followed by certain words
     Dim firstWordAfter As String
-    afterText = Trim(afterText)
     sp = InStr(1, afterText, " ")
     If sp > 0 Then
         firstWordAfter = Left$(afterText, sp - 1)
     Else
         firstWordAfter = afterText
     End If
+    ' Strip leading hyphen if present (already handled above for compounds)
+    If Left$(firstWordAfter, 1) = "-" Then firstWordAfter = Mid$(firstWordAfter, 2)
 
     Dim verbFollows As Variant
     verbFollows = Array("that", "whether", "if", "the", "this", _
@@ -1159,8 +1250,7 @@ Private Function IsCheckUsedAsVerb(rng As Range, doc As Document) As Boolean
         End If
     Next vi
 
-    ' Noun indicators: preceded by "a", "the", "this", "that",
-    ' "each", "every", "your", "our", "his", "her", "my", "by"
+    ' Noun indicators: preceded by determiners/prepositions
     Dim nounPrecedes As Variant
     nounPrecedes = Array("a", "the", "this", "that", "each", _
                          "every", "your", "our", "his", "her", _
@@ -1176,6 +1266,144 @@ Private Function IsCheckUsedAsVerb(rng As Range, doc As Document) As Boolean
     ' Default: treat as possible noun (flag it as possible_error for review)
     IsCheckUsedAsVerb = False
 End Function
+
+' ----------------------------------------------------------------
+' Search for financial compound words/phrases containing "check"
+' that should use "cheque" in UK English. These are searched as
+' literal phrases and flagged unconditionally (no verb/noun analysis).
+' ----------------------------------------------------------------
+Private Sub SearchFinancialCheckCompounds(searchRange As Range, _
+                                          doc As Document, _
+                                          ByRef issues As Collection)
+    ' Parallel arrays: search terms and their UK suggestions
+    ' Split into batches to stay under 25 line-continuation limit
+    Dim terms1 As Variant, sugs1 As Variant
+    terms1 = Array("checkbook", "check-book", "checkbooks", "check-books", _
+        "paycheck", "pay-check", "paychecks", "pay-checks")
+    sugs1 = Array("chequebook", "cheque-book", "chequebooks", "cheque-books", _
+        "pay cheque", "pay cheque", "pay cheques", "pay cheques")
+
+    Dim terms2 As Variant, sugs2 As Variant
+    terms2 = Array("blank check", "blank checks", "bad check", "bad checks", _
+        "bounced check", "bounced checks", "rubber check", "rubber checks")
+    sugs2 = Array("blank cheque", "blank cheques", "bad cheque", "bad cheques", _
+        "bounced cheque", "bounced cheques", "rubber cheque", "rubber cheques")
+
+    Dim terms3 As Variant, sugs3 As Variant
+    terms3 = Array("cancelled check", "canceled check", _
+        "certified check", "certified checks", _
+        "cashier's check", "cashiers check")
+    sugs3 = Array("cancelled cheque", "cancelled cheque", _
+        "certified cheque", "certified cheques", _
+        "cashier's cheque", "cashier's cheque")
+
+    Dim terms4 As Variant, sugs4 As Variant
+    terms4 = Array("traveller's check", "traveler's check", _
+        "travellers check", "travelers check", _
+        "traveller's checks", "traveler's checks")
+    sugs4 = Array("traveller's cheque", "traveller's cheque", _
+        "travellers' cheque", "travellers' cheque", _
+        "traveller's cheques", "traveller's cheques")
+
+    Dim terms5 As Variant, sugs5 As Variant
+    terms5 = Array("travellers checks", "travelers checks", _
+        "personal check", "personal checks", _
+        "bank check", "bank checks")
+    sugs5 = Array("travellers' cheques", "travellers' cheques", _
+        "personal cheque", "personal cheques", _
+        "bank cheque", "bank cheques")
+
+    Dim terms6 As Variant, sugs6 As Variant
+    terms6 = Array("post-dated check", "postdated check", _
+        "stale check", "stale checks", _
+        "dishonoured check", "dishonored check")
+    sugs6 = Array("post-dated cheque", "post-dated cheque", _
+        "stale cheque", "stale cheques", _
+        "dishonoured cheque", "dishonoured cheque")
+
+    Dim terms7 As Variant, sugs7 As Variant
+    terms7 = Array("check stub", "check stubs", "check fraud", _
+        "check forgery", "check clearing", _
+        "check guarantee", "check number", "check numbers")
+    sugs7 = Array("cheque stub", "cheque stubs", "cheque fraud", _
+        "cheque forgery", "cheque clearing", _
+        "cheque guarantee", "cheque number", "cheque numbers")
+
+    ' Process each batch
+    SearchFinancialBatch searchRange, doc, issues, terms1, sugs1, True
+    SearchFinancialBatch searchRange, doc, issues, terms2, sugs2, False
+    SearchFinancialBatch searchRange, doc, issues, terms3, sugs3, False
+    SearchFinancialBatch searchRange, doc, issues, terms4, sugs4, False
+    SearchFinancialBatch searchRange, doc, issues, terms5, sugs5, False
+    SearchFinancialBatch searchRange, doc, issues, terms6, sugs6, False
+    SearchFinancialBatch searchRange, doc, issues, terms7, sugs7, False
+End Sub
+
+Private Sub SearchFinancialBatch(searchRange As Range, _
+                                  doc As Document, _
+                                  ByRef issues As Collection, _
+                                  terms As Variant, _
+                                  suggestions As Variant, _
+                                  wholeWord As Boolean)
+    Dim ti As Long
+    Dim rng As Range
+    Dim finding As Object
+    Dim locStr As String
+
+    For ti = LBound(terms) To UBound(terms)
+        On Error Resume Next
+        Set rng = searchRange.Duplicate
+        If Err.Number <> 0 Then Err.Clear: GoTo NextFinTerm
+        On Error GoTo 0
+
+        With rng.Find
+            .ClearFormatting
+            .Text = CStr(terms(ti))
+            .MatchWholeWord = wholeWord
+            .MatchCase = False
+            .MatchWildcards = False
+            .Wrap = wdFindStop
+            .Forward = True
+        End With
+
+        Dim lastPos As Long
+        lastPos = -1
+        Do
+            On Error Resume Next
+            Dim foundIt As Boolean
+            foundIt = rng.Find.Execute
+            If Err.Number <> 0 Then Err.Clear: Exit Do
+            On Error GoTo 0
+
+            If Not foundIt Then Exit Do
+            If rng.Start <= lastPos Then Exit Do
+            lastPos = rng.Start
+
+            If Not EngineIsInPageRange(rng) Then
+                rng.Collapse wdCollapseEnd
+                GoTo NextFinMatch
+            End If
+
+            On Error Resume Next
+            locStr = EngineGetLocationString(rng, doc)
+            If Err.Number <> 0 Then locStr = "unknown location": Err.Clear
+            On Error GoTo 0
+
+            Set finding = CreateIssueDict(RULE_NAME_CHECK, locStr, _
+                "UK spelling: '" & rng.Text & "' should be '" & _
+                CStr(suggestions(ti)) & "' in UK English.", _
+                CStr(suggestions(ti)), rng.Start, rng.End, "possible_error", True)
+            issues.Add finding
+
+NextFinMatch:
+            On Error Resume Next
+            rng.Collapse wdCollapseEnd
+            If Err.Number <> 0 Then Err.Clear: Exit Do
+            On Error GoTo 0
+        Loop
+NextFinTerm:
+    Next ti
+End Sub
 
 ' ================================================================
 ' ================================================================
