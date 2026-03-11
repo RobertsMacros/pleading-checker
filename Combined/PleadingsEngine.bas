@@ -953,6 +953,31 @@ NextCoverPara:
             isBQ = True
         End If
 
+        ' Check 1.5: Skip lists (mirrors IsBlockQuotePara CHECK 0)
+        If Not isBQ Then
+            Dim listLvl As Long
+            listLvl = 0
+            listLvl = para.Range.ListFormat.ListLevelNumber
+            If Err.Number <> 0 Then listLvl = 0: Err.Clear
+            If listLvl > 0 Then GoTo NxtBQ  ' Listed paragraph - not a block quote
+
+            ' Check for bullet/number prefix in text
+            Dim bqPText As String
+            bqPText = ""
+            bqPText = para.Range.Text
+            If Err.Number <> 0 Then bqPText = "": Err.Clear
+            If Len(bqPText) > 0 Then
+                Dim fc As String
+                fc = Left$(bqPText, 1)
+                ' Bullet characters
+                If fc = Chr(183) Or fc = ChrW(8226) Or fc = "-" Or fc = "*" Then GoTo NxtBQ
+                ' Numbered list pattern: digit(s) followed by . or )
+                If fc >= "0" And fc <= "9" Then
+                    If bqPText Like "#[.)]#*" Or bqPText Like "##[.)]#*" Then GoTo NxtBQ
+                End If
+            End If
+        End If
+
         ' Check 2: Indentation + smaller font or italic
         If Not isBQ Then
             Dim leftInd As Single
