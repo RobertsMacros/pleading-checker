@@ -271,6 +271,27 @@ pText = Trim$(pText)
 
 Word's `Find.MatchWholeWord` considers hyphens as word separators. Searching for "check" with `MatchWholeWord = True` will match "double-check" (finding "check" after the hyphen). Build exception arrays for compound words and check before/after context manually.
 
+### 30. VBA is entirely case-insensitive — variable names must not collide with any identifier
+
+VBA treats `MyVar`, `myvar`, `MYVAR`, and `myVar` as the same symbol. This means a variable name that happens to match a built-in function, method, property, enum constant, or type — even in a different case — will shadow or collide with it. The VBA editor will silently "auto-correct" the casing of one to match the other everywhere in the module, making the conflict invisible.
+
+**Dangerous collisions include:**
+- `text` / `Text` — shadows `Range.Text`, `TextBox.Text`, etc.
+- `name` / `Name` — shadows `Name` statement and `.Name` properties
+- `type` / `Type` — reserved keyword for user-defined types
+- `value` / `Value` — shadows `.Value` on controls, cells, fields
+- `count` / `Count` — shadows `.Count` on collections
+- `replace` / `Replace` — shadows `VBA.Replace()` function
+- `format` / `Format` — shadows `VBA.Format()` function
+- `left` / `Left` — shadows `VBA.Left()` function
+- `right` / `Right` — shadows `VBA.Right()` function
+- `mid` / `Mid` — shadows `VBA.Mid()` function
+- `len` / `Len` — shadows `VBA.Len()` function
+- `trim` / `Trim` — shadows `VBA.Trim()` function
+- `date` / `Date` — shadows `VBA.Date` function/type
+
+**Rule:** Always prefix or qualify variable names to avoid any ambiguity: `paraText` not `text`, `itemCount` not `count`, `sugLen` not `len`, `startPos` not `start`, etc.
+
 ---
 
 ## Filtering false positives
