@@ -34,7 +34,7 @@ Private Function IsClauseRef(ByRef paraText As String, _
                               ByVal openParen As Long) As Boolean
     Dim prevCh As String
     Dim refWords As Variant
-    Dim wEnd As Long
+    Dim wordEnd As Long
     Dim wStart As Long
     Dim wCh As String
     Dim prevWord As String
@@ -76,9 +76,9 @@ Private Function IsClauseRef(ByRef paraText As String, _
                      "part", "parts", "pt", _
                      "item", "items", "annex")
 
-    wEnd = openParen - 2
-    If wEnd >= 1 Then
-        wStart = wEnd
+    wordEnd = openParen - 2
+    If wordEnd >= 1 Then
+        wStart = wordEnd
         Do While wStart >= 1
             wCh = Mid$(paraText, wStart, 1)
             If (wCh >= "A" And wCh <= "Z") Or _
@@ -89,8 +89,8 @@ Private Function IsClauseRef(ByRef paraText As String, _
             End If
         Loop
         wStart = wStart + 1
-        If wStart <= wEnd Then
-            prevWord = LCase(Mid$(paraText, wStart, wEnd - wStart + 1))
+        If wStart <= wordEnd Then
+            prevWord = LCase(Mid$(paraText, wStart, wordEnd - wStart + 1))
             For ri = LBound(refWords) To UBound(refWords)
                 If prevWord = CStr(refWords(ri)) Then
                     IsClauseRef = True
