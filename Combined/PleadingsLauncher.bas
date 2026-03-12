@@ -47,11 +47,7 @@ Private Sub RunChecks()
     Dim pgInput As String
     pgInput = InputBox("Page range (e.g. 1-10, or leave blank for all pages):", _
                         "Pleadings Checker - Page Range", "")
-    If Len(Trim(pgInput)) > 0 Then
-        ParsePageRange pgInput
-    Else
-        Application.Run "PleadingsEngine.SetPageRange", 0, 0
-    End If
+    Application.Run "PleadingsEngine.SetPageRangeFromString", Trim(pgInput)
 
     ' -- Spelling mode prompt --
     Dim spMode As Long
@@ -250,63 +246,3 @@ Private Sub ExportReport(issues As Collection)
            vbInformation, "Pleadings Checker"
 End Sub
 
-' ============================================================
-'  PARSE PAGE RANGE INPUT
-'  Supports: "5", "1-10", "1:10", "1" & ChrW(8211) & "10",
-'  "1-3, 7-9", "1-3, 5, 8-12" (comma-separated segments).
-'  Sets the overall min-max envelope.
-' ============================================================
-Private Sub ParsePageRange(ByVal pageInput As String)
-    pageInput = Trim(pageInput)
-    If Len(pageInput) = 0 Then
-        Application.Run "PleadingsEngine.SetPageRange", 0, 0
-        Exit Sub
-    End If
-
-    ' Normalise separators: en-dash and colon to hyphen
-    pageInput = Replace(pageInput, ChrW(8211), "-")  ' en-dash
-    pageInput = Replace(pageInput, ":", "-")
-
-    ' Split on comma for multi-segment support
-    Dim segments() As String
-    segments = Split(pageInput, ",")
-
-    Dim globalMin As Long, globalMax As Long
-    globalMin = 2147483647  ' Long max
-    globalMax = 0
-
-    Dim s As Long
-    For s = 0 To UBound(segments)
-        Dim seg As String
-        seg = Trim(segments(s))
-        If Len(seg) = 0 Then GoTo NextSeg
-
-        Dim dashPos As Long
-        dashPos = InStr(1, seg, "-")
-        If dashPos > 1 Then
-            Dim lPart As String, rPart As String
-            lPart = Trim(Left$(seg, dashPos - 1))
-            rPart = Trim(Mid$(seg, dashPos + 1))
-            If IsNumeric(lPart) And IsNumeric(rPart) Then
-                Dim lo As Long, hi As Long
-                lo = CLng(lPart)
-                hi = CLng(rPart)
-                If lo < globalMin Then globalMin = lo
-                If hi > globalMax Then globalMax = hi
-            End If
-        ElseIf IsNumeric(seg) Then
-            Dim pg As Long
-            pg = CLng(seg)
-            If pg < globalMin Then globalMin = pg
-            If pg > globalMax Then globalMax = pg
-        End If
-NextSeg:
-    Next s
-
-    If globalMax > 0 And globalMin <= globalMax Then
-        Application.Run "PleadingsEngine.SetPageRange", globalMin, globalMax
-    Else
-        ' Invalid input -- use all pages
-        Application.Run "PleadingsEngine.SetPageRange", 0, 0
-    End If
-End Sub

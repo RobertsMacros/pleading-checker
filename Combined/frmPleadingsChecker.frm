@@ -613,11 +613,11 @@ Private Sub btnRun_Click()
     Set lastResults = PleadingsEngine.RunAllPleadingsRules(ActiveDocument, ruleConfig)
 
     ' Show performance summary in Immediate window
+    Dim slowestRules As String
     If PleadingsEngine.ENABLE_PROFILING Then
         Dim perfSummary As String
         perfSummary = PleadingsEngine.GetPerformanceSummary()
-        ' Performance summary is already printed by the engine to Debug.Print
-        ' Also show final form dimensions for diagnostics
+        slowestRules = PleadingsEngine.GetTopSlowestRules(3)
         Debug.Print "UserForm final: Width=" & Me.Width & " Height=" & Me.Height
     End If
 
@@ -643,6 +643,9 @@ Private Sub btnRun_Click()
         Dim errMsg As String
         If errCount > 0 Then
             errMsg = vbCrLf & "(Note: " & errCount & " rule(s) failed to run -- check Ctrl+G for details.)"
+        End If
+        If Len(slowestRules) > 0 Then
+            errMsg = errMsg & vbCrLf & "Slowest: " & slowestRules
         End If
 
         ' Ask user whether to apply suggestions
@@ -682,12 +685,23 @@ Private Sub btnExport_Click()
     End If
 
     Dim reportPath As String
+    Dim sep As String
+    sep = Application.PathSeparator
     If ActiveDocument.Path <> "" Then
-        reportPath = ActiveDocument.Path & "\" & _
-                     Replace(ActiveDocument.Name, ".docx", "") & _
-                     "_pleadings_report.json"
+        Dim baseName As String
+        baseName = ActiveDocument.Name
+        Dim dotPos As Long
+        dotPos = InStrRev(baseName, ".")
+        If dotPos > 1 Then baseName = Left$(baseName, dotPos - 1)
+        reportPath = ActiveDocument.Path & sep & baseName & "_pleadings_report.json"
     Else
-        reportPath = Environ("TEMP") & "\pleadings_report.json"
+        #If Mac Then
+            reportPath = Environ("TMPDIR")
+            If Len(reportPath) = 0 Then reportPath = "/tmp"
+            reportPath = reportPath & sep & "pleadings_report.json"
+        #Else
+            reportPath = Environ("TEMP") & sep & "pleadings_report.json"
+        #End If
     End If
 
     lblStatus.Caption = "Exporting report..."
@@ -695,7 +709,16 @@ Private Sub btnExport_Click()
     DoEvents
 
     Dim summary As String
-    summary = PleadingsEngine.GenerateReport(lastResults, reportPath)
+    summary = PleadingsEngine.GenerateReport(lastResults, reportPath, ActiveDocument)
+
+    ' Auto-save debug log alongside report when DEBUG_MODE is True
+    On Error Resume Next
+    If modDebugLog.DEBUG_MODE Then
+        Dim logPath As String
+        logPath = Left$(reportPath, Len(reportPath) - 5) & "_debug.log"
+        modDebugLog.DebugLogSaveToTextFile logPath
+    End If
+    On Error GoTo 0
 
     lblStatus.Caption = "Report saved."
     MsgBox "Report saved to:" & vbCrLf & reportPath & vbCrLf & vbCrLf & summary, _
@@ -786,11 +809,19 @@ End Sub
 
 Private Sub btnSaveBrands_Click()
     Dim brandFile As String
-    brandFile = Environ("APPDATA") & "\PleadingsChecker\brand_rules.txt"
-
-    On Error Resume Next
-    MkDir Environ("APPDATA") & "\PleadingsChecker"
-    On Error GoTo 0
+    #If Mac Then
+        Dim brandDir As String
+        brandDir = Environ("HOME") & "/Library/Application Support/PleadingsChecker"
+        On Error Resume Next
+        MkDir brandDir
+        On Error GoTo 0
+        brandFile = brandDir & "/brand_rules.txt"
+    #Else
+        On Error Resume Next
+        MkDir Environ("APPDATA") & "\PleadingsChecker"
+        On Error GoTo 0
+        brandFile = Environ("APPDATA") & "\PleadingsChecker\brand_rules.txt"
+    #End If
 
     On Error Resume Next
     Application.Run "Rules_Brands.SaveBrandRules", brandFile
@@ -807,7 +838,11 @@ End Sub
 
 Private Sub btnLoadBrands_Click()
     Dim brandFile As String
-    brandFile = Environ("APPDATA") & "\PleadingsChecker\brand_rules.txt"
+    #If Mac Then
+        brandFile = Environ("HOME") & "/Library/Application Support/PleadingsChecker/brand_rules.txt"
+    #Else
+        brandFile = Environ("APPDATA") & "\PleadingsChecker\brand_rules.txt"
+    #End If
 
     If Dir(brandFile) = "" Then
         MsgBox "No saved brand rules found at:" & vbCrLf & brandFile, _

@@ -223,7 +223,6 @@ Public Function InitRuleConfig() As Object
     cfg.Add "check_cheque", True
     cfg.Add "slash_style", True
     cfg.Add "dash_usage", True
-    cfg.Add "list_punctuation", True
     cfg.Add "bracket_integrity", True
     cfg.Add "quotation_mark_consistency", True
     cfg.Add "currency_number_format", True
@@ -364,6 +363,54 @@ Public Function GetPerformanceSummary() As String
     End If
 
     GetPerformanceSummary = result
+End Function
+
+Public Function GetTopSlowestRules(Optional ByVal topN As Long = 3) As String
+    If Not ENABLE_PROFILING Then
+        GetTopSlowestRules = ""
+        Exit Function
+    End If
+    If perfTimings Is Nothing Then Exit Function
+    If perfTimings.Count = 0 Then Exit Function
+
+    ' Build sorted arrays (same sort as GetPerformanceSummary)
+    Dim labels() As String, times() As Single
+    Dim n As Long
+    n = perfTimings.Count
+    ReDim labels(0 To n - 1)
+    ReDim times(0 To n - 1)
+    Dim keys As Variant
+    keys = perfTimings.keys
+    Dim idx As Long
+    For idx = 0 To n - 1
+        labels(idx) = CStr(keys(idx))
+        times(idx) = CSng(perfTimings(keys(idx)))
+    Next idx
+
+    ' Bubble sort descending
+    Dim swapped As Boolean
+    Dim tmpS As String: Dim tmpF As Single
+    Do
+        swapped = False
+        Dim si As Long
+        For si = 0 To n - 2
+            If times(si) < times(si + 1) Then
+                tmpF = times(si): times(si) = times(si + 1): times(si + 1) = tmpF
+                tmpS = labels(si): labels(si) = labels(si + 1): labels(si + 1) = tmpS
+                swapped = True
+            End If
+        Next si
+    Loop While swapped
+
+    Dim result As String
+    Dim limit As Long
+    limit = topN
+    If limit > n Then limit = n
+    For idx = 0 To limit - 1
+        If idx > 0 Then result = result & ", "
+        result = result & labels(idx) & " (" & Format(times(idx), "0.0") & "s)"
+    Next idx
+    GetTopSlowestRules = result
 End Function
 
 ' ============================================================
@@ -765,13 +812,23 @@ Public Function RunAllPleadingsRules(doc As Document, _
 
 RunnerCleanup:
     ' -- Restore application state (always runs) ----------------
+    On Error Resume Next
     Application.ScreenUpdating = True
     Application.StatusBar = ""
+    On Error GoTo 0
 
     ' -- Filter out issues inside block quotes / quoted text -----
+    On Error Resume Next
     PerfTimerStart "FilterBlockQuoteIssues"
     Set allIssues = FilterBlockQuoteIssues(doc, allIssues)
+    If Err.Number <> 0 Then
+        ruleErrorCount = ruleErrorCount + 1
+        ruleErrorLog = ruleErrorLog & "FilterBlockQuoteIssues (Err " & Err.Number & ": " & Err.Description & ")" & vbCrLf
+        DebugLogError "RunAllPleadingsRules", "FilterBlockQuoteIssues", Err.Number, Err.Description
+        Err.Clear
+    End If
     PerfTimerEnd "FilterBlockQuoteIssues"
+    On Error GoTo 0
 
     ' -- Print performance summary --------------------------------
     If ENABLE_PROFILING Then
@@ -1164,6 +1221,8 @@ Public Sub ApplyHighlights(doc As Document, _
     wasScreenUpdating = Application.ScreenUpdating
     Application.ScreenUpdating = False
 
+    On Error GoTo HighlightCleanup
+
     For i = 1 To issues.Count
         Set finding = issues(i)
         If GetIssueProp(finding, "RangeStart") >= 0 And GetIssueProp(finding, "RangeEnd") > GetIssueProp(finding, "RangeStart") Then
@@ -1178,11 +1237,14 @@ Public Sub ApplyHighlights(doc As Document, _
                     If Err.Number <> 0 Then Err.Clear
                 End If
             End If
-            On Error GoTo 0
+            On Error GoTo HighlightCleanup
         End If
     Next i
 
+HighlightCleanup:
+    On Error Resume Next
     Application.ScreenUpdating = wasScreenUpdating
+    On Error GoTo 0
     TraceExit "ApplyHighlights"
 End Sub
 
@@ -1207,6 +1269,8 @@ Public Sub ApplySuggestionsAsTrackedChanges(doc As Document, _
     Dim wasScreenUpdating As Boolean
     wasScreenUpdating = Application.ScreenUpdating
     Application.ScreenUpdating = False
+
+    On Error GoTo TrackedCleanup
 
     ' Process from end of document backwards so tracked-change
     ' insertions / deletions do not shift positions of later issues
@@ -1320,20 +1384,20 @@ Public Sub ApplySuggestionsAsTrackedChanges(doc As Document, _
             End If
 NextApplyIssue:
             On Error GoTo 0
-        ElseIf addComments Then
-            On Error Resume Next: Err.Clear
-            If doc.Content.Start < doc.Content.End Then
-                Set rng = doc.Range(doc.Content.Start, doc.Content.Start + 1)
-                If Err.Number = 0 Then
-                    doc.Comments.Add Range:=rng, Text:=BuildCommentText(finding)
-                End If
-            End If
-            On Error GoTo 0
+        Else
+            ' Invalid range -- skip silently (don't comment at document start)
+            TraceStep "ApplyTrackedChanges", "SKIPPED i=" & i & _
+                      " -- invalid range start=" & GetIssueProp(finding, "RangeStart") & _
+                      " end=" & GetIssueProp(finding, "RangeEnd")
         End If
     Next i
 
-    ' Restore screen updating
+TrackedCleanup:
+    ' Restore state (always runs, even on error)
+    On Error Resume Next
+    doc.TrackRevisions = wasTrackingChanges
     Application.ScreenUpdating = wasScreenUpdating
+    On Error GoTo 0
     TraceExit "ApplyTrackedChanges"
 End Sub
 

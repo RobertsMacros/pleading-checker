@@ -185,6 +185,7 @@ Public Sub SaveBrandRules(filePath As String)
 SaveError:
     On Error Resume Next
     Close #fileNum
+    Debug.Print "Rules_Brands.SaveBrandRules: Err " & Err.Number & ": " & Err.Description
     On Error GoTo 0
 End Sub
 
@@ -235,6 +236,7 @@ NextLine:
 LoadError:
     On Error Resume Next
     Close #fileNum
+    Debug.Print "Rules_Brands.LoadBrandRules: Err " & Err.Number & ": " & Err.Description
     On Error GoTo 0
     ' If file could not be loaded, fall back to defaults.
     ' Guard against Nothing before accessing .Count.
