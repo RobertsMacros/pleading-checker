@@ -314,8 +314,10 @@ Private Function GetBrandRulesPath() As String
     On Error Resume Next
     GetBrandRulesPath = Application.Run("Rules_Brands.GetDefaultBrandRulesPath")
     If Err.Number <> 0 Then
+        Debug.Print "GetBrandRulesPath: Rules_Brands not loaded (Err " & Err.Number & "); using inline fallback"
         Err.Clear
         On Error GoTo 0
+        ' Fallback: build the path locally (kept in sync with Rules_Brands.GetDefaultBrandRulesPath)
         Dim sep As String
         sep = Application.PathSeparator
         #If Mac Then

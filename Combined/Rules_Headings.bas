@@ -445,6 +445,7 @@ NextPara:
         Set Check_HeadingCapitalisation = issues
         Exit Function
     End If
+    On Error GoTo 0   ' Pass 1 complete; Pass 2 is pure VBA
 
     ' -------------------------------------------------------
     '  PASS 2: Split headings into local families
@@ -573,10 +574,12 @@ NextPara:
                         Dim finding As Object
                         Dim loc As String
                         Dim rng As Range
+                        On Error Resume Next
                         Set rng = doc.Range(hStarts(hj), hEnds(hj))
-                        If Err.Number <> 0 Then Err.Clear: GoTo NextFamilyHeading
+                        If Err.Number <> 0 Then Err.Clear: On Error GoTo 0: GoTo NextFamilyHeading
                         loc = EngineGetLocationString(rng, doc)
                         If Err.Number <> 0 Then loc = "unknown location": Err.Clear
+                        On Error GoTo 0
 
                         Dim cleanHText As String
                         cleanHText = Trim$(Replace(hTexts(hj), vbCr, ""))
@@ -682,6 +685,7 @@ Private Function EngineIsInPageRange(rng As Object) As Boolean
     On Error Resume Next
     EngineIsInPageRange = Application.Run("PleadingsEngine.IsInPageRange", rng)
     If Err.Number <> 0 Then
+        Debug.Print "EngineIsInPageRange: fallback (Err " & Err.Number & ")"
         EngineIsInPageRange = True
         Err.Clear
     End If
@@ -695,6 +699,7 @@ Private Function EngineGetLocationString(rng As Object, doc As Document) As Stri
     On Error Resume Next
     EngineGetLocationString = Application.Run("PleadingsEngine.GetLocationString", rng, doc)
     If Err.Number <> 0 Then
+        Debug.Print "EngineGetLocationString: fallback (Err " & Err.Number & ")"
         EngineGetLocationString = "unknown location"
         Err.Clear
     End If
