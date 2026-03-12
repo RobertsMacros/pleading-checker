@@ -156,7 +156,8 @@ End Sub
 
 ' -- Count occurrences of a phrase in the document -----------
 '  Uses Find with MatchWildcards=False, MatchWholeWord=False
-'  (necessary for multi-word phrases).
+'  (necessary for multi-word phrases).  Word-boundary check
+'  prevents matching fragments inside larger words.
 ' ------------------------------------------------------------
 Private Function CountPhrase(doc As Document, phrase As String) As Long
     Dim rng As Range
@@ -184,6 +185,15 @@ Private Function CountPhrase(doc As Document, phrase As String) As Long
 
         If Not found Then Exit Do
 
+        ' Word-boundary check: char before/after match must not be a letter
+        If Not IsWordBoundaryMatch(rng, doc) Then
+            On Error Resume Next
+            rng.Collapse wdCollapseEnd
+            If Err.Number <> 0 Then Err.Clear: On Error GoTo 0: Exit Do
+            On Error GoTo 0
+            GoTo NextCountMatch
+        End If
+
         If EngineIsInPageRange(rng) Then
             cnt = cnt + 1
         End If
@@ -192,6 +202,7 @@ Private Function CountPhrase(doc As Document, phrase As String) As Long
         rng.Collapse wdCollapseEnd
         If Err.Number <> 0 Then Err.Clear: On Error GoTo 0: Exit Do
         On Error GoTo 0
+NextCountMatch:
     Loop
 
     CountPhrase = cnt
@@ -226,6 +237,15 @@ Private Sub FlagPhraseOccurrences(doc As Document, _
 
         If Not found Then Exit Do
 
+        ' Word-boundary check: reject partial-word matches
+        If Not IsWordBoundaryMatch(rng, doc) Then
+            On Error Resume Next
+            rng.Collapse wdCollapseEnd
+            If Err.Number <> 0 Then Err.Clear: On Error GoTo 0: Exit Do
+            On Error GoTo 0
+            GoTo NextFlagMatch
+        End If
+
         If EngineIsInPageRange(rng) Then
             On Error Resume Next
             locStr = EngineGetLocationString(rng, doc)
@@ -240,6 +260,7 @@ Private Sub FlagPhraseOccurrences(doc As Document, _
         rng.Collapse wdCollapseEnd
         If Err.Number <> 0 Then Err.Clear: On Error GoTo 0: Exit Do
         On Error GoTo 0
+NextFlagMatch:
     Loop
 End Sub
 
@@ -380,6 +401,55 @@ Public Function Check_DefinedTerms(doc As Document) As Collection
 NextSmartFind:
     Loop
 
+    ' -- Pattern A2: Straight-quoted defined terms ("-quoted) --
+    ' Mirrors Pattern A but for straight double quotes
+    Dim straightQ As String
+    straightQ = Chr$(34)  ' straight double quote "
+
+    Set rng = doc.Content.Duplicate
+    With rng.Find
+        .ClearFormatting
+        .Text = straightQ & "[A-Z]"
+        .Forward = True
+        .Wrap = wdFindStop
+        .MatchCase = True
+        .MatchWildcards = True
+    End With
+
+    lastPos = -1
+    Do While rng.Find.Execute
+        If rng.Start <= lastPos Then Exit Do  ' stall guard
+        lastPos = rng.Start
+        If Not EngineIsInPageRange(rng) Then
+            rng.Collapse wdCollapseEnd
+            GoTo NextStraightFind
+        End If
+
+        startPos = rng.Start
+        endSearch = startPos + 100
+        If endSearch > doc.Content.End Then endSearch = doc.Content.End
+        Set expandedRng = doc.Range(startPos, endSearch)
+        fullText = expandedRng.Text
+
+        closePos = InStr(2, fullText, straightQ)
+        If closePos > 1 Then
+            Dim sqTermText As String
+            sqTermText = Mid$(fullText, 2, closePos - 2)
+            If Len(Trim$(sqTermText)) > 0 And Not definedTerms.Exists(sqTermText) _
+               And Not LooksLikeSentence(sqTermText) Then
+                Dim sqInfo() As Variant
+                ReDim sqInfo(0 To 2)
+                sqInfo(0) = 0
+                sqInfo(1) = startPos
+                sqInfo(2) = startPos + CLng(closePos)
+                definedTerms.Add sqTermText, sqInfo
+            End If
+        End If
+
+        rng.Collapse wdCollapseEnd
+NextStraightFind:
+    Loop
+
     ' -- Pattern B: "X means " or "X has the meaning " -------
     paraIdx = 0
     For Each para In doc.Paragraphs
@@ -505,12 +575,26 @@ NextParenFind:
         tInfo = definedTerms(termKey)
 
         ' -- Check A: Lowercase variant (inconsistent capitalisation) --
+        '    Flag ALL occurrences (not just the first)
         Dim lcTerm2 As String
         lcTerm2 = LCase(Left$(term, 1)) & Mid$(term, 2)
         If lcTerm2 <> term Then
             Dim lcRng As Range
-            Set lcRng = FindTermRange(doc, lcTerm2, True)
-            If Not lcRng Is Nothing Then
+            Set lcRng = doc.Content.Duplicate
+            With lcRng.Find
+                .ClearFormatting
+                .Text = lcTerm2
+                .Forward = True
+                .Wrap = wdFindStop
+                .MatchCase = True
+                .MatchWholeWord = True
+                .MatchWildcards = False
+            End With
+            Dim lcLastPos As Long
+            lcLastPos = -1
+            Do While lcRng.Find.Execute
+                If lcRng.Start <= lcLastPos Then Exit Do
+                lcLastPos = lcRng.Start
                 If EngineIsInPageRange(lcRng) Then
                     Dim findingLC As Object
                     Dim locLC As String
@@ -518,7 +602,8 @@ NextParenFind:
                     Set findingLC = CreateIssueDict(RULE07_NAME, locLC, "Inconsistent capitalisation: '" & lcTerm2 & "' found but '" & term & "' is the defined term", "Use '" & term & "' consistently", lcRng.Start, lcRng.End, "error")
                     issues.Add findingLC
                 End If
-            End If
+                lcRng.Collapse wdCollapseEnd
+            Loop
         End If
 
         ' -- Check B: Hyphenated/unhyphenated variant ----------
@@ -591,6 +676,49 @@ Public Function Check_PhraseConsistency(doc As Document) As Collection
     Set Check_PhraseConsistency = issues
 End Function
 
+
+' ----------------------------------------------------------------
+'  PRIVATE: Check that a Find match sits on word boundaries
+'  (char before/after is not a letter). Prevents partial matches
+'  inside larger words, e.g. "prior to" inside "a priori to".
+' ----------------------------------------------------------------
+Private Function IsWordBoundaryMatch(rng As Range, doc As Document) As Boolean
+    IsWordBoundaryMatch = True
+    On Error Resume Next
+    ' Check character before match
+    If rng.Start > 0 Then
+        Dim bRng As Range
+        Set bRng = doc.Range(rng.Start - 1, rng.Start)
+        If Err.Number = 0 Then
+            Dim bc As String
+            bc = bRng.Text
+            If (bc >= "A" And bc <= "Z") Or (bc >= "a" And bc <= "z") Then
+                IsWordBoundaryMatch = False
+                Err.Clear: On Error GoTo 0
+                Exit Function
+            End If
+        Else
+            Err.Clear
+        End If
+    End If
+    ' Check character after match
+    If rng.End < doc.Content.End Then
+        Dim aRng As Range
+        Set aRng = doc.Range(rng.End, rng.End + 1)
+        If Err.Number = 0 Then
+            Dim ac As String
+            ac = aRng.Text
+            If (ac >= "A" And ac <= "Z") Or (ac >= "a" And ac <= "z") Then
+                IsWordBoundaryMatch = False
+                Err.Clear: On Error GoTo 0
+                Exit Function
+            End If
+        Else
+            Err.Clear
+        End If
+    End If
+    On Error GoTo 0
+End Function
 
 ' ----------------------------------------------------------------
 '  PRIVATE: Late-bound wrapper for EngineSetWhitelist ' ----------------------------------------------------------------

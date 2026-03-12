@@ -1137,23 +1137,25 @@ End Sub
 Private Function IsCheckUsedAsVerb(rng As Range, doc As Document) As Boolean
     IsCheckUsedAsVerb = False
 
-    On Error Resume Next
     ' Get up to 30 chars before the word
     Dim lookStart As Long
     lookStart = rng.Start - 30
     If lookStart < 0 Then lookStart = 0
     Dim beforeText As String
     beforeText = ""
+    On Error Resume Next
     If rng.Start > lookStart Then
         beforeText = LCase(doc.Range(lookStart, rng.Start).Text)
     End If
     If Err.Number <> 0 Then beforeText = "": Err.Clear
+    On Error GoTo 0
 
     ' Get up to 20 chars after the word
     Dim afterText As String
     afterText = ""
     Dim lookEnd As Long
     lookEnd = rng.End + 20
+    On Error Resume Next
     If lookEnd > doc.Content.End Then lookEnd = doc.Content.End
     If lookEnd > rng.End Then
         afterText = LCase(doc.Range(rng.End, lookEnd).Text)

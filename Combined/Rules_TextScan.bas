@@ -92,12 +92,15 @@ Public Function Check_RepeatedWords(doc As Document) As Collection
 
         ' -- Compare consecutive words ---------------------
         prevWord = ""
+        Dim wordStartPos As Long
+        wordStartPos = 1  ' 1-based cumulative position in paraText
         For i = LBound(cleanWords) To UBound(cleanWords)
             currWord = LCase(cleanWords(i))
 
             ' Skip empty tokens (multiple spaces, punctuation-only)
             If Len(currWord) = 0 Then
                 prevWord = ""
+                wordStartPos = wordStartPos + Len(words(i)) + 1
                 GoTo NextWordInPara
             End If
 
@@ -116,30 +119,11 @@ Public Function Check_RepeatedWords(doc As Document) As Collection
 
                 suggestion = "Remove the duplicate '" & cleanWords(i) & "'"
 
-                ' -- Calculate character position within paragraph -
-                ' Find the second occurrence of the repeated word
-                ' by searching after the first occurrence
-                Dim searchStart As Long
-                Dim firstPos As Long
-                Dim secondPos As Long
-
-                firstPos = InStr(1, paraText, words(i - 1), vbTextCompare)
-                If firstPos > 0 Then
-                    secondPos = InStr(firstPos + Len(words(i - 1)), _
-                                      paraText, words(i), vbTextCompare)
-                Else
-                    secondPos = 0
-                End If
-
-                ' Map to document-level character positions
-                If secondPos > 0 Then
-                    rangeStart = paraRange.Start + secondPos - 1 - rwListPrefixLen
-                    rangeEnd = rangeStart + Len(words(i))
-                Else
-                    ' Fallback: use paragraph start
-                    rangeStart = paraRange.Start
-                    rangeEnd = paraRange.End
-                End If
+                ' -- Calculate character position from cumulative word offset -
+                ' wordStartPos tracks the 1-based position of word i in paraText,
+                ' computed by summing lengths of all preceding words + spaces.
+                rangeStart = paraRange.Start + wordStartPos - 1 - rwListPrefixLen
+                rangeEnd = rangeStart + Len(words(i))
 
                 ' -- Build location string -------------
                 Err.Clear
@@ -162,6 +146,7 @@ Public Function Check_RepeatedWords(doc As Document) As Collection
             End If
 
             prevWord = currWord
+            wordStartPos = wordStartPos + Len(words(i)) + 1
 
 NextWordInPara:
         Next i

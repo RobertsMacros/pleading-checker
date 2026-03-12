@@ -56,6 +56,8 @@ End Function
 
 ' ============================================================
 '  PRIVATE: Count tight slashes using wildcard search
+'  Excludes conventional tight pairs (and/or, his/her, etc.)
+'  so they don't bias the dominant-style determination.
 ' ============================================================
 Private Function CountTightSlashes(doc As Document) As Long
     Dim rng As Range
@@ -84,7 +86,10 @@ Private Function CountTightSlashes(doc As Document) As Long
 
         ' Skip URLs and dates
         If Not IsURLContext(rng, doc) And Not IsDateSlash(rng) Then
-            cnt = cnt + 1
+            ' Skip conventional tight pairs (and/or, his/her, etc.)
+            If Not IsConventionalTightSlash(rng, doc) Then
+                cnt = cnt + 1
+            End If
         End If
 
         rng.Collapse wdCollapseEnd
@@ -214,6 +219,7 @@ Private Sub FlagTightSlashes(doc As Document, ByRef issues As Collection)
         If Not EngineIsInPageRange(rng) Then GoTo ContinueTight
         If IsURLContext(rng, doc) Then GoTo ContinueTight
         If IsDateSlash(rng) Then GoTo ContinueTight
+        If IsConventionalTightSlash(rng, doc) Then GoTo ContinueTight
 
         locStr = EngineGetLocationString(rng, doc)
         If Err.Number <> 0 Then
@@ -318,6 +324,44 @@ ContinueBackslash:
     Loop
     On Error GoTo 0
 End Sub
+
+' ============================================================
+'  PRIVATE: Check if a tight slash is a conventional pair
+'  (and/or, his/her, etc.) that should always be tight
+'  regardless of the document's dominant slash style.
+' ============================================================
+Private Function IsConventionalTightSlash(rng As Range, doc As Document) As Boolean
+    IsConventionalTightSlash = False
+    On Error Resume Next
+
+    ' Expand range to capture surrounding word context
+    Dim ctxStart As Long, ctxEnd As Long
+    ctxStart = rng.Start - 8
+    If ctxStart < 0 Then ctxStart = 0
+    ctxEnd = rng.End + 8
+    If ctxEnd > doc.Content.End Then ctxEnd = doc.Content.End
+
+    Dim ctxRng As Range
+    Set ctxRng = doc.Range(ctxStart, ctxEnd)
+    If Err.Number <> 0 Then Err.Clear: On Error GoTo 0: Exit Function
+
+    Dim ctxText As String
+    ctxText = LCase$(ctxRng.Text)
+    If Err.Number <> 0 Then Err.Clear: On Error GoTo 0: Exit Function
+    On Error GoTo 0
+
+    ' Known conventionally-tight slash pairs
+    Dim tightPairs As Variant
+    tightPairs = Array("and/or", "either/or", "his/her", "he/she", _
+                       "s/he", "w/o", "n/a", "c/o", "a/c", "y/n", "yes/no")
+    Dim tp As Variant
+    For Each tp In tightPairs
+        If InStr(1, ctxText, CStr(tp), vbTextCompare) > 0 Then
+            IsConventionalTightSlash = True
+            Exit Function
+        End If
+    Next tp
+End Function
 
 ' ============================================================
 '  PRIVATE: Check if context suggests a URL

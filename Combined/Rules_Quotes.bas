@@ -182,11 +182,18 @@ Public Function Check_QuotationMarkConsistency( _
 End Function
 
 ' ================================================================
-'  RULE 32 -- SINGLE / DOUBLE QUOTES DEFAULT
+'  RULE 32 -- SINGLE / DOUBLE QUOTES DEFAULT (nesting-aware)
 '
 '  Configurable: Single outer (UK convention) or Double outer (US).
-'  One pass over paragraphs.  Per paragraph: one page-range check,
-'  one style check, then a byte-array scan for the wrong quote type.
+'  One pass over paragraphs.  Per paragraph: a byte-array scan
+'  that tracks nesting depth, so inner quotes (which correctly
+'  alternate with the outer style) are NOT flagged.
+'
+'  UK convention (nestMode="SINGLE"):
+'    Outer = single, Inner = double -- only flag outer doubles
+'  US convention (nestMode="DOUBLE"):
+'    Outer = double, Inner = single -- only flag outer singles
+'
 '  Uses a single reusable Range for location lookups.
 ' ================================================================
 Public Function Check_SingleQuotesDefault( _
@@ -215,6 +222,19 @@ Public Function Check_SingleQuotesDefault( _
     Else
         issueMsg = "Outer quotation marks should use single quotation marks, not double quotation marks."
         suggMsg = ""
+    End If
+
+    ' Outer and inner quote codes based on nesting mode
+    ' For SINGLE outer: outer = single quotes, inner = double quotes
+    ' For DOUBLE outer: outer = double quotes, inner = single quotes
+    Dim outerOpen As Long, outerClose As Long, outerStraight As Long
+    Dim innerOpen As Long, innerClose As Long, innerStraight As Long
+    If nestMode = "DOUBLE" Then
+        outerOpen = QDO: outerClose = QDC: outerStraight = QD
+        innerOpen = QSO: innerClose = QSC: innerStraight = QS
+    Else
+        outerOpen = QSO: outerClose = QSC: outerStraight = QS
+        innerOpen = QDO: innerClose = QDC: innerStraight = QD
     End If
 
     ' Reusable range -- created once, repositioned via SetRange
@@ -250,28 +270,99 @@ Public Function Check_SingleQuotesDefault( _
         Dim r32ListPrefixLen As Long
         r32ListPrefixLen = GetQListPrefixLen(para, pText)
 
-        ' Byte-array scan: flag the wrong quote type
+        ' -- Nesting-aware scan --
+        ' Track depth: 0 = outside quotes, 1 = inside outer,
+        ' 2 = inside inner (nested).  Only flag wrong-type quotes
+        ' that appear at depth 0 (outer level).
+        Dim nestDepth As Long
+        nestDepth = 0
+
         For i = 0 To bMax Step 2
             code = b(i) Or (CLng(b(i + 1)) * 256&)
 
-            Dim isWrongQuote As Boolean
-            isWrongQuote = False
-
-            If nestMode = "DOUBLE" Then
-                ' Flag single quotes (but skip apostrophes)
-                If code = QS Or code = QSO Or code = QSC Then
-                    If Not ByteIsApostrophe(b, i, bMax) Then
-                        isWrongQuote = True
-                    End If
+            ' --- Track outer quote open/close ---
+            If code = outerOpen Then
+                nestDepth = nestDepth + 1
+                GoTo NxtChar32
+            End If
+            If code = outerClose Then
+                ' Skip if this is an apostrophe (smart close single)
+                If nestMode = "SINGLE" And code = QSC Then
+                    If ByteIsApostrophe(b, i, bMax) Then GoTo NxtChar32
                 End If
-            Else
-                ' Flag double quotes
-                If code = QD Or code = QDO Or code = QDC Then
-                    isWrongQuote = True
+                If nestDepth > 0 Then nestDepth = nestDepth - 1
+                GoTo NxtChar32
+            End If
+
+            ' --- Track inner quote open/close ---
+            If code = innerOpen Then
+                ' Inner quotes at depth >= 1 are correct (nested)
+                If nestDepth > 0 Then
+                    nestDepth = nestDepth + 1
+                    GoTo NxtChar32
+                End If
+                ' Inner quote at depth 0 = WRONG (should be outer style)
+                ' Fall through to flagging below
+            End If
+            If code = innerClose Then
+                ' Skip apostrophes
+                If nestMode = "DOUBLE" And code = QSC Then
+                    If ByteIsApostrophe(b, i, bMax) Then GoTo NxtChar32
+                End If
+                If nestDepth > 1 Then
+                    nestDepth = nestDepth - 1
+                    GoTo NxtChar32
+                End If
+                ' At depth 0 or 1 with inner close = structural issue
+                ' Only flag at depth 0
+                If nestDepth > 0 Then GoTo NxtChar32
+                ' Fall through to flagging
+            End If
+
+            ' --- Handle straight quotes ---
+            If code = outerStraight Then
+                ' Skip apostrophes for straight single quote
+                If outerStraight = QS Then
+                    If ByteIsApostrophe(b, i, bMax) Then GoTo NxtChar32
+                End If
+                ' Toggle nesting
+                If nestDepth = 0 Then
+                    nestDepth = nestDepth + 1
+                Else
+                    nestDepth = nestDepth - 1
+                End If
+                GoTo NxtChar32
+            End If
+            If code = innerStraight Then
+                ' Skip apostrophes for straight single quote
+                If innerStraight = QS Then
+                    If ByteIsApostrophe(b, i, bMax) Then GoTo NxtChar32
+                End If
+                ' At depth >= 1, this is a correct inner quote
+                If nestDepth > 0 Then
+                    ' Toggle inner nesting
+                    GoTo NxtChar32
+                End If
+                ' At depth 0 = wrong type, fall through to flag
+            End If
+
+            ' --- Flag wrong-type quotes at outer level (depth 0) ---
+            Dim isWrongOuter As Boolean
+            isWrongOuter = False
+            If nestDepth = 0 Then
+                If code = innerOpen Or code = innerClose Or code = innerStraight Then
+                    ' Skip apostrophes
+                    If code = QS Or code = QSC Then
+                        If Not ByteIsApostrophe(b, i, bMax) Then
+                            isWrongOuter = True
+                        End If
+                    Else
+                        isWrongOuter = True
+                    End If
                 End If
             End If
 
-            If isWrongQuote Then
+            If isWrongOuter Then
                 pos = pStart + (i \ 2) - r32ListPrefixLen
                 Err.Clear
                 locRng.SetRange pos, pos + 1
@@ -288,6 +379,7 @@ Public Function Check_SingleQuotesDefault( _
                 issues.Add CreateIssueDict(RULE32, locStr, _
                     issueMsg, suggMsg, pos, pos + 1, "warning")
             End If
+NxtChar32:
         Next i
 
 NxtP32:

@@ -259,6 +259,10 @@ Private Sub CheckManualNumbering(doc As Document, _
     seqFontSize = 0
     seqIndent = 0
 
+    ' Track consecutive blank lines to detect section boundaries
+    Dim blankLineRun As Long
+    blankLineRun = 0
+
     On Error Resume Next
 
     For Each para In doc.Paragraphs
@@ -299,6 +303,7 @@ Private Sub CheckManualNumbering(doc As Document, _
             expectedNext = 0
             seqFontSize = 0
             seqIndent = 0
+            blankLineRun = 0
             GoTo NextManualPara
         End If
 
@@ -307,17 +312,41 @@ Private Sub CheckManualNumbering(doc As Document, _
         manualNum = ExtractLeadingNumber(paraText)
 
         If manualNum < 0 Then
-            ' No number pattern found; break tracking chain
-            ' but only if the paragraph has substantial text
-            ' (skip blank lines to allow gaps between items)
-            If Len(paraText) > 1 Then
-                tracking = False
-                expectedNext = 0
-                seqFontSize = 0
-                seqIndent = 0
+            ' No number pattern found
+            If Len(paraText) <= 1 Then
+                ' Blank/empty line: track consecutive blanks
+                blankLineRun = blankLineRun + 1
+                ' 3+ consecutive blank lines = likely section boundary
+                If blankLineRun >= 3 And tracking Then
+                    tracking = False
+                    expectedNext = 0
+                    seqFontSize = 0
+                    seqIndent = 0
+                End If
+            Else
+                blankLineRun = 0
+                ' Check for section/schedule/annex headings that reset numbering
+                Dim lcParaText As String
+                lcParaText = LCase$(paraText)
+                If lcParaText Like "schedule*" Or lcParaText Like "annex*" Or _
+                   lcParaText Like "appendix*" Or lcParaText Like "part *" Or _
+                   lcParaText Like "section *" Then
+                    tracking = False
+                    expectedNext = 0
+                    seqFontSize = 0
+                    seqIndent = 0
+                Else
+                    ' Substantial non-numbered text: break tracking chain
+                    tracking = False
+                    expectedNext = 0
+                    seqFontSize = 0
+                    seqIndent = 0
+                End If
             End If
             GoTo NextManualPara
         End If
+
+        blankLineRun = 0
 
         ' -- Skip if outside configured page range --------
         If Not EngineIsInPageRange(paraRange) Then

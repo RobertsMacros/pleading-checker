@@ -530,11 +530,38 @@ Public Function Check_DateTimeFormat(doc As Document) As Collection
             Dim hourStr As String
             hourStr = Left$(t24Text, colonPos - 1)
             Dim hourVal As Long
-            hourVal = 0
+            hourVal = -1
             If IsNumeric(hourStr) Then hourVal = CLng(hourStr)
-            If hourVal >= 13 And hourVal <= 23 Then
-                timeFinds.Add t24Info
-                timeCounts("24hr") = timeCounts("24hr") + 1
+            If hourVal >= 0 And hourVal <= 23 Then
+                Dim is24hrTime As Boolean
+                is24hrTime = True
+                ' Hours 0-12 could be 12-hour without AM/PM marker --
+                ' check whether AM/PM follows to avoid double-counting
+                If hourVal <= 12 Then
+                    Dim peekEnd As Long
+                    peekEnd = CLng(t24Info(3)) + 4
+                    If peekEnd > doc.Content.End Then peekEnd = doc.Content.End
+                    If peekEnd > CLng(t24Info(3)) Then
+                        Dim peekRng As Range
+                        Set peekRng = doc.Range(CLng(t24Info(3)), peekEnd)
+                        Dim peekTxt As String
+                        peekTxt = ""
+                        peekTxt = UCase$(peekRng.Text)
+                        If Err.Number <> 0 Then peekTxt = "": Err.Clear
+                        ' Followed by AM/PM (with or without space) = 12-hour
+                        If Left$(peekTxt, 2) = "AM" Or Left$(peekTxt, 2) = "PM" Then
+                            is24hrTime = False
+                        ElseIf Len(peekTxt) >= 3 Then
+                            If Mid$(peekTxt, 2, 2) = "AM" Or Mid$(peekTxt, 2, 2) = "PM" Then
+                                is24hrTime = False
+                            End If
+                        End If
+                    End If
+                End If
+                If is24hrTime Then
+                    timeFinds.Add t24Info
+                    timeCounts("24hr") = timeCounts("24hr") + 1
+                End If
             End If
         End If
     Next i

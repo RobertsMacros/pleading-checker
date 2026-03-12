@@ -30,7 +30,7 @@ Private Const ABBREV_LIST As String = _
     "|maj|col|cmdr|adm|jan|feb|mar|apr|" & _
     "|jun|jul|aug|sep|oct|nov|dec|mon|" & _
     "|tue|wed|thu|fri|sat|sun|fig|eq|" & _
-    "|ref|para|paras|cl|pt|sch|art|reg|"
+    "|ref|para|paras|cl|pt|sch|art|reg|v|"
 
 ' ============================================================
 '  PUBLIC: Check_DoubleSpaces
@@ -515,6 +515,16 @@ Private Function IsLikelyAbbreviation(ByVal paraText As String, _
     If IsAbbrevWord(wordBefore) Then
         IsLikelyAbbreviation = True
         Exit Function
+    End If
+
+    ' 1b. Single uppercase letter (initial: "J. Smith", "A. Jones")
+    If Len(wordBefore) = 1 Then
+        Dim wbCode As Long
+        wbCode = AscW(wordBefore)
+        If wbCode >= 65 And wbCode <= 90 Then  ' A-Z
+            IsLikelyAbbreviation = True
+            Exit Function
+        End If
     End If
 
     ' 2. Dotted abbreviation: wordBefore is 1-2 chars and char before it is a dot
