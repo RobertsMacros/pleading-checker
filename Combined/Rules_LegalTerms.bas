@@ -87,6 +87,8 @@ Private Sub SearchAndFlag(doc As Document, _
         .Forward = True
     End With
 
+    Dim lastPos As Long
+    lastPos = -1
     Do
         On Error Resume Next
         found = rng.Find.Execute
@@ -94,6 +96,8 @@ Private Sub SearchAndFlag(doc As Document, _
         On Error GoTo 0
 
         If Not found Then Exit Do
+        If rng.Start <= lastPos Then Exit Do   ' stall guard
+        lastPos = rng.Start
 
         ' Skip if the matched text already has the correct hyphenated form
         If StrComp(rng.Text, correctForm, vbTextCompare) = 0 Then
@@ -444,6 +448,7 @@ Private Function EngineIsInPageRange(rng As Object) As Boolean
     On Error Resume Next
     EngineIsInPageRange = Application.Run("PleadingsEngine.IsInPageRange", rng)
     If Err.Number <> 0 Then
+        Debug.Print "EngineIsInPageRange: fallback (Err " & Err.Number & ")"
         EngineIsInPageRange = True
         Err.Clear
     End If
@@ -457,6 +462,7 @@ Private Function EngineGetLocationString(rng As Object, doc As Document) As Stri
     On Error Resume Next
     EngineGetLocationString = Application.Run("PleadingsEngine.GetLocationString", rng, doc)
     If Err.Number <> 0 Then
+        Debug.Print "EngineGetLocationString: fallback (Err " & Err.Number & ")"
         EngineGetLocationString = "unknown location"
         Err.Clear
     End If

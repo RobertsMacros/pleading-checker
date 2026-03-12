@@ -8,6 +8,12 @@ Attribute VB_Name = "Rules_Lists"
 '     of formal list items, final-item full stop, penultimate
 '     conjunction)
 '
+' ENGINE WIRING NOTE:
+'   Both rules are dispatched under the single aggregate toggle
+'   "list_rules" in PleadingsEngine.InitRuleConfig / RunAllPleadingsRules.
+'   Enabling/disabling "list_rules" controls both Check_InlineListFormat
+'   and Check_ListPunctuation together.
+'
 ' Rule 10 uses LOCAL-CONTEXT grouping: only inline lists that
 ' are structurally close (within the same section-like region)
 ' are compared for consistency.  Unrelated lists in different
@@ -946,6 +952,7 @@ Private Function EngineIsInPageRange(rng As Object) As Boolean
     On Error Resume Next
     EngineIsInPageRange = Application.Run("PleadingsEngine.IsInPageRange", rng)
     If Err.Number <> 0 Then
+        Debug.Print "EngineIsInPageRange: fallback (Err " & Err.Number & ")"
         EngineIsInPageRange = True
         Err.Clear
     End If
@@ -959,6 +966,7 @@ Private Function EngineGetLocationString(rng As Object, doc As Document) As Stri
     On Error Resume Next
     EngineGetLocationString = Application.Run("PleadingsEngine.GetLocationString", rng, doc)
     If Err.Number <> 0 Then
+        Debug.Print "EngineGetLocationString: fallback (Err " & Err.Number & ")"
         EngineGetLocationString = "unknown location"
         Err.Clear
     End If

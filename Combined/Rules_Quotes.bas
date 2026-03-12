@@ -739,6 +739,7 @@ Private Function EngineIsInPageRange(rng As Object) As Boolean
     EngineIsInPageRange = Application.Run( _
         "PleadingsEngine.IsInPageRange", rng)
     If Err.Number <> 0 Then
+        Debug.Print "EngineIsInPageRange: fallback (Err " & Err.Number & ")"
         EngineIsInPageRange = True
         Err.Clear
     End If
@@ -754,6 +755,7 @@ Private Function EngineGetLocationString(rng As Object, _
     EngineGetLocationString = Application.Run( _
         "PleadingsEngine.GetLocationString", rng, doc)
     If Err.Number <> 0 Then
+        Debug.Print "EngineGetLocationString: fallback (Err " & Err.Number & ")"
         EngineGetLocationString = "unknown location"
         Err.Clear
     End If

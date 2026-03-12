@@ -750,6 +750,41 @@ Public Function RunAllPleadingsRules(doc As Document, _
         PerfTimerEnd "smart_quote_consistency"
     End If
 
+    ' -- Dedupe overlapping quote-rule findings --
+    ' The three quote rules can flag the same character position independently.
+    ' Keep the first finding per RangeStart+RangeEnd and discard later duplicates.
+    If allIssues.Count > 0 Then
+        Dim quoteRules As Object
+        Set quoteRules = CreateObject("Scripting.Dictionary")
+        quoteRules.Add "quotation_mark_consistency", True
+        quoteRules.Add "single_quotes_default", True
+        quoteRules.Add "smart_quote_consistency", True
+
+        Dim seenQuoteKeys As Object
+        Set seenQuoteKeys = CreateObject("Scripting.Dictionary")
+        Dim dedupedIssues As New Collection
+        Dim iss As Variant
+        Dim posKey As String
+
+        For Each iss In allIssues
+            If quoteRules.Exists(GetIssueProp(iss, "RuleName")) Then
+                posKey = GetIssueProp(iss, "RangeStart") & "|" & _
+                         GetIssueProp(iss, "RangeEnd")
+                If Not seenQuoteKeys.Exists(posKey) Then
+                    seenQuoteKeys.Add posKey, GetIssueProp(iss, "RuleName")
+                    dedupedIssues.Add iss
+                End If
+                ' If posKey already seen (from a different quote rule), skip
+            Else
+                dedupedIssues.Add iss
+            End If
+        Next iss
+
+        Set allIssues = dedupedIssues
+        Set seenQuoteKeys = Nothing
+        Set quoteRules = Nothing
+    End If
+
     DoEvents
     ' -- Footnote rules (combined: integrity, not-endnotes, Hart's rules) --
     If IsRuleEnabled(config, "footnote_rules") Then

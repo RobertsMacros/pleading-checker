@@ -3,21 +3,25 @@ Attribute VB_Name = "Rules_NumberFormats"
 ' Rules_NumberFormats.bas
 ' Combined module for number/date/currency format rules:
 '   - Rule09: Date and time format consistency
-'   - Rule18: Page range configuration
 '   - Rule19: Currency and number format consistency
+'
+' RETIRED (not engine-wired):
+'   - Rule18 page-range helpers: kept for backwards compatibility
+'     but not dispatched by RunAllPleadingsRules. The engine
+'     manages page ranges directly via SetPageRangeFromString.
 '
 ' Public functions:
 '   Check_DateTimeFormat        (Rule09)
-'   Check_PageRange             (Rule18)
 '   Check_CurrencyNumberFormat  (Rule19)
 '
 ' Dependencies:
-'   - PleadingsEngine.bas (IsInPageRange, GetLocationString, SetPageRange)
+'   - PleadingsEngine.bas (IsInPageRange, GetLocationString)
 ' ============================================================
 Option Explicit
 
 ' -- Rule name constants ---------------------------------------
 Private Const RULE_NAME_DATE_TIME As String = "date_time_format"
+' RETIRED: page_range is not engine-wired; kept for backwards compat only
 Private Const RULE_NAME_PAGE_RANGE As String = "page_range"
 Private Const RULE_NAME_CURRENCY As String = "currency_number_format"
 
@@ -215,6 +219,8 @@ Private Sub CheckSymbolConsistency(doc As Document, _
         .Forward = True
     End With
 
+    Dim lastPos As Long
+    lastPos = -1
     Do
         On Error Resume Next
         Dim found As Boolean
@@ -227,6 +233,8 @@ Private Sub CheckSymbolConsistency(doc As Document, _
         On Error GoTo 0
 
         If Not found Then Exit Do
+        If rng.Start <= lastPos Then Exit Do   ' stall guard
+        lastPos = rng.Start
 
         ' Validate that the trailing word is a magnitude word
         Dim matchText As String
@@ -259,6 +267,7 @@ Private Sub CheckSymbolConsistency(doc As Document, _
         .Forward = True
     End With
 
+    lastPos = -1
     Do
         On Error Resume Next
         found = rng.Find.Execute
@@ -266,6 +275,8 @@ Private Sub CheckSymbolConsistency(doc As Document, _
         On Error GoTo 0
 
         If Not found Then Exit Do
+        If rng.Start <= lastPos Then Exit Do   ' stall guard
+        lastPos = rng.Start
 
         If EngineIsInPageRange(rng) Then
             abbrCount = abbrCount + 1
@@ -293,6 +304,7 @@ Private Sub CheckSymbolConsistency(doc As Document, _
         .Forward = True
     End With
 
+    lastPos = -1
     Do
         On Error Resume Next
         found = rng.Find.Execute
@@ -300,6 +312,8 @@ Private Sub CheckSymbolConsistency(doc As Document, _
         On Error GoTo 0
 
         If Not found Then Exit Do
+        If rng.Start <= lastPos Then Exit Do   ' stall guard
+        lastPos = rng.Start
 
         ' Only count as full_numeric if it contains a comma and is long enough
         Dim numText As String
@@ -376,6 +390,8 @@ Private Sub CheckISOCodeFormat(doc As Document, _
 
     Dim isoCount As Long
     isoCount = 0
+    Dim isoLastPos As Long
+    isoLastPos = -1
 
     Do
         On Error Resume Next
@@ -385,6 +401,8 @@ Private Sub CheckISOCodeFormat(doc As Document, _
         On Error GoTo 0
 
         If Not isoFound Then Exit Do
+        If rng.Start <= isoLastPos Then Exit Do   ' stall guard
+        isoLastPos = rng.Start
 
         If EngineIsInPageRange(rng) Then
             isoCount = isoCount + 1
@@ -460,8 +478,6 @@ End Function
 ' ================================================================
 Public Function Check_DateTimeFormat(doc As Document) As Collection
     Dim issues As New Collection
-
-    On Error Resume Next
 
     ' ==========================================================
     '  PASS 1: Find all date occurrences
@@ -570,9 +586,13 @@ Public Function Check_DateTimeFormat(doc As Document) As Collection
                 If dType <> dominantDate Then
                     Dim findingD As Object
                     Dim rngD As Range
+                    On Error Resume Next
                     Set rngD = doc.Range(CLng(dInfo(2)), CLng(dInfo(3)))
+                    If Err.Number <> 0 Then Err.Clear: On Error GoTo 0: GoTo NextDateFind
                     Dim locD As String
                     locD = EngineGetLocationString(rngD, doc)
+                    If Err.Number <> 0 Then locD = "unknown location": Err.Clear
+                    On Error GoTo 0
 
                     Dim suggestion As String
                     Select Case dominantDate
@@ -587,6 +607,7 @@ Public Function Check_DateTimeFormat(doc As Document) As Collection
                     Set findingD = CreateIssueDict(RULE_NAME_DATE_TIME, locD, "Inconsistent date format: '" & CStr(dInfo(1)) & "' uses " & dType & " format but dominant is " & dominantDate, suggestion, CLng(dInfo(2)), CLng(dInfo(3)), "error")
                     issues.Add findingD
                 End If
+NextDateFind:
             Next i
         End If
     End If
@@ -660,14 +681,19 @@ Public Function Check_DateTimeFormat(doc As Document) As Collection
                 ' to avoid double-counting 12-hour times
                 Dim peekEnd As Long
                 peekEnd = CLng(t24Info(3)) + 4
+                On Error Resume Next
                 If peekEnd > doc.Content.End Then peekEnd = doc.Content.End
+                If Err.Number <> 0 Then Err.Clear
+                On Error GoTo 0
                 If peekEnd > CLng(t24Info(3)) Then
                     Dim peekRng As Range
+                    On Error Resume Next
                     Set peekRng = doc.Range(CLng(t24Info(3)), peekEnd)
                     Dim peekTxt As String
                     peekTxt = ""
                     peekTxt = UCase$(peekRng.Text)
                     If Err.Number <> 0 Then peekTxt = "": Err.Clear
+                    On Error GoTo 0
                     ' Followed by AM/PM (with or without space) = 12-hour
                     If Len(peekTxt) >= 2 Then
                         If Left$(peekTxt, 2) = "AM" Or Left$(peekTxt, 2) = "PM" Then
@@ -744,9 +770,13 @@ Public Function Check_DateTimeFormat(doc As Document) As Collection
                 If tType <> dominantTime Then
                     Dim findingT As Object
                     Dim rngT As Range
+                    On Error Resume Next
                     Set rngT = doc.Range(CLng(tInfo(2)), CLng(tInfo(3)))
+                    If Err.Number <> 0 Then Err.Clear: On Error GoTo 0: GoTo NextTimeFind
                     Dim locT As String
                     locT = EngineGetLocationString(rngT, doc)
+                    If Err.Number <> 0 Then locT = "unknown location": Err.Clear
+                    On Error GoTo 0
 
                     Dim timeSugg As String
                     If dominantTime = "12hr" Then
@@ -763,14 +793,14 @@ NextTimeFind:
         End If
     End If
 
-    On Error GoTo 0
     Set Check_DateTimeFormat = issues
 End Function
 
 ' ================================================================
-'  Rule18: SetRange
-'  Called by the form to configure the page window before
-'  rules are executed. Pass 0, 0 to clear the restriction.
+'  RETIRED Rule18: SetRange
+'  Not dispatched by the engine. The engine manages page ranges
+'  directly via SetPageRangeFromString / SetPageRange.
+'  Kept for backwards compatibility only.
 ' ================================================================
 Public Sub SetRange(s As Long, e As Long)
     mStartPage = s
@@ -778,10 +808,10 @@ Public Sub SetRange(s As Long, e As Long)
 End Sub
 
 ' ================================================================
-'  Rule18: Check_PageRange
-'  Pushes the configured page range into PleadingsEngine
-'  so that IsInPageRange() respects the restriction.
-'  Returns an empty Collection (this rule produces no issues).
+'  RETIRED Rule18: Check_PageRange
+'  Not dispatched by the engine. The engine manages page ranges
+'  directly via SetPageRangeFromString / SetPageRange.
+'  Kept for backwards compatibility only.
 ' ================================================================
 Public Function Check_PageRange(doc As Document) As Collection
     Dim issues As New Collection
@@ -863,6 +893,7 @@ Private Function EngineIsInPageRange(rng As Object) As Boolean
     On Error Resume Next
     EngineIsInPageRange = Application.Run("PleadingsEngine.IsInPageRange", rng)
     If Err.Number <> 0 Then
+        Debug.Print "EngineIsInPageRange: fallback (Err " & Err.Number & ")"
         EngineIsInPageRange = True
         Err.Clear
     End If
@@ -876,6 +907,7 @@ Private Function EngineGetLocationString(rng As Object, doc As Document) As Stri
     On Error Resume Next
     EngineGetLocationString = Application.Run("PleadingsEngine.GetLocationString", rng, doc)
     If Err.Number <> 0 Then
+        Debug.Print "EngineGetLocationString: fallback (Err " & Err.Number & ")"
         EngineGetLocationString = "unknown location"
         Err.Clear
     End If

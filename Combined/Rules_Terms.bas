@@ -4,16 +4,17 @@ Attribute VB_Name = "Rules_Terms"
 ' Combined module for term-related rules:
 '   Rule05 - Custom term whitelist
 '   Rule07 - Defined terms
-'   Rule23 - Phrase consistency
 '
-' Phrase matching (Rule23) uses MatchWholeWord=True for single
-' words and word-boundary validation for multi-word phrases to
-' prevent false matches inside larger words.
+' RETIRED (not engine-wired):
+'   Rule23 - Phrase consistency: kept for backwards compatibility
+'     but not dispatched by RunAllPleadingsRules. Retired due to
+'     high false-positive rate on common legal phrases.
 ' ============================================================
 Option Explicit
 
 Private Const RULE05_NAME As String = "custom_term_whitelist"
 Private Const RULE07_NAME As String = "defined_terms"
+' RETIRED: phrase_consistency is not engine-wired; kept for backwards compat only
 Private Const RULE23_NAME As String = "phrase_consistency"
 
 ' ============================================================
@@ -345,8 +346,6 @@ End Function
 Public Function Check_DefinedTerms(doc As Document) As Collection
     Dim issues As New Collection
 
-    On Error Resume Next
-
     ' Dictionary: term (String) -> Array(definitionParaIdx, rangeStart, rangeEnd)
     Dim definedTerms As Object
     Set definedTerms = CreateObject("Scripting.Dictionary")
@@ -364,6 +363,7 @@ Public Function Check_DefinedTerms(doc As Document) As Collection
     ' ==========================================================
 
     ' -- Pattern A: Smart-quoted defined terms ----------------
+    ' Each pattern section uses scoped OERN around its Word OM calls.
     ' Use quote preference from engine to determine which quotes to search
     Dim leftSmart As String
     Dim rightSmart As String
@@ -389,7 +389,9 @@ Public Function Check_DefinedTerms(doc As Document) As Collection
 
     Dim lastPos As Long
     lastPos = -1
+    On Error Resume Next
     Do While rng.Find.Execute
+        If Err.Number <> 0 Then Err.Clear: Exit Do
         If rng.Start <= lastPos Then Exit Do  ' stall guard
         lastPos = rng.Start
         If Not EngineIsInPageRange(rng) Then
@@ -430,8 +432,10 @@ Public Function Check_DefinedTerms(doc As Document) As Collection
         End If
 
         rng.Collapse wdCollapseEnd
+        If Err.Number <> 0 Then Err.Clear: Exit Do
 NextSmartFind:
     Loop
+    On Error GoTo 0
 
     ' -- Pattern A2: Straight-quoted defined terms ("-quoted) --
     ' Mirrors Pattern A but for straight double quotes
@@ -449,7 +453,9 @@ NextSmartFind:
     End With
 
     lastPos = -1
+    On Error Resume Next
     Do While rng.Find.Execute
+        If Err.Number <> 0 Then Err.Clear: Exit Do
         If rng.Start <= lastPos Then Exit Do  ' stall guard
         lastPos = rng.Start
         If Not EngineIsInPageRange(rng) Then
@@ -479,12 +485,16 @@ NextSmartFind:
         End If
 
         rng.Collapse wdCollapseEnd
+        If Err.Number <> 0 Then Err.Clear: Exit Do
 NextStraightFind:
     Loop
+    On Error GoTo 0
 
     ' -- Pattern B: "X means " or "X has the meaning " -------
     paraIdx = 0
+    On Error Resume Next
     For Each para In doc.Paragraphs
+        Err.Clear
         paraIdx = paraIdx + 1
         If Not EngineIsInPageRange(para.Range) Then GoTo NextParaMeans
 
@@ -546,6 +556,7 @@ NextStraightFind:
         End If
 NextParaMeans:
     Next para
+    On Error GoTo 0
 
     ' -- Pattern C: Parenthetical definitions (the "Term") ---
     Set rng = doc.Content.Duplicate
@@ -559,7 +570,9 @@ NextParaMeans:
     End With
 
     lastPos = -1
+    On Error Resume Next
     Do While rng.Find.Execute
+        If Err.Number <> 0 Then Err.Clear: Exit Do
         If rng.Start <= lastPos Then Exit Do  ' stall guard
         lastPos = rng.Start
         If Not EngineIsInPageRange(rng) Then
@@ -593,8 +606,10 @@ NextParaMeans:
         End If
 
         rng.Collapse wdCollapseEnd
+        If Err.Number <> 0 Then Err.Clear: Exit Do
 NextParenFind:
     Loop
+    On Error GoTo 0
 
     ' ==========================================================
     '  PASS 2: Validate each defined term
@@ -611,8 +626,11 @@ NextParenFind:
         Dim lcTerm2 As String
         lcTerm2 = LCase(Left$(term, 1)) & Mid$(term, 2)
         If lcTerm2 <> term Then
+            On Error Resume Next
             Dim lcRng As Range
             Set lcRng = doc.Content.Duplicate
+            If Err.Number <> 0 Then Err.Clear: On Error GoTo 0: GoTo SkipLCCheck
+            On Error GoTo 0
             With lcRng.Find
                 .ClearFormatting
                 .Text = lcTerm2
@@ -624,31 +642,44 @@ NextParenFind:
             End With
             Dim lcLastPos As Long
             lcLastPos = -1
+            On Error Resume Next
             Do While lcRng.Find.Execute
+                If Err.Number <> 0 Then Err.Clear: Exit Do
                 If lcRng.Start <= lcLastPos Then Exit Do
                 lcLastPos = lcRng.Start
                 If EngineIsInPageRange(lcRng) Then
                     Dim findingLC As Object
                     Dim locLC As String
+                    Err.Clear
                     locLC = EngineGetLocationString(lcRng, doc)
+                    If Err.Number <> 0 Then locLC = "unknown location": Err.Clear
                     Set findingLC = CreateIssueDict(RULE07_NAME, locLC, "Inconsistent capitalisation: '" & lcTerm2 & "' found but '" & term & "' is the defined term", "Use '" & term & "' consistently", lcRng.Start, lcRng.End, "error")
                     issues.Add findingLC
                 End If
                 lcRng.Collapse wdCollapseEnd
+                If Err.Number <> 0 Then Err.Clear: Exit Do
             Loop
+            On Error GoTo 0
         End If
+SkipLCCheck:
 
         ' -- Check B: Hyphenated/unhyphenated variant ----------
         If InStr(1, term, "-") > 0 Then
             Dim noHyphen As String
             noHyphen = RemoveHyphens(term)
             Dim nhRng As Range
+            On Error Resume Next
             Set nhRng = FindTermRange(doc, noHyphen, False)
+            If Err.Number <> 0 Then Err.Clear: On Error GoTo 0: GoTo SkipHyphenCheck
+            On Error GoTo 0
             If Not nhRng Is Nothing Then
                 If EngineIsInPageRange(nhRng) Then
                     Dim findingH As Object
                     Dim locH As String
+                    On Error Resume Next
                     locH = EngineGetLocationString(nhRng, doc)
+                    If Err.Number <> 0 Then locH = "unknown location": Err.Clear
+                    On Error GoTo 0
                     Set findingH = CreateIssueDict(RULE07_NAME, locH, "Hyphenation variant: '" & noHyphen & "' found but defined term uses hyphen: '" & term & "'", "Use the defined form: '" & term & "'", nhRng.Start, nhRng.End, "error")
                     issues.Add findingH
                 End If
@@ -658,6 +689,7 @@ NextParenFind:
             ' Try common hyphenation points (before common prefixes)
             ' This is a best-effort check
         End If
+SkipHyphenCheck:
 
         ' -- Check C: Defined term never referenced ------------
         Dim totalCount As Long
@@ -666,20 +698,25 @@ NextParenFind:
             ' Only appears at the definition site
             Dim findingUnused As Object
             Dim unusedRng As Range
+            On Error Resume Next
             Set unusedRng = doc.Range(CLng(tInfo(1)), CLng(tInfo(2)))
+            If Err.Number <> 0 Then Err.Clear: On Error GoTo 0: GoTo SkipUnusedCheck
             Dim locUnused As String
             locUnused = EngineGetLocationString(unusedRng, doc)
+            If Err.Number <> 0 Then locUnused = "unknown location": Err.Clear
+            On Error GoTo 0
             Set findingUnused = CreateIssueDict(RULE07_NAME, locUnused, "Defined term never referenced: '" & term & "' is defined but not used elsewhere in the document.", "", CLng(tInfo(1)), CLng(tInfo(2)), "possible_error")
             issues.Add findingUnused
         End If
+SkipUnusedCheck:
     Next termKey
 
-    On Error GoTo 0
     Set Check_DefinedTerms = issues
 End Function
 
 ' ============================================================
-'  RULE 23: PHRASE CONSISTENCY
+'  RETIRED RULE 23: PHRASE CONSISTENCY
+'  Not dispatched by the engine. Kept for backwards compatibility.
 ' ============================================================
 Public Function Check_PhraseConsistency(doc As Document) As Collection
     Dim issues As New Collection
@@ -809,6 +846,7 @@ Private Function EngineIsInPageRange(rng As Object) As Boolean
     On Error Resume Next
     EngineIsInPageRange = Application.Run("PleadingsEngine.IsInPageRange", rng)
     If Err.Number <> 0 Then
+        Debug.Print "EngineIsInPageRange: fallback (Err " & Err.Number & ")"
         EngineIsInPageRange = True
         Err.Clear
     End If
@@ -822,6 +860,7 @@ Private Function EngineGetLocationString(rng As Object, doc As Document) As Stri
     On Error Resume Next
     EngineGetLocationString = Application.Run("PleadingsEngine.GetLocationString", rng, doc)
     If Err.Number <> 0 Then
+        Debug.Print "EngineGetLocationString: fallback (Err " & Err.Number & ")"
         EngineGetLocationString = "unknown location"
         Err.Clear
     End If
