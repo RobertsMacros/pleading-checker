@@ -77,12 +77,16 @@ Private Function CountTightSlashes(doc As Document) As Long
         .Forward = True
     End With
 
+    Dim lastPos As Long
+    lastPos = -1
     On Error Resume Next
     Do
         Err.Clear
         found = rng.Find.Execute
         If Err.Number <> 0 Then Exit Do
         If Not found Then Exit Do
+        If rng.Start <= lastPos Then Exit Do   ' stall guard
+        lastPos = rng.Start
 
         ' Skip URLs and dates
         If Not IsURLContext(rng, doc) And Not IsDateSlash(rng) Then
@@ -121,12 +125,16 @@ Private Function CountSpacedSlashes(doc As Document) As Long
         .Forward = True
     End With
 
+    Dim lastPos As Long
+    lastPos = -1
     On Error Resume Next
     Do
         Err.Clear
         found = rng.Find.Execute
         If Err.Number <> 0 Then Exit Do
         If Not found Then Exit Do
+        If rng.Start <= lastPos Then Exit Do   ' stall guard
+        lastPos = rng.Start
 
         ' Skip URLs
         If Not IsURLContext(rng, doc) Then
@@ -162,12 +170,16 @@ Private Sub FlagSpacedSlashes(doc As Document, ByRef issues As Collection)
         .Forward = True
     End With
 
+    Dim lastPos As Long
+    lastPos = -1
     On Error Resume Next
     Do
         Err.Clear
         found = rng.Find.Execute
         If Err.Number <> 0 Then Exit Do
         If Not found Then Exit Do
+        If rng.Start <= lastPos Then Exit Do   ' stall guard
+        lastPos = rng.Start
 
         If Not EngineIsInPageRange(rng) Then GoTo ContinueSpaced
         If IsURLContext(rng, doc) Then GoTo ContinueSpaced
@@ -209,12 +221,16 @@ Private Sub FlagTightSlashes(doc As Document, ByRef issues As Collection)
         .Forward = True
     End With
 
+    Dim lastPos2 As Long
+    lastPos2 = -1
     On Error Resume Next
     Do
         Err.Clear
         found = rng.Find.Execute
         If Err.Number <> 0 Then Exit Do
         If Not found Then Exit Do
+        If rng.Start <= lastPos2 Then Exit Do   ' stall guard
+        lastPos2 = rng.Start
 
         If Not EngineIsInPageRange(rng) Then GoTo ContinueTight
         If IsURLContext(rng, doc) Then GoTo ContinueTight
@@ -260,12 +276,16 @@ Private Sub FlagBackslashes(doc As Document, ByRef issues As Collection)
         .Forward = True
     End With
 
+    Dim lastPos3 As Long
+    lastPos3 = -1
     On Error Resume Next
     Do
         Err.Clear
         found = rng.Find.Execute
         If Err.Number <> 0 Then Exit Do
         If Not found Then Exit Do
+        If rng.Start <= lastPos3 Then Exit Do   ' stall guard
+        lastPos3 = rng.Start
 
         If Not EngineIsInPageRange(rng) Then GoTo ContinueBackslash
 
