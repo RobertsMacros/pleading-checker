@@ -88,6 +88,8 @@ End Sub
 '  Runs all available rules and shows summary via MsgBox.
 ' ============================================================
 Public Sub RunQuick()
+    TraceEnter "RunQuick"
+    DebugLogDoc "RunQuick target", ActiveDocument
     Dim cfg As Object
     Set cfg = InitRuleConfig()
     SetPageRange 0, 0
@@ -105,6 +107,7 @@ Public Sub RunQuick()
         MsgBox summary, vbInformation, "Pleadings Checker"
         ApplySuggestionsAsTrackedChanges ActiveDocument, issues, True
     End If
+    TraceExit "RunQuick", issues.Count & " issues"
 End Sub
 
 ' ============================================================
@@ -439,12 +442,14 @@ Private Function TryRunRule(ByVal funcName As String, _
     Dim result As Object
     Set result = Nothing
 
+    TraceStep "RunAllPleadingsRules", "dispatching " & funcName
+
     On Error Resume Next
     Set result = Application.Run(funcName, doc)
     If Err.Number <> 0 Then
         ruleErrorCount = ruleErrorCount + 1
         ruleErrorLog = ruleErrorLog & funcName & " (Err " & Err.Number & ": " & Err.Description & ")" & vbCrLf
-        Debug.Print "RULE ERROR: " & funcName & " -- Err " & Err.Number & ": " & Err.Description
+        DebugLogError "TryRunRule", funcName, Err.Number, Err.Description
         Err.Clear
         On Error GoTo 0
         Set TryRunRule = New Collection
@@ -453,10 +458,10 @@ Private Function TryRunRule(ByVal funcName As String, _
     On Error GoTo 0
 
     If result Is Nothing Then
-        Debug.Print "RULE OK (no results): " & funcName
+        TraceStep "TryRunRule", funcName & " -> 0 issues (Nothing)"
         Set TryRunRule = New Collection
     Else
-        Debug.Print "RULE OK: " & funcName & " -- " & result.Count & " issue(s)"
+        TraceStep "TryRunRule", funcName & " -> " & result.Count & " issue(s)"
         Set TryRunRule = result
     End If
 End Function
@@ -466,6 +471,9 @@ End Function
 ' ============================================================
 Public Function RunAllPleadingsRules(doc As Document, _
                                      config As Object) As Collection
+    TraceEnter "RunAllPleadingsRules"
+    DebugLogDoc "RunAllPleadingsRules target", doc
+
     Dim allIssues As New Collection
     Set ruleConfig = config
     ruleErrorCount = 0
@@ -772,6 +780,10 @@ RunnerCleanup:
         Debug.Print perfSummary
     End If
 
+    TraceStep "RunAllPleadingsRules", "total issues: " & allIssues.Count & _
+              ", rule errors: " & ruleErrorCount
+    TraceExit "RunAllPleadingsRules", allIssues.Count & " issues"
+
     Set RunAllPleadingsRules = allIssues
 End Function
 
@@ -796,6 +808,8 @@ End Function
 ' ============================================================
 Private Function FilterBlockQuoteIssues(doc As Document, _
                                          issues As Collection) As Collection
+    TraceEnter "FilterBlockQuoteIssues"
+    TraceStep "FilterBlockQuoteIssues", "input: " & issues.Count & " issues"
     Dim filtered As New Collection
     Dim i As Long
 
@@ -1126,6 +1140,9 @@ SkipIssue:
 NextIssue:
     Next i
 
+    TraceStep "FilterBlockQuoteIssues", "output: " & filtered.Count & " issues (" & _
+              (issues.Count - filtered.Count) & " filtered out)"
+    TraceExit "FilterBlockQuoteIssues"
     Set FilterBlockQuoteIssues = filtered
 End Function
 
@@ -1135,6 +1152,9 @@ End Function
 Public Sub ApplyHighlights(doc As Document, _
                            issues As Collection, _
                            Optional addComments As Boolean = True)
+    TraceEnter "ApplyHighlights"
+    TraceStep "ApplyHighlights", issues.Count & " issues, addComments=" & addComments
+
     Dim finding As Object
     Dim rng As Range
     Dim i As Long
@@ -1159,6 +1179,7 @@ Public Sub ApplyHighlights(doc As Document, _
     Next i
 
     Application.ScreenUpdating = wasScreenUpdating
+    TraceExit "ApplyHighlights"
 End Sub
 
 ' ============================================================
@@ -1167,6 +1188,10 @@ End Sub
 Public Sub ApplySuggestionsAsTrackedChanges(doc As Document, _
                                              issues As Collection, _
                                              Optional addComments As Boolean = True)
+    TraceEnter "ApplyTrackedChanges"
+    DebugLogDoc "ApplyTrackedChanges target", doc
+    TraceStep "ApplyTrackedChanges", issues.Count & " issues, addComments=" & addComments
+
     Dim finding As Object
     Dim rng As Range
     Dim i As Long
@@ -1261,6 +1286,8 @@ Public Sub ApplySuggestionsAsTrackedChanges(doc As Document, _
                     End If
 
                     If skipAmendment Then
+                        TraceStep "ApplyTrackedChanges", "SKIPPED amendment i=" & i & _
+                                  " orig=""" & Left$(origText, 30) & """ sug=""" & Left$(sugText, 30) & """"
                         ' Still add comment to explain the issue, but don't auto-fix
                         If addComments Then
                             doc.Comments.Add Range:=rng, Text:=BuildCommentText(finding)
@@ -1270,6 +1297,9 @@ Public Sub ApplySuggestionsAsTrackedChanges(doc As Document, _
                     End If
 
                     ' Apply tracked change
+                    TraceStep "ApplyTrackedChanges", "APPLYING i=" & i & _
+                              " range=" & origStart & "-" & (origStart + origLen) & _
+                              " orig=""" & Left$(origText, 30) & """ -> """ & Left$(sugText, 30) & """"
                     doc.TrackRevisions = True
                     rng.Text = sugText
                     doc.TrackRevisions = wasTrackingChanges
@@ -1297,6 +1327,7 @@ NextApplyIssue:
 
     ' Restore screen updating
     Application.ScreenUpdating = wasScreenUpdating
+    TraceExit "ApplyTrackedChanges"
 End Sub
 
 ' ============================================================
