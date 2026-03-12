@@ -110,8 +110,6 @@ End Sub
 Public Function Check_AnglicisedTermsNotItalic(doc As Document) As Collection
     Dim issues As New Collection
 
-    On Error Resume Next
-
     InitSeedTerms
 
     Dim para As Paragraph
@@ -128,49 +126,53 @@ Public Function Check_AnglicisedTermsNotItalic(doc As Document) As Collection
 
     For Each para In doc.Paragraphs
         ' Skip paragraphs outside the configured page range
-        If Not EngineIsInPageRange(para.Range) Then GoTo NextParaR30
+        On Error Resume Next
+        Dim inRange As Boolean
+        inRange = EngineIsInPageRange(para.Range)
+        If Err.Number <> 0 Then inRange = True: Err.Clear
+        On Error GoTo 0
+        If Not inRange Then GoTo NextParaR30
 
+        On Error Resume Next
         paraText = para.Range.Text
+        If Err.Number <> 0 Then Err.Clear: On Error GoTo 0: GoTo NextParaR30
+        On Error GoTo 0
         If Len(paraText) = 0 Then GoTo NextParaR30
 
         For termIdx = LBound(seedTerms) To UBound(seedTerms)
             term = CStr(seedTerms(termIdx))
             termLen = Len(term)
 
-            ' Search for all occurrences of the term in this paragraph
             pos = InStr(1, paraText, term, vbTextCompare)
             Do While pos > 0
-                ' -- Word-boundary check -----------------------
-                ' Character before match must be non-letter (or match starts at position 1)
                 If pos > 1 Then
                     charBefore = Mid$(paraText, pos - 1, 1)
                     If IsLetter(charBefore) Then GoTo NextMatchR30
-                Else
-                    charBefore = ""
                 End If
 
-                ' Character after match must be non-letter (or match ends at string end)
                 If pos + termLen <= Len(paraText) Then
                     charAfter = Mid$(paraText, pos + termLen, 1)
                     If IsLetter(charAfter) Then GoTo NextMatchR30
                 End If
 
-                ' -- Build Range for the matched span ----------
+                On Error Resume Next
                 Set rng = doc.Range( _
                     para.Range.Start + pos - 1, _
                     para.Range.Start + pos - 1 + termLen)
+                If Err.Number <> 0 Then Err.Clear: On Error GoTo 0: GoTo NextMatchR30
+                On Error GoTo 0
 
-                ' -- Check italic formatting -------------------
                 If IsRangeItalic(rng) Then
+                    On Error Resume Next
                     locStr = EngineGetLocationString(rng, doc)
                     If Err.Number <> 0 Then locStr = "unknown location": Err.Clear
+                    On Error GoTo 0
 
                     Set finding = CreateIssueDict(RULE_NAME_ANGLICISED, locStr, "Anglicised foreign term is italicised.", "Set '" & term & "' in roman, not italics.", rng.Start, rng.End, "warning", False)
                     issues.Add finding
                 End If
 
 NextMatchR30:
-                ' Search for next occurrence after this one
                 pos = InStr(pos + 1, paraText, term, vbTextCompare)
             Loop
         Next termIdx
@@ -178,7 +180,6 @@ NextMatchR30:
 NextParaR30:
     Next para
 
-    On Error GoTo 0
     Set Check_AnglicisedTermsNotItalic = issues
 End Function
 
@@ -217,8 +218,6 @@ End Sub
 Public Function Check_ForeignNamesNotItalic(doc As Document) As Collection
     Dim issues As New Collection
 
-    On Error Resume Next
-
     ' Initialise defaults if not yet loaded
     If foreignNames Is Nothing Then
         InitSeedNames
@@ -240,10 +239,17 @@ Public Function Check_ForeignNamesNotItalic(doc As Document) As Collection
     keys = foreignNames.keys
 
     For Each para In doc.Paragraphs
-        ' Skip paragraphs outside the configured page range
-        If Not EngineIsInPageRange(para.Range) Then GoTo NextParaR31
+        On Error Resume Next
+        Dim inRange31 As Boolean
+        inRange31 = EngineIsInPageRange(para.Range)
+        If Err.Number <> 0 Then inRange31 = True: Err.Clear
+        On Error GoTo 0
+        If Not inRange31 Then GoTo NextParaR31
 
+        On Error Resume Next
         paraText = para.Range.Text
+        If Err.Number <> 0 Then Err.Clear: On Error GoTo 0: GoTo NextParaR31
+        On Error GoTo 0
         If Len(paraText) = 0 Then GoTo NextParaR31
 
         Dim k As Long
@@ -251,40 +257,36 @@ Public Function Check_ForeignNamesNotItalic(doc As Document) As Collection
             term = CStr(keys(k))
             termLen = Len(term)
 
-            ' Search for all occurrences of the name in this paragraph
             pos = InStr(1, paraText, term, vbTextCompare)
             Do While pos > 0
-                ' -- Word-boundary check -----------------------
-                ' Character before match must be non-letter (or match starts at position 1)
                 If pos > 1 Then
                     charBefore = Mid$(paraText, pos - 1, 1)
                     If IsLetter(charBefore) Then GoTo NextMatchR31
-                Else
-                    charBefore = ""
                 End If
 
-                ' Character after match must be non-letter (or match ends at string end)
                 If pos + termLen <= Len(paraText) Then
                     charAfter = Mid$(paraText, pos + termLen, 1)
                     If IsLetter(charAfter) Then GoTo NextMatchR31
                 End If
 
-                ' -- Build Range for the matched span ----------
+                On Error Resume Next
                 Set rng = doc.Range( _
                     para.Range.Start + pos - 1, _
                     para.Range.Start + pos - 1 + termLen)
+                If Err.Number <> 0 Then Err.Clear: On Error GoTo 0: GoTo NextMatchR31
+                On Error GoTo 0
 
-                ' -- Check italic formatting -------------------
                 If IsRangeItalic(rng) Then
+                    On Error Resume Next
                     locStr = EngineGetLocationString(rng, doc)
                     If Err.Number <> 0 Then locStr = "unknown location": Err.Clear
+                    On Error GoTo 0
 
                     Set finding = CreateIssueDict(RULE_NAME_FOREIGN, locStr, "Foreign name or institution should not be italicised.", "Set '" & term & "' in roman, not italics.", rng.Start, rng.End, "warning", False)
                     issues.Add finding
                 End If
 
 NextMatchR31:
-                ' Search for next occurrence after this one
                 pos = InStr(pos + 1, paraText, term, vbTextCompare)
             Loop
         Next k
@@ -292,7 +294,6 @@ NextMatchR31:
 NextParaR31:
     Next para
 
-    On Error GoTo 0
     Set Check_ForeignNamesNotItalic = issues
 End Function
 
