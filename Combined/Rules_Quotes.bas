@@ -232,6 +232,17 @@ Public Function Check_SingleQuotesDefault( _
     Dim locRng As Range
     Set locRng = doc.Range(0, 1)
 
+    ' Nesting state persists across paragraphs for multi-paragraph quotes
+    Dim nestDepth As Long
+    nestDepth = 0
+    ' Track what type each nesting level was opened with:
+    ' True = outer-type, False = inner-type.  Max 10 levels.
+    Dim levelIsOuter(0 To 9) As Boolean
+    ' Count of nesting anomalies (underflow / overflow).
+    ' If too many anomalies we suppress further flagging.
+    Dim nestAnomalies As Long
+    nestAnomalies = 0
+
     On Error Resume Next
     For Each para In doc.Paragraphs
         Err.Clear
@@ -265,25 +276,18 @@ Public Function Check_SingleQuotesDefault( _
         '  NESTING-AWARE SCAN
         '
         '  nestDepth tracks how many quote levels deep we are.
-        '  At even depths (0, 2, ...) we expect the "outer" type.
-        '  At odd depths (1, 3, ...) we expect the "inner" type.
+        '  Even depths (0, 2, ...) expect the "outer" type.
+        '  Odd  depths (1, 3, ...) expect the "inner" type.
         '
-        '  A quote character is "expected" if its type matches
-        '  the expected type for the current depth.
-        '  It is "wrong" if used at a depth where the other
-        '  type should appear.
+        '  Only FLAG wrong-type OPENING quotes.  Closing quotes
+        '  just pop the stack. Straight-quote open/close is
+        '  determined by preceding-character context (space/SOL
+        '  = opening, letter/digit = closing).
         '
-        '  We only FLAG wrong-type characters that OPEN a new
-        '  level at the wrong type. We still track depth for
-        '  them so that their matching close isn't misflagged.
+        '  Soft failure: if nestDepth underflows on close, reset
+        '  to 0 and increment anomaly counter; if anomaly count
+        '  is high, stop flagging for this document.
         ' ======================================================
-        Dim nestDepth As Long
-        nestDepth = 0
-
-        ' Track what type each nesting level was opened with:
-        ' True = opened with outer-type, False = opened with inner-type.
-        ' Max 10 levels deep (more than enough for legal text).
-        Dim levelIsOuter(0 To 9) As Boolean
 
         For i = 0 To bMax Step 2
             code = b(i) Or (CLng(b(i + 1)) * 256&)
@@ -292,7 +296,6 @@ Public Function Check_SingleQuotesDefault( _
             Dim isApostrophe As Boolean
             isApostrophe = False
             If code = QS Or code = QSC Or code = QSO Then
-                ' Extended apostrophe detection: letter/digit on both sides
                 isApostrophe = ByteIsApostropheExt(b, i, bMax)
             End If
             If isApostrophe Then GoTo NxtChar32
@@ -320,11 +323,11 @@ Public Function Check_SingleQuotesDefault( _
             ' -- Determine if this is an opening or closing quote --
             Dim isOpening As Boolean
             Dim isClosing As Boolean
-            Dim isOuterType As Boolean  ' True = outer-style char, False = inner-style
+            Dim isOuterType As Boolean  ' True = outer-style char
 
             isOuterType = (isOuterOpen Or isOuterClose Or isStraightOuter)
 
-            ' Smart quotes have directionality
+            ' Smart quotes have directionality built in
             If isOuterOpen Or isInnerOpen Then
                 isOpening = True
                 isClosing = False
@@ -332,46 +335,58 @@ Public Function Check_SingleQuotesDefault( _
                 isOpening = False
                 isClosing = True
             Else
-                ' Straight quote: determine open vs close from context
-                ' At depth 0 or if last action was a close -> opening
-                ' Otherwise -> closing (heuristic)
-                If nestDepth = 0 Then
+                ' Straight quote: use preceding-character context
+                ' Space, tab, newline, SOL, open-paren = opening
+                ' Letter, digit, punctuation = closing
+                Dim prevIsSpace As Boolean
+                prevIsSpace = True  ' default: start-of-line = opening
+                If i >= 2 Then
+                    Dim prevCode As Long
+                    prevCode = b(i - 2) Or (CLng(b(i - 1)) * 256&)
+                    prevIsSpace = (prevCode = 32 Or prevCode = 9 Or _
+                                   prevCode = 13 Or prevCode = 10 Or _
+                                   prevCode = 160 Or prevCode = 40 Or _
+                                   prevCode = 91 Or prevCode = 8212 Or _
+                                   prevCode = 8211)
+                End If
+                If prevIsSpace Then
                     isOpening = True
                     isClosing = False
                 Else
-                    ' Check if the matching level was opened with same type
-                    Dim curLevelOuter As Boolean
-                    If nestDepth <= 10 Then
-                        curLevelOuter = levelIsOuter(nestDepth - 1)
+                    ' Check if the current nesting level was opened with same type
+                    If nestDepth > 0 Then
+                        Dim curLevelOuter As Boolean
+                        If nestDepth <= 10 Then
+                            curLevelOuter = levelIsOuter(nestDepth - 1)
+                        Else
+                            curLevelOuter = ((nestDepth Mod 2) = 0)
+                        End If
+                        If curLevelOuter = isOuterType Then
+                            isOpening = False
+                            isClosing = True
+                        Else
+                            isOpening = True
+                            isClosing = False
+                        End If
                     Else
-                        curLevelOuter = ((nestDepth Mod 2) = 0)
-                    End If
-                    ' If the current level was opened with same type, this closes it
-                    If curLevelOuter = isOuterType Then
+                        ' At depth 0, non-space-preceded straight quote
+                        ' is probably closing an untracked opening
                         isOpening = False
                         isClosing = True
-                    Else
-                        ' Different type at this level - treat as opening new level
-                        isOpening = True
-                        isClosing = False
                     End If
                 End If
             End If
 
-            ' -- Determine expected type for current depth --
-            ' Even depth (0,2,4..) -> outer type expected
-            ' Odd depth (1,3,5..) -> inner type expected
-            Dim expectOuter As Boolean
-            expectOuter = ((nestDepth Mod 2) = 0)
-
             ' -- Process opening quotes --
             If isOpening Then
-                ' Check if this is the wrong type for the current level
+                Dim expectOuter As Boolean
+                expectOuter = ((nestDepth Mod 2) = 0)
+
                 Dim wrongTypeOpen As Boolean
                 wrongTypeOpen = (isOuterType <> expectOuter)
 
-                If wrongTypeOpen Then
-                    ' FLAG: wrong quote type at this nesting level
+                ' Only flag if we have low anomaly count (reliable nesting state)
+                If wrongTypeOpen And nestAnomalies < 5 Then
                     Dim issMsg As String
                     If expectOuter Then
                         If nestMode = "DOUBLE" Then
@@ -416,9 +431,11 @@ Public Function Check_SingleQuotesDefault( _
             If isClosing Then
                 If nestDepth > 0 Then
                     nestDepth = nestDepth - 1
+                Else
+                    ' Underflow: malformed sequence.  Soft-reset.
+                    nestAnomalies = nestAnomalies + 1
+                    nestDepth = 0
                 End If
-                ' Don't flag closing quotes - the opening was already
-                ' flagged if wrong type. Closing just pops the level.
                 GoTo NxtChar32
             End If
 

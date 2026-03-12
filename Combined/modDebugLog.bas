@@ -426,6 +426,49 @@ Public Function DebugLogGetText() As String
     DebugLogGetText = result
 End Function
 
+Public Function DebugLogSaveToTextFile(ByVal filePath As String) As Boolean
+    DebugLogSaveToTextFile = False
+    If Not logInited Then Exit Function
+    If logCount = 0 Then Exit Function
+
+    Dim fileNum As Integer
+    fileNum = FreeFile
+    On Error Resume Next
+    Open filePath For Output As #fileNum
+    If Err.Number <> 0 Then
+        Debug.Print "DebugLogSaveToTextFile: cannot open " & filePath & _
+                    " (Err " & Err.Number & ": " & Err.Description & ")"
+        Err.Clear
+        On Error GoTo 0
+        Exit Function
+    End If
+    On Error GoTo 0
+
+    On Error GoTo SaveErr
+    Dim idx As Long, startIdx As Long
+    If logCount < LOG_CAP Then
+        startIdx = 0
+    Else
+        startIdx = logHead
+    End If
+    Print #fileNum, "=== DEBUG LOG (" & logCount & " entries) ==="
+    Dim lineIdx As Long
+    For lineIdx = 0 To logCount - 1
+        idx = (startIdx + lineIdx) Mod LOG_CAP
+        Print #fileNum, logBuf(idx)
+    Next lineIdx
+    Print #fileNum, "=== END DEBUG LOG ==="
+    Close #fileNum
+    DebugLogSaveToTextFile = True
+    Exit Function
+
+SaveErr:
+    On Error Resume Next
+    Close #fileNum
+    Debug.Print "DebugLogSaveToTextFile: write error " & Err.Number & ": " & Err.Description
+    On Error GoTo 0
+End Function
+
 Public Sub DebugLogFlushToDocument(Optional ByVal doc As Document = Nothing)
     If Not DEBUG_MODE Then Exit Sub
     On Error Resume Next

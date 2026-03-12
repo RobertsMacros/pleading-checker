@@ -687,14 +687,27 @@ Public Function Check_DateTimeFormat(doc As Document) As Collection
                     End If
                 End If
 
-                ' For hours 1-9 with leading zero (01:xx-09:xx), the leading
-                ' zero strongly suggests 24-hour format intentionally.
-                ' For hours 10-12 without AM/PM, accept as 24-hour if
-                ' context doesn't suggest otherwise (already filtered above).
-
+                ' Classify: hours 13-23 or 00 are definite 24-hour.
+                ' Hours 01-12 without AM/PM are ambiguous and should not
+                ' drive the dominant-style count (but are still collected
+                ' so they can be flagged if a clear dominant emerges).
                 If is24hrTime Then
-                    timeFinds.Add t24Info
-                    timeCounts("24hr") = timeCounts("24hr") + 1
+                    If hourVal >= 13 Or hourVal = 0 Then
+                        ' Definite 24-hour: counts toward dominance
+                        timeFinds.Add t24Info
+                        timeCounts("24hr") = timeCounts("24hr") + 1
+                    Else
+                        ' Ambiguous (01:00-12:59 without AM/PM):
+                        ' Collect for possible flagging but mark as "ambiguous"
+                        ' so it does NOT influence the dominant format.
+                        Dim ambigInfo(0 To 3) As Variant
+                        ambigInfo(0) = "ambiguous"
+                        ambigInfo(1) = t24Info(1)
+                        ambigInfo(2) = t24Info(2)
+                        ambigInfo(3) = t24Info(3)
+                        timeFinds.Add ambigInfo
+                        ' Do NOT increment timeCounts("24hr")
+                    End If
                 End If
             End If
         End If
@@ -726,6 +739,8 @@ Public Function Check_DateTimeFormat(doc As Document) As Collection
                 Dim tType As String
                 tType = CStr(tInfo(0))
 
+                ' Skip ambiguous times: they don't conflict with anything
+                If tType = "ambiguous" Then GoTo NextTimeFind
                 If tType <> dominantTime Then
                     Dim findingT As Object
                     Dim rngT As Range
@@ -743,6 +758,7 @@ Public Function Check_DateTimeFormat(doc As Document) As Collection
                     Set findingT = CreateIssueDict(RULE_NAME_DATE_TIME, locT, "Inconsistent time format: '" & CStr(tInfo(1)) & "' uses " & tType & " format but dominant is " & dominantTime, timeSugg, CLng(tInfo(2)), CLng(tInfo(3)), "error")
                     issues.Add findingT
                 End If
+NextTimeFind:
             Next i
         End If
     End If

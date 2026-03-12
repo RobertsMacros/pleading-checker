@@ -204,15 +204,14 @@ Private Function CountPhrase(doc As Document, phrase As String) As Long
         If rng.Start <= lastMatchStart Then Exit Do
         lastMatchStart = rng.Start
 
-        ' For multi-word phrases, verify word boundaries manually
-        If Not singleWord Then
-            If Not IsWordBoundaryMatch(rng, doc) Then
-                On Error Resume Next
-                rng.Collapse wdCollapseEnd
-                If Err.Number <> 0 Then Err.Clear: On Error GoTo 0: Exit Do
-                On Error GoTo 0
-                GoTo NextCountMatch
-            End If
+        ' Verify word boundaries: even for single words, MatchWholeWord
+        ' can behave inconsistently with hyphens and special chars.
+        If Not IsWordBoundaryMatch(rng, doc) Then
+            On Error Resume Next
+            rng.Collapse wdCollapseEnd
+            If Err.Number <> 0 Then Err.Clear: On Error GoTo 0: Exit Do
+            On Error GoTo 0
+            GoTo NextCountMatch
         End If
 
         If EngineIsInPageRange(rng) Then
@@ -269,15 +268,14 @@ Private Sub FlagPhraseOccurrences(doc As Document, _
         If rng.Start <= lastMatchStart Then Exit Do
         lastMatchStart = rng.Start
 
-        ' For multi-word phrases, verify word boundaries manually
-        If Not singleWord Then
-            If Not IsWordBoundaryMatch(rng, doc) Then
-                On Error Resume Next
-                rng.Collapse wdCollapseEnd
-                If Err.Number <> 0 Then Err.Clear: On Error GoTo 0: Exit Do
-                On Error GoTo 0
-                GoTo NextFlagMatch
-            End If
+        ' Verify word boundaries: even for single words, MatchWholeWord
+        ' can behave inconsistently with hyphens and special chars.
+        If Not IsWordBoundaryMatch(rng, doc) Then
+            On Error Resume Next
+            rng.Collapse wdCollapseEnd
+            If Err.Number <> 0 Then Err.Clear: On Error GoTo 0: Exit Do
+            On Error GoTo 0
+            GoTo NextFlagMatch
         End If
 
         If EngineIsInPageRange(rng) Then

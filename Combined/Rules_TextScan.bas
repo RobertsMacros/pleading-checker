@@ -76,56 +76,68 @@ Public Function Check_RepeatedWords(doc As Document) As Collection
         Dim rwListPrefixLen As Long
         rwListPrefixLen = GetSOListPrefixLen(para, paraText)
 
-        ' -- Split paragraph into words --------------------
-        words = Split(paraText, " ")
-        wordCount = UBound(words) - LBound(words) + 1
+        ' -- Tokenise by scanning character positions directly ---
+        ' This avoids misalignment from tabs, multiple spaces, NBSP.
+        Dim tLen As Long
+        tLen = Len(paraText)
+        If tLen < 3 Then GoTo NextParagraph_RW
 
-        If wordCount < 2 Then
-            GoTo NextParagraph_RW
-        End If
-
-        ' -- Clean words: strip leading/trailing punctuation -
-        ReDim cleanWords(LBound(words) To UBound(words))
-        For i = LBound(words) To UBound(words)
-            cleanWords(i) = StripPunctuation(words(i))
-        Next i
-
-        ' -- Compare consecutive words ---------------------
         prevWord = ""
-        Dim wordStartPos As Long
-        wordStartPos = 1  ' 1-based cumulative position in paraText
-        For i = LBound(cleanWords) To UBound(cleanWords)
-            currWord = LCase(cleanWords(i))
+        Dim prevTokenStart As Long, prevTokenEnd As Long
+        prevTokenStart = 0: prevTokenEnd = 0
 
-            ' Skip empty tokens (multiple spaces, punctuation-only)
-            If Len(currWord) = 0 Then
-                prevWord = ""
-                wordStartPos = wordStartPos + Len(words(i)) + 1
-                GoTo NextWordInPara
+        Dim scanPos As Long
+        scanPos = 1  ' 1-based position in paraText
+
+        Do While scanPos <= tLen
+            ' Skip whitespace
+            Dim sc As String
+            sc = Mid$(paraText, scanPos, 1)
+            If sc = " " Or sc = vbTab Or sc = ChrW(160) Or _
+               sc = vbCr Or sc = vbLf Or sc = Chr(11) Then
+                scanPos = scanPos + 1
+                GoTo NextScanPos_RW
             End If
 
-            ' Check for repetition
-            If currWord = prevWord And Len(currWord) > 0 Then
+            ' Found start of a token
+            Dim tokStart As Long
+            tokStart = scanPos
+            Do While scanPos <= tLen
+                sc = Mid$(paraText, scanPos, 1)
+                If sc = " " Or sc = vbTab Or sc = ChrW(160) Or _
+                   sc = vbCr Or sc = vbLf Or sc = Chr(11) Then Exit Do
+                scanPos = scanPos + 1
+            Loop
+            Dim tokEnd As Long
+            tokEnd = scanPos  ' one past end (exclusive)
 
-                ' -- Determine severity ----------------
+            Dim rawToken As String
+            rawToken = Mid$(paraText, tokStart, tokEnd - tokStart)
+            currWord = LCase(StripPunctuation(rawToken))
+
+            If Len(currWord) = 0 Then
+                prevWord = ""
+                GoTo NextScanPos_RW
+            End If
+
+            ' Check for repetition with previous token
+            If currWord = prevWord And Len(currWord) > 0 Then
+                ' Determine severity
                 If IsKnownValidRepetition(currWord, knownValid) Then
                     severity = "possible_error"
-                    issueText = "Repeated word '" & cleanWords(i) & "' " & _
+                    issueText = "Repeated word '" & currWord & "' " & _
                                 "-- review context; may be intentional"
                 Else
                     severity = "error"
-                    issueText = "Repeated word '" & cleanWords(i) & "' detected"
+                    issueText = "Repeated word '" & currWord & "' detected"
                 End If
 
-                suggestion = "Remove the duplicate '" & cleanWords(i) & "'"
+                suggestion = "Remove the duplicate '" & currWord & "'"
 
-                ' -- Calculate character position from cumulative word offset -
-                ' wordStartPos tracks the 1-based position of word i in paraText,
-                ' computed by summing lengths of all preceding words + spaces.
-                rangeStart = paraRange.Start + wordStartPos - 1 - rwListPrefixLen
-                rangeEnd = rangeStart + Len(words(i))
+                ' tokStart is 1-based in paraText; convert to document position
+                rangeStart = paraRange.Start + (tokStart - 1) - rwListPrefixLen
+                rangeEnd = rangeStart + (tokEnd - tokStart)
 
-                ' -- Build location string -------------
                 Err.Clear
                 Dim matchRange As Range
                 Set matchRange = doc.Range(rangeStart, rangeEnd)
@@ -140,16 +152,15 @@ Public Function Check_RepeatedWords(doc As Document) As Collection
                     End If
                 End If
 
-                ' -- Create the finding ------------------
                 Set finding = CreateIssueDict(RULE_NAME_REPEATED, locStr, issueText, suggestion, rangeStart, rangeEnd, severity)
                 issues.Add finding
             End If
 
             prevWord = currWord
-            wordStartPos = wordStartPos + Len(words(i)) + 1
-
-NextWordInPara:
-        Next i
+            prevTokenStart = tokStart
+            prevTokenEnd = tokEnd
+NextScanPos_RW:
+        Loop
 
 NextParagraph_RW:
     Next para

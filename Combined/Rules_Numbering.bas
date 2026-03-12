@@ -710,93 +710,141 @@ Public Function Check_ClauseNumberFormat(doc As Document) As Collection
 NextClausePara:
     Next para
 
-    ' -- Group by level category and detect mixed formats ----
-    ' Level categories: L1, L2, L3, L4
-    Dim levelGroups As Object  ' "L1" -> Dictionary(format -> count)
-    Set levelGroups = CreateObject("Scripting.Dictionary")
-    Dim fk As Variant
-    For Each fk In formatCounts.keys
-        Dim levelCat As String
-        If Left$(CStr(fk), 2) = "L1" Then
-            levelCat = "L1"
-        ElseIf Left$(CStr(fk), 2) = "L2" Then
-            levelCat = "L2"
-        ElseIf Left$(CStr(fk), 2) = "L3" Then
-            levelCat = "L3"
-        ElseIf Left$(CStr(fk), 2) = "L4" Then
-            levelCat = "L4"
-        Else
-            levelCat = "other"
-        End If
+    ' -- Group into contiguous runs for local-context comparison --
+    ' A new run starts when paragraph gap > MAX_CLAUSE_GAP.
+    ' Within each run, compare formats per level category.
+    Const MAX_CLAUSE_GAP As Long = 40
+    If clauseInfos.Count < 2 Then GoTo ClauseFormatDone
 
-        If Not levelGroups.Exists(levelCat) Then
-            levelGroups.Add levelCat, CreateObject("Scripting.Dictionary")
-        End If
-        Dim lgDict As Object
-        Set lgDict = levelGroups(levelCat)
-        lgDict.Add CStr(fk), formatCounts(fk)
-    Next fk
+    ' Build arrays for grouping
+    Dim ciTotal As Long
+    ciTotal = clauseInfos.Count
+    Dim ciFmts() As String, ciIdxs() As Long
+    Dim ciStarts() As Long, ciEnds() As Long
+    Dim ciPrefixes() As String
+    ReDim ciFmts(0 To ciTotal - 1)
+    ReDim ciIdxs(0 To ciTotal - 1)
+    ReDim ciStarts(0 To ciTotal - 1)
+    ReDim ciEnds(0 To ciTotal - 1)
+    ReDim ciPrefixes(0 To ciTotal - 1)
 
-    ' -- Find dominant format per level and flag deviations --
-    Dim dominantFormats As Object  ' levelCat -> dominant format string
-    Set dominantFormats = CreateObject("Scripting.Dictionary")
-    Dim lgKey As Variant
-    For Each lgKey In levelGroups.keys
-        Set lgDict = levelGroups(lgKey)
-        If lgDict.Count > 1 Then
-            ' Mixed formats at this level -- find dominant
-            Dim domFmt As String
-            Dim maxCnt As Long
-            domFmt = ""
-            maxCnt = 0
-            For Each fk In lgDict.keys
-                If lgDict(fk) > maxCnt Then
-                    maxCnt = lgDict(fk)
-                    domFmt = CStr(fk)
-                End If
-            Next fk
-            dominantFormats.Add CStr(lgKey), domFmt
-        End If
-    Next lgKey
+    Dim ci As Long
+    For ci = 1 To ciTotal
+        Dim clauseArr As Variant
+        clauseArr = clauseInfos(ci)
+        Dim clauseData As Variant
+        clauseData = clauseArr(1)
+        ciFmts(ci - 1) = CStr(clauseArr(0))
+        ciIdxs(ci - 1) = CLng(clauseData(0))
+        ciStarts(ci - 1) = CLng(clauseData(2))
+        ciEnds(ci - 1) = CLng(clauseData(3))
+        ciPrefixes(ci - 1) = CStr(clauseData(1))
+    Next ci
 
-    ' -- Flag individual clauses that deviate ----------------
-    If dominantFormats.Count > 0 Then
-        Dim ci As Long
-        For ci = 1 To clauseInfos.Count
-            Dim clauseArr As Variant
-            clauseArr = clauseInfos(ci)
-            Dim clauseFmt As String
-            clauseFmt = CStr(clauseArr(0))
-            Dim clauseData As Variant
-            clauseData = clauseArr(1)
+    ' Identify run boundaries
+    Dim runStart As Long, ri As Long
+    runStart = 0
 
-            ' Determine level category
-            If Left$(clauseFmt, 2) = "L1" Then
-                levelCat = "L1"
-            ElseIf Left$(clauseFmt, 2) = "L2" Then
-                levelCat = "L2"
-            ElseIf Left$(clauseFmt, 2) = "L3" Then
-                levelCat = "L3"
-            ElseIf Left$(clauseFmt, 2) = "L4" Then
-                levelCat = "L4"
-            Else
-                levelCat = "other"
+    For ri = 0 To ciTotal  ' one past end to close final run
+        Dim startNewRun As Boolean
+        startNewRun = (ri = ciTotal)  ' always close at end
+        If Not startNewRun And ri > 0 Then
+            If ciIdxs(ri) - ciIdxs(ri - 1) > MAX_CLAUSE_GAP Then
+                startNewRun = True
             End If
+        End If
 
-            If dominantFormats.Exists(levelCat) Then
-                If clauseFmt <> dominantFormats(levelCat) Then
-                    Dim finding As Object
-                    Dim rng As Range
-                    Set rng = doc.Range(CLng(clauseData(2)), CLng(clauseData(3)))
-                    Dim loc As String
-                    loc = EngineGetLocationString(rng, doc)
+        If startNewRun And ri > runStart Then
+            ' Process the run [runStart..ri-1]
+            Dim runEnd As Long
+            runEnd = ri - 1
+            If runEnd > runStart Then  ' need >= 2 items
+                ' Group by level category within this run
+                Dim runLevelGroups As Object
+                Set runLevelGroups = CreateObject("Scripting.Dictionary")
+                Dim rj As Long
+                For rj = runStart To runEnd
+                    Dim levelCat As String
+                    If Left$(ciFmts(rj), 2) = "L1" Then
+                        levelCat = "L1"
+                    ElseIf Left$(ciFmts(rj), 2) = "L2" Then
+                        levelCat = "L2"
+                    ElseIf Left$(ciFmts(rj), 2) = "L3" Then
+                        levelCat = "L3"
+                    ElseIf Left$(ciFmts(rj), 2) = "L4" Then
+                        levelCat = "L4"
+                    Else
+                        levelCat = "other"
+                    End If
 
-                    Set finding = CreateIssueDict(RULE_NAME_FMT, loc, "Mixed clause number format: '" & CStr(clauseData(1)) & "' uses style " & clauseFmt & " but dominant " & levelCat & " style is " & dominantFormats(levelCat), "Reformat to match the dominant clause numbering style", CLng(clauseData(2)), CLng(clauseData(3)), "error")
-                    issues.Add finding
-                End If
+                    If Not runLevelGroups.Exists(levelCat) Then
+                        runLevelGroups.Add levelCat, CreateObject("Scripting.Dictionary")
+                    End If
+                    Dim lgDict As Object
+                    Set lgDict = runLevelGroups(levelCat)
+                    If lgDict.Exists(ciFmts(rj)) Then
+                        lgDict(ciFmts(rj)) = lgDict(ciFmts(rj)) + 1
+                    Else
+                        lgDict.Add ciFmts(rj), 1
+                    End If
+                Next rj
+
+                ' Find dominant per level in this run
+                Dim lgKey As Variant
+                Dim fk As Variant
+                For Each lgKey In runLevelGroups.keys
+                    Set lgDict = runLevelGroups(lgKey)
+                    If lgDict.Count > 1 Then
+                        Dim domFmt As String
+                        Dim maxCnt As Long
+                        domFmt = ""
+                        maxCnt = 0
+                        For Each fk In lgDict.keys
+                            If lgDict(fk) > maxCnt Then
+                                maxCnt = lgDict(fk)
+                                domFmt = CStr(fk)
+                            End If
+                        Next fk
+
+                        ' Flag deviations within this run
+                        For rj = runStart To runEnd
+                            Dim rjLevelCat As String
+                            If Left$(ciFmts(rj), 2) = "L1" Then
+                                rjLevelCat = "L1"
+                            ElseIf Left$(ciFmts(rj), 2) = "L2" Then
+                                rjLevelCat = "L2"
+                            ElseIf Left$(ciFmts(rj), 2) = "L3" Then
+                                rjLevelCat = "L3"
+                            ElseIf Left$(ciFmts(rj), 2) = "L4" Then
+                                rjLevelCat = "L4"
+                            Else
+                                rjLevelCat = "other"
+                            End If
+
+                            If rjLevelCat = CStr(lgKey) And ciFmts(rj) <> domFmt Then
+                                Dim finding As Object
+                                Dim rng As Range
+                                Set rng = doc.Range(ciStarts(rj), ciEnds(rj))
+                                Dim loc As String
+                                loc = EngineGetLocationString(rng, doc)
+                                If Err.Number <> 0 Then loc = "unknown location": Err.Clear
+
+                                Set finding = CreateIssueDict(RULE_NAME_FMT, loc, _
+                                    "Mixed clause number format: '" & ciPrefixes(rj) & _
+                                    "' uses style " & ciFmts(rj) & " but dominant " & _
+                                    CStr(lgKey) & " style in this section is " & domFmt, _
+                                    "Reformat to match the dominant clause numbering style", _
+                                    ciStarts(rj), ciEnds(rj), "error")
+                                issues.Add finding
+                            End If
+                        Next rj
+                    End If
+                Next lgKey
             End If
-        Next ci
-    End If
+            runStart = ri
+        End If
+    Next ri
+ClauseFormatDone:
 
     On Error GoTo 0
     Set Check_ClauseNumberFormat = issues

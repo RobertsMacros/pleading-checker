@@ -1170,8 +1170,12 @@ Public Sub ApplyHighlights(doc As Document, _
             On Error Resume Next: Err.Clear
             Set rng = doc.Range(GetIssueProp(finding, "RangeStart"), GetIssueProp(finding, "RangeEnd"))
             If Err.Number = 0 Then
+                ' Apply yellow highlight to the flagged range
+                rng.HighlightColorIndex = wdYellow
+                If Err.Number <> 0 Then Err.Clear
                 If addComments Then
                     doc.Comments.Add Range:=rng, Text:=BuildCommentText(finding)
+                    If Err.Number <> 0 Then Err.Clear
                 End If
             End If
             On Error GoTo 0
@@ -1219,7 +1223,10 @@ Public Sub ApplySuggestionsAsTrackedChanges(doc As Document, _
                     Dim sugText As String
                     origStart = rng.Start
                     origLen = rng.End - rng.Start
-                    sugText = GetIssueProp(finding, "Suggestion")
+                    ' Prefer ReplacementText (literal replacement) over Suggestion (human-readable)
+                    sugText = ""
+                    sugText = CStr(GetIssueProp(finding, "ReplacementText"))
+                    If Len(sugText) = 0 Then sugText = GetIssueProp(finding, "Suggestion")
 
                     ' --- WHITESPACE VALIDATION GATE ---
                     ' Before amending any tracked deletion, verify the
@@ -1349,16 +1356,40 @@ End Function
 '  GENERATE JSON REPORT
 ' ============================================================
 Public Function GenerateReport(issues As Collection, _
-                                filePath As String) As String
+                                filePath As String, _
+                                Optional doc As Document = Nothing) As String
     Dim fileNum As Integer
     Dim finding As Object
     Dim i As Long
 
+    ' Resolve document name: prefer explicit doc, fall back to ActiveDocument
+    Dim docName As String
+    On Error Resume Next
+    If Not doc Is Nothing Then
+        docName = doc.Name
+    Else
+        docName = ActiveDocument.Name
+    End If
+    If Err.Number <> 0 Then docName = "(unknown)": Err.Clear
+    On Error GoTo 0
+
+    ' Open file with error handling
     fileNum = FreeFile
+    On Error Resume Next
     Open filePath For Output As #fileNum
+    If Err.Number <> 0 Then
+        GenerateReport = "Error: could not write to " & filePath & _
+                         " (Err " & Err.Number & ": " & Err.Description & ")"
+        Err.Clear
+        On Error GoTo 0
+        Exit Function
+    End If
+    On Error GoTo 0
+
+    On Error GoTo ReportWriteErr
 
     Print #fileNum, "{"
-    Print #fileNum, "  ""document"": """ & EscJSON(ActiveDocument.Name) & ""","
+    Print #fileNum, "  ""document"": """ & EscJSON(docName) & ""","
     Print #fileNum, "  ""timestamp"": """ & Format(Now, "yyyy-mm-ddThh:nn:ss") & ""","
     Print #fileNum, "  ""total_issues"": " & issues.Count & ","
 
@@ -1406,6 +1437,13 @@ Public Function GenerateReport(issues As Collection, _
     summaryStr = "Report saved: " & filePath & vbCrLf
     summaryStr = summaryStr & "Total issues: " & issues.Count
     GenerateReport = summaryStr
+    Exit Function
+
+ReportWriteErr:
+    On Error Resume Next
+    Close #fileNum
+    On Error GoTo 0
+    GenerateReport = "Error writing report: Err " & Err.Number & ": " & Err.Description
 End Function
 
 ' ============================================================
@@ -1670,7 +1708,8 @@ Public Function CreateIssue(ByVal ruleName_ As String, _
                             ByVal rangeStart_ As Long, _
                             ByVal rangeEnd_ As Long, _
                             Optional ByVal severity_ As String = "error", _
-                            Optional ByVal autoFixSafe_ As Boolean = False) As Object
+                            Optional ByVal autoFixSafe_ As Boolean = False, _
+                            Optional ByVal replacementText_ As String = "") As Object
     Dim d As Object
     Set d = CreateObject("Scripting.Dictionary")
     d("RuleName") = ruleName_
@@ -1681,6 +1720,7 @@ Public Function CreateIssue(ByVal ruleName_ As String, _
     d("RangeEnd") = rangeEnd_
     d("Severity") = severity_
     d("AutoFixSafe") = autoFixSafe_
+    d("ReplacementText") = replacementText_
     Set CreateIssue = d
 End Function
 
@@ -1715,6 +1755,11 @@ Private Function IssueToJSON(finding As Object) As String
     s = s & "      ""severity"": """ & EscJSON(CStr(GetIssueProp(finding, "Severity"))) & """," & vbCrLf
     s = s & "      ""finding"": """ & EscJSON(CStr(GetIssueProp(finding, "Issue"))) & """," & vbCrLf
     s = s & "      ""suggestion"": """ & EscJSON(CStr(GetIssueProp(finding, "Suggestion"))) & """," & vbCrLf
+    Dim repText As String
+    repText = CStr(GetIssueProp(finding, "ReplacementText"))
+    If Len(repText) > 0 Then
+        s = s & "      ""replacement_text"": """ & EscJSON(repText) & """," & vbCrLf
+    End If
     s = s & "      ""auto_fix_safe"": " & IIf(CBool(GetIssueProp(finding, "AutoFixSafe")), "true", "false") & vbCrLf
     s = s & "    }"
     IssueToJSON = s

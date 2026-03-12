@@ -336,9 +336,9 @@ Private Function IsConventionalTightSlash(rng As Range, doc As Document) As Bool
 
     ' Expand range to capture surrounding word context
     Dim ctxStart As Long, ctxEnd As Long
-    ctxStart = rng.Start - 8
+    ctxStart = rng.Start - 12
     If ctxStart < 0 Then ctxStart = 0
-    ctxEnd = rng.End + 8
+    ctxEnd = rng.End + 12
     If ctxEnd > doc.Content.End Then ctxEnd = doc.Content.End
 
     Dim ctxRng As Range
@@ -353,7 +353,9 @@ Private Function IsConventionalTightSlash(rng As Range, doc As Document) As Bool
     ' Known conventionally-tight slash pairs
     Dim tightPairs As Variant
     tightPairs = Array("and/or", "either/or", "his/her", "he/she", _
-                       "s/he", "w/o", "n/a", "c/o", "a/c", "y/n", "yes/no")
+                       "s/he", "w/o", "n/a", "c/o", "a/c", "y/n", "yes/no", _
+                       "input/output", "read/write", "true/false", "on/off", _
+                       "open/close", "start/end", "pass/fail", "client/server")
     Dim tp As Variant
     For Each tp In tightPairs
         If InStr(1, ctxText, CStr(tp), vbTextCompare) > 0 Then
@@ -361,6 +363,41 @@ Private Function IsConventionalTightSlash(rng As Range, doc As Document) As Bool
             Exit Function
         End If
     Next tp
+
+    ' General word/word alternative detection:
+    ' If the match text is letter(s)/letter(s) and both sides are short
+    ' English words (2-12 chars), treat as a functional alternative pair.
+    Dim matchText As String
+    matchText = LCase$(rng.Text)
+    Dim slashPos As Long
+    slashPos = InStr(1, matchText, "/")
+    If slashPos > 1 And slashPos < Len(matchText) Then
+        Dim lWord As String, rWord As String
+        lWord = Left$(matchText, slashPos - 1)
+        rWord = Mid$(matchText, slashPos + 1)
+        ' Both sides are purely alphabetic and short
+        If Len(lWord) >= 2 And Len(lWord) <= 12 And _
+           Len(rWord) >= 2 And Len(rWord) <= 12 Then
+            If IsAlphaOnly(lWord) And IsAlphaOnly(rWord) Then
+                IsConventionalTightSlash = True
+                Exit Function
+            End If
+        End If
+    End If
+End Function
+
+' Helper: check if a string is purely alphabetic (a-z)
+Private Function IsAlphaOnly(ByVal s As String) As Boolean
+    Dim ci As Long
+    For ci = 1 To Len(s)
+        Dim cc As String
+        cc = Mid$(s, ci, 1)
+        If Not ((cc >= "a" And cc <= "z") Or (cc >= "A" And cc <= "Z")) Then
+            IsAlphaOnly = False
+            Exit Function
+        End If
+    Next ci
+    IsAlphaOnly = True
 End Function
 
 ' ============================================================

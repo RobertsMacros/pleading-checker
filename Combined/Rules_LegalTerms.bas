@@ -335,9 +335,37 @@ Private Function IsInsideQuote(paraText As String, matchPos As Long) As Boolean
             Case 8221  ' right double smart quote
                 If openCount > 0 Then openCount = openCount - 1
             Case 8216  ' left single smart quote
-                openCount = openCount + 1
+                ' Skip if flanked by letters (apostrophe in smart-quote mode)
+                If i > 1 And i < Len(paraText) Then
+                    Dim ls16Prev As String, ls16Next As String
+                    ls16Prev = Mid(paraText, i - 1, 1)
+                    ls16Next = Mid(paraText, i + 1, 1)
+                    Dim ls16PrevA As Boolean, ls16NextA As Boolean
+                    ls16PrevA = IsWordChar(ls16Prev) And ls16Prev <> "-" And ls16Prev <> "_"
+                    ls16NextA = IsWordChar(ls16Next) And ls16Next <> "-" And ls16Next <> "_"
+                    If Not (ls16PrevA And ls16NextA) Then
+                        openCount = openCount + 1
+                    End If
+                Else
+                    openCount = openCount + 1
+                End If
             Case 8217  ' right single smart quote
-                If openCount > 0 Then openCount = openCount - 1
+                ' Skip if flanked by letters (apostrophe: it's, don't)
+                If i > 1 And i < Len(paraText) Then
+                    Dim rs17Prev As String, rs17Next As String
+                    rs17Prev = Mid(paraText, i - 1, 1)
+                    rs17Next = Mid(paraText, i + 1, 1)
+                    Dim rs17PrevA As Boolean, rs17NextA As Boolean
+                    rs17PrevA = IsWordChar(rs17Prev) And rs17Prev <> "-" And rs17Prev <> "_"
+                    rs17NextA = IsWordChar(rs17Next) And rs17Next <> "-" And rs17Next <> "_"
+                    If rs17PrevA And rs17NextA Then
+                        ' Apostrophe - skip
+                    ElseIf openCount > 0 Then
+                        openCount = openCount - 1
+                    End If
+                ElseIf openCount > 0 Then
+                    openCount = openCount - 1
+                End If
             Case 34    ' straight double quote -- toggle
                 If openCount > 0 Then
                     openCount = openCount - 1
@@ -345,13 +373,30 @@ Private Function IsInsideQuote(paraText As String, matchPos As Long) As Boolean
                     openCount = openCount + 1
                 End If
             Case 39    ' straight single quote / apostrophe
-                ' Only treat as quote if preceded by whitespace or at start
-                If i = 1 Then
-                    openCount = openCount + 1
-                Else
-                    Dim prevCh As String
+                ' Distinguish apostrophe from quote delimiter:
+                ' If flanked by letters/digits on both sides, it's an apostrophe -> skip.
+                ' Otherwise use whitespace heuristic for open/close.
+                Dim prevCh As String
+                Dim nextCh As String
+                Dim prevIsAlpha As Boolean, nextIsAlpha As Boolean
+                prevIsAlpha = False
+                nextIsAlpha = False
+                If i > 1 Then
                     prevCh = Mid(paraText, i - 1, 1)
-                    If prevCh = " " Or prevCh = vbTab Or AscW(prevCh) = 10 Or AscW(prevCh) = 13 Then
+                    prevIsAlpha = IsWordChar(prevCh) And prevCh <> "-" And prevCh <> "_"
+                End If
+                If i < Len(paraText) Then
+                    nextCh = Mid(paraText, i + 1, 1)
+                    nextIsAlpha = IsWordChar(nextCh) And nextCh <> "-" And nextCh <> "_"
+                End If
+                ' Letter/digit on both sides = apostrophe (it's, don't, 90's)
+                If prevIsAlpha And nextIsAlpha Then
+                    ' Skip: this is an apostrophe, not a quote
+                Else
+                    If i = 1 Then
+                        openCount = openCount + 1
+                    ElseIf Not prevIsAlpha Then
+                        ' Preceded by space/punct = opening quote
                         openCount = openCount + 1
                     ElseIf openCount > 0 Then
                         openCount = openCount - 1

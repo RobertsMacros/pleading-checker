@@ -173,7 +173,11 @@ Private Sub ManageBrands()
 
         Case "LOAD"
             Dim loadPath As String
-            loadPath = Environ("APPDATA") & "\PleadingsChecker\brand_rules.txt"
+            #If Mac Then
+                loadPath = Environ("HOME") & "/Library/Application Support/PleadingsChecker/brand_rules.txt"
+            #Else
+                loadPath = Environ("APPDATA") & "\PleadingsChecker\brand_rules.txt"
+            #End If
             On Error Resume Next
             Application.Run "Rules_Brands.LoadBrandRules", loadPath
             If Err.Number <> 0 Then
@@ -187,9 +191,15 @@ Private Sub ManageBrands()
 
         Case "SAVE"
             Dim savePath As String
-            savePath = Environ("APPDATA") & "\PleadingsChecker\brand_rules.txt"
-            On Error Resume Next
-            MkDir Environ("APPDATA") & "\PleadingsChecker"
+            #If Mac Then
+                savePath = Environ("HOME") & "/Library/Application Support/PleadingsChecker/brand_rules.txt"
+                On Error Resume Next
+                MkDir Environ("HOME") & "/Library/Application Support/PleadingsChecker"
+            #Else
+                savePath = Environ("APPDATA") & "\PleadingsChecker\brand_rules.txt"
+                On Error Resume Next
+                MkDir Environ("APPDATA") & "\PleadingsChecker"
+            #End If
             Err.Clear
             Application.Run "Rules_Brands.SaveBrandRules", savePath
             If Err.Number <> 0 Then
@@ -211,46 +221,92 @@ End Sub
 ' ============================================================
 Private Sub ExportReport(issues As Collection)
     Dim reportPath As String
+    Dim sep As String
+    sep = Application.PathSeparator
+
     If ActiveDocument.Path <> "" Then
-        reportPath = ActiveDocument.Path & "\" & _
-                     Replace(ActiveDocument.Name, ".docx", "") & _
-                     "_pleadings_report.json"
+        ' Strip any extension from the document name
+        Dim baseName As String
+        baseName = ActiveDocument.Name
+        Dim dotPos As Long
+        dotPos = InStrRev(baseName, ".")
+        If dotPos > 1 Then baseName = Left$(baseName, dotPos - 1)
+        reportPath = ActiveDocument.Path & sep & baseName & "_pleadings_report.json"
     Else
-        reportPath = Environ("TEMP") & "\pleadings_report.json"
+        ' No saved path: use temp directory (cross-platform)
+        #If Mac Then
+            reportPath = Environ("TMPDIR")
+            If Len(reportPath) = 0 Then reportPath = "/tmp"
+            reportPath = reportPath & sep & "pleadings_report.json"
+        #Else
+            reportPath = Environ("TEMP") & sep & "pleadings_report.json"
+        #End If
     End If
 
     Dim summary As String
-    summary = Application.Run("PleadingsEngine.GenerateReport", issues, reportPath)
+    summary = Application.Run("PleadingsEngine.GenerateReport", issues, reportPath, ActiveDocument)
 
     MsgBox "Report saved to:" & vbCrLf & reportPath, _
            vbInformation, "Pleadings Checker"
 End Sub
 
 ' ============================================================
-'  PARSE PAGE RANGE INPUT (e.g. "1-10" or "5")
+'  PARSE PAGE RANGE INPUT
+'  Supports: "5", "1-10", "1:10", "1" & ChrW(8211) & "10",
+'  "1-3, 7-9", "1-3, 5, 8-12" (comma-separated segments).
+'  Sets the overall min-max envelope.
 ' ============================================================
 Private Sub ParsePageRange(ByVal pageInput As String)
-    Dim parts() As String
-    Dim startPg As Long
-    Dim endPg As Long
-
     pageInput = Trim(pageInput)
-    If InStr(1, pageInput, "-") > 0 Then
-        parts = Split(pageInput, "-")
-        If UBound(parts) >= 1 Then
-            If IsNumeric(Trim(parts(0))) And IsNumeric(Trim(parts(1))) Then
-                startPg = CLng(Trim(parts(0)))
-                endPg = CLng(Trim(parts(1)))
-                Application.Run "PleadingsEngine.SetPageRange", startPg, endPg
-                Exit Sub
-            End If
-        End If
-    ElseIf IsNumeric(pageInput) Then
-        startPg = CLng(pageInput)
-        Application.Run "PleadingsEngine.SetPageRange", startPg, startPg
+    If Len(pageInput) = 0 Then
+        Application.Run "PleadingsEngine.SetPageRange", 0, 0
         Exit Sub
     End If
 
-    ' Invalid input -- use all pages
-    Application.Run "PleadingsEngine.SetPageRange", 0, 0
+    ' Normalise separators: en-dash and colon to hyphen
+    pageInput = Replace(pageInput, ChrW(8211), "-")  ' en-dash
+    pageInput = Replace(pageInput, ":", "-")
+
+    ' Split on comma for multi-segment support
+    Dim segments() As String
+    segments = Split(pageInput, ",")
+
+    Dim globalMin As Long, globalMax As Long
+    globalMin = 2147483647  ' Long max
+    globalMax = 0
+
+    Dim s As Long
+    For s = 0 To UBound(segments)
+        Dim seg As String
+        seg = Trim(segments(s))
+        If Len(seg) = 0 Then GoTo NextSeg
+
+        Dim dashPos As Long
+        dashPos = InStr(1, seg, "-")
+        If dashPos > 1 Then
+            Dim lPart As String, rPart As String
+            lPart = Trim(Left$(seg, dashPos - 1))
+            rPart = Trim(Mid$(seg, dashPos + 1))
+            If IsNumeric(lPart) And IsNumeric(rPart) Then
+                Dim lo As Long, hi As Long
+                lo = CLng(lPart)
+                hi = CLng(rPart)
+                If lo < globalMin Then globalMin = lo
+                If hi > globalMax Then globalMax = hi
+            End If
+        ElseIf IsNumeric(seg) Then
+            Dim pg As Long
+            pg = CLng(seg)
+            If pg < globalMin Then globalMin = pg
+            If pg > globalMax Then globalMax = pg
+        End If
+NextSeg:
+    Next s
+
+    If globalMax > 0 And globalMin <= globalMax Then
+        Application.Run "PleadingsEngine.SetPageRange", globalMin, globalMax
+    Else
+        ' Invalid input -- use all pages
+        Application.Run "PleadingsEngine.SetPageRange", 0, 0
+    End If
 End Sub
