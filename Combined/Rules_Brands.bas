@@ -163,8 +163,9 @@ End Function
 '  PUBLIC: Save brand rules to a text file
 '  Format: one line per rule -- "CorrectForm=brandVariant1,brandVariant2"
 ' ============================================================
-Public Sub SaveBrandRules(filePath As String)
-    If brandRules Is Nothing Then Exit Sub
+Public Function SaveBrandRules(filePath As String) As Boolean
+    SaveBrandRules = False
+    If brandRules Is Nothing Then Exit Function
 
     Dim fileNum As Integer
     Dim keys As Variant
@@ -180,21 +181,23 @@ Public Sub SaveBrandRules(filePath As String)
     Next k
 
     Close #fileNum
-    Exit Sub
+    SaveBrandRules = True
+    Exit Function
 
 SaveError:
     On Error Resume Next
     Close #fileNum
     Debug.Print "Rules_Brands.SaveBrandRules: Err " & Err.Number & ": " & Err.Description
     On Error GoTo 0
-End Sub
+End Function
 
 ' ============================================================
 '  PUBLIC: Load brand rules from a text file
 '  Replaces existing rules with contents of the file.
 '  Format: one line per rule -- "CorrectForm=brandVariant1,brandVariant2"
 ' ============================================================
-Public Sub LoadBrandRules(filePath As String)
+Public Function LoadBrandRules(filePath As String) As Boolean
+    LoadBrandRules = False
     Dim fileNum As Integer
     Dim lineText As String
     Dim eqPos As Long
@@ -231,7 +234,8 @@ NextLine:
     Loop
 
     Close #fileNum
-    Exit Sub
+    LoadBrandRules = True
+    Exit Function
 
 LoadError:
     On Error Resume Next
@@ -239,13 +243,12 @@ LoadError:
     Debug.Print "Rules_Brands.LoadBrandRules: Err " & Err.Number & ": " & Err.Description
     On Error GoTo 0
     ' If file could not be loaded, fall back to defaults.
-    ' Guard against Nothing before accessing .Count.
     If brandRules Is Nothing Then
         InitDefaultBrands
     ElseIf brandRules.Count = 0 Then
         InitDefaultBrands
     End If
-End Sub
+End Function
 
 
 ' ----------------------------------------------------------------

@@ -32,9 +32,9 @@ Attribute VB_Name = "PleadingsEngine"
 '   1. Open the VBA Editor (Alt+F11)
 '   2. Tools > References > check "Microsoft Scripting Runtime"
 '   3. File > Import File > PleadingsEngine.bas
-'   5. File > Import File > PleadingsLauncher.bas
-'   6. Import whichever Rules_*.bas modules you need
-'   7. Run the macro "PleadingsChecker"
+'   4. File > Import File > PleadingsLauncher.bas
+'   5. Import whichever Rules_*.bas modules you need
+'   6. Run the macro "PleadingsChecker"
 ' ============================================================
 Option Explicit
 
@@ -529,13 +529,13 @@ Public Function RunAllPleadingsRules(doc As Document, _
     ' -- Initialise profiling --
     ResetProfiling
 
-    ' -- Build paragraph position cache (one scan, enables O(log N) lookups) --
-    BuildParagraphCache doc
-
     ' -- Suppress screen redraws for performance ----
     Application.ScreenUpdating = False
 
     On Error GoTo RunnerCleanup
+
+    ' -- Build paragraph position cache (one scan, enables O(log N) lookups) --
+    BuildParagraphCache doc
 
     ' -- Whitelist rule first (populates whitelistDict) --
     If IsRuleEnabled(config, "custom_term_whitelist") Then
@@ -647,8 +647,6 @@ Public Function RunAllPleadingsRules(doc As Document, _
             TryRunRule("Rules_Terms.Check_DefinedTerms", doc)
         PerfTimerEnd "defined_terms"
     End If
-
-    ' phrase_consistency removed (false positives on words with different meanings)
 
     DoEvents
     ' -- Formatting consistency (combined: paragraph breaks, font, colour) --
@@ -1373,6 +1371,10 @@ Public Sub ApplySuggestionsAsTrackedChanges(doc As Document, _
                               " orig=""" & Left$(origText, 30) & """ -> """ & Left$(sugText, 30) & """"
                     doc.TrackRevisions = True
                     rng.Text = sugText
+                    If Err.Number <> 0 Then
+                        DebugLogError "ApplyTrackedChanges", "rng.Text= i=" & i, Err.Number, Err.Description
+                        Err.Clear
+                    End If
                     doc.TrackRevisions = wasTrackingChanges
                     ' No comment for auto-fixed items: the tracked change
                     ' itself is self-explanatory.
@@ -1593,6 +1595,40 @@ Public Function GetRuleDisplayNames() As Object
 
     Set GetRuleDisplayNames = d
 End Function
+
+' ============================================================
+'  CONFIG DRIFT VALIDATION (development helper)
+'  Call from Immediate window: PleadingsEngine.ValidateConfigDrift
+'  Prints any keys present in config but missing from display
+'  names, or vice versa.
+' ============================================================
+Public Sub ValidateConfigDrift()
+    Dim cfg As Object
+    Set cfg = InitRuleConfig()
+    Dim disp As Object
+    Set disp = GetRuleDisplayNames()
+    Dim k As Variant
+    Dim driftFound As Boolean
+    driftFound = False
+
+    For Each k In cfg.keys
+        If Not disp.Exists(CStr(k)) Then
+            Debug.Print "DRIFT: config key '" & k & "' has no display name"
+            driftFound = True
+        End If
+    Next k
+
+    For Each k In disp.keys
+        If Not cfg.Exists(CStr(k)) Then
+            Debug.Print "DRIFT: display name '" & k & "' has no config key"
+            driftFound = True
+        End If
+    Next k
+
+    If Not driftFound Then
+        Debug.Print "ValidateConfigDrift: OK -- config and display names are in sync"
+    End If
+End Sub
 
 ' ============================================================
 '  HELPERS: PAGE RANGE

@@ -76,8 +76,11 @@ Private Sub RunChecks()
 
     If issues.Count = 0 Then
         If errCount > 0 Then
-            MsgBox "No issues found, but " & errCount & " rule(s) failed to run." & vbCrLf & vbCrLf & _
-                   "Check Immediate window (Ctrl+G) for details.", _
+            Dim errLog As String
+            errLog = Application.Run("PleadingsEngine.GetRuleErrorLog")
+            MsgBox "No issues found, but " & errCount & " rule(s) failed to run:" & vbCrLf & vbCrLf & _
+                   errLog & vbCrLf & _
+                   "Check Immediate window (Ctrl+G) or export a report for the debug log.", _
                    vbExclamation, "Pleadings Checker"
         Else
             MsgBox "No issues found -- document looks clean.", _
@@ -86,8 +89,13 @@ Private Sub RunChecks()
         Exit Sub
     End If
 
+    Dim errInfo As String
+    If errCount > 0 Then
+        errInfo = vbCrLf & errCount & " rule(s) failed to run."
+    End If
+
     Dim applyChoice As Long
-    applyChoice = MsgBox(issues.Count & " issue(s) found." & vbCrLf & vbCrLf & _
+    applyChoice = MsgBox(issues.Count & " issue(s) found." & errInfo & vbCrLf & vbCrLf & _
                          "Apply to document?" & vbCrLf & _
                          "Yes = Apply as tracked changes" & vbCrLf & _
                          "No = Highlight + comments only" & vbCrLf & _
@@ -169,41 +177,51 @@ Private Sub ManageBrands()
 
         Case "LOAD"
             Dim loadPath As String
-            #If Mac Then
-                loadPath = Environ("HOME") & "/Library/Application Support/PleadingsChecker/brand_rules.txt"
-            #Else
-                loadPath = Environ("APPDATA") & "\PleadingsChecker\brand_rules.txt"
-            #End If
+            loadPath = GetBrandRulesPath()
             On Error Resume Next
-            Application.Run "Rules_Brands.LoadBrandRules", loadPath
+            Dim loadOK As Boolean
+            loadOK = Application.Run("Rules_Brands.LoadBrandRules", loadPath)
             If Err.Number <> 0 Then
-                MsgBox "Rules_Brands module not imported or file not found.", _
-                       vbExclamation, "Pleadings Checker"
+                MsgBox "Rules_Brands module not imported or file not found." & vbCrLf & _
+                       "Error: " & Err.Description, vbExclamation, "Pleadings Checker"
                 Err.Clear
-            Else
+            ElseIf loadOK Then
                 MsgBox "Brand rules loaded.", vbInformation, "Pleadings Checker"
+            Else
+                MsgBox "Brand rules file could not be read:" & vbCrLf & loadPath, _
+                       vbExclamation, "Pleadings Checker"
             End If
             On Error GoTo 0
 
         Case "SAVE"
             Dim savePath As String
-            #If Mac Then
-                savePath = Environ("HOME") & "/Library/Application Support/PleadingsChecker/brand_rules.txt"
+            savePath = GetBrandRulesPath()
+            ' Ensure directory exists
+            Dim brandDir As String
+            Dim sep2 As String
+            sep2 = Application.PathSeparator
+            Dim lastSep As Long
+            lastSep = InStrRev(savePath, sep2)
+            If lastSep > 0 Then
+                brandDir = Left$(savePath, lastSep - 1)
                 On Error Resume Next
-                MkDir Environ("HOME") & "/Library/Application Support/PleadingsChecker"
-            #Else
-                savePath = Environ("APPDATA") & "\PleadingsChecker\brand_rules.txt"
-                On Error Resume Next
-                MkDir Environ("APPDATA") & "\PleadingsChecker"
-            #End If
-            Err.Clear
-            Application.Run "Rules_Brands.SaveBrandRules", savePath
-            If Err.Number <> 0 Then
-                MsgBox "Rules_Brands module not imported.", vbExclamation, "Pleadings Checker"
+                MkDir brandDir
                 Err.Clear
-            Else
+                On Error GoTo 0
+            End If
+            On Error Resume Next
+            Dim saveOK As Boolean
+            saveOK = Application.Run("Rules_Brands.SaveBrandRules", savePath)
+            If Err.Number <> 0 Then
+                MsgBox "Rules_Brands module not imported." & vbCrLf & _
+                       "Error: " & Err.Description, vbExclamation, "Pleadings Checker"
+                Err.Clear
+            ElseIf saveOK Then
                 MsgBox "Brand rules saved to:" & vbCrLf & savePath, _
                        vbInformation, "Pleadings Checker"
+            Else
+                MsgBox "Failed to save brand rules to:" & vbCrLf & savePath, _
+                       vbExclamation, "Pleadings Checker"
             End If
             On Error GoTo 0
 
@@ -220,29 +238,72 @@ Private Sub ExportReport(issues As Collection)
     Dim sep As String
     sep = Application.PathSeparator
 
+    On Error Resume Next
     If ActiveDocument.Path <> "" Then
-        ' Strip any extension from the document name
         Dim baseName As String
         baseName = ActiveDocument.Name
         Dim dotPos As Long
         dotPos = InStrRev(baseName, ".")
         If dotPos > 1 Then baseName = Left$(baseName, dotPos - 1)
         reportPath = ActiveDocument.Path & sep & baseName & "_pleadings_report.json"
-    Else
-        ' No saved path: use temp directory (cross-platform)
+    End If
+    If Err.Number <> 0 Or Len(reportPath) = 0 Then
+        Err.Clear
+        reportPath = ""
+    End If
+    On Error GoTo 0
+
+    If Len(reportPath) = 0 Then
+        Dim tmpDir As String
         #If Mac Then
-            reportPath = Environ("TMPDIR")
-            If Len(reportPath) = 0 Then reportPath = "/tmp"
-            reportPath = reportPath & sep & "pleadings_report.json"
+            tmpDir = Environ("TMPDIR")
+            If Len(tmpDir) = 0 Then tmpDir = "/tmp"
+            If Right$(tmpDir, 1) = sep Then tmpDir = Left$(tmpDir, Len(tmpDir) - 1)
         #Else
-            reportPath = Environ("TEMP") & sep & "pleadings_report.json"
+            tmpDir = Environ("TEMP")
+            If Len(tmpDir) = 0 Then tmpDir = Environ("TMP")
+            If Len(tmpDir) = 0 Then tmpDir = "C:\Temp"
+            If Right$(tmpDir, 1) = sep Then tmpDir = Left$(tmpDir, Len(tmpDir) - 1)
         #End If
+        reportPath = tmpDir & sep & "pleadings_report.json"
     End If
 
     Dim summary As String
     summary = Application.Run("PleadingsEngine.GenerateReport", issues, reportPath, ActiveDocument)
 
-    MsgBox "Report saved to:" & vbCrLf & reportPath, _
-           vbInformation, "Pleadings Checker"
+    ' Auto-save debug log alongside report when DEBUG_MODE is True
+    Dim logPath As String
+    Dim logSaved As Boolean
+    logSaved = False
+    logPath = ""
+
+    On Error Resume Next
+    If modDebugLog.DEBUG_MODE Then
+        logPath = Left$(reportPath, Len(reportPath) - 5) & "_debug.log"
+        logSaved = modDebugLog.DebugLogSaveToTextFile(logPath)
+    End If
+    On Error GoTo 0
+
+    Dim msg As String
+    msg = "Report saved to:" & vbCrLf & reportPath
+    If logSaved And Len(logPath) > 0 Then
+        msg = msg & vbCrLf & vbCrLf & "Debug log saved to:" & vbCrLf & logPath
+    End If
+
+    MsgBox msg, vbInformation, "Pleadings Checker"
 End Sub
+
+' ============================================================
+'  PRIVATE: Cross-platform brand rules file path
+' ============================================================
+Private Function GetBrandRulesPath() As String
+    Dim sep As String
+    sep = Application.PathSeparator
+    #If Mac Then
+        GetBrandRulesPath = Environ("HOME") & sep & "Library" & sep & _
+                            "Application Support" & sep & "PleadingsChecker" & sep & "brand_rules.txt"
+    #Else
+        GetBrandRulesPath = Environ("APPDATA") & sep & "PleadingsChecker" & sep & "brand_rules.txt"
+    #End If
+End Function
 

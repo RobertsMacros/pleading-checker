@@ -397,6 +397,10 @@ NextPara:
 NextLevel:
     Next lvlKey
 
+    If Err.Number <> 0 Then
+        Debug.Print "Check_ParagraphBreakConsistency: exiting with Err " & Err.Number & ": " & Err.Description
+        Err.Clear
+    End If
     On Error GoTo 0
     Set Check_ParagraphBreakConsistency = issues
 End Function
@@ -851,6 +855,10 @@ NextFN2:
         Next fn
     End If
 
+    If Err.Number <> 0 Then
+        Debug.Print "Check_FontConsistency: exiting with Err " & Err.Number & ": " & Err.Description
+        Err.Clear
+    End If
     On Error GoTo 0
     Set Check_FontConsistency = issues
 End Function
