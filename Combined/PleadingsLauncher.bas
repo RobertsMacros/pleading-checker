@@ -286,8 +286,20 @@ Private Sub ExportReport(issues As Collection)
 
     Dim msg As String
     msg = "Report saved to:" & vbCrLf & reportPath
+
     If logSaved And Len(logPath) > 0 Then
         msg = msg & vbCrLf & vbCrLf & "Debug log saved to:" & vbCrLf & logPath
+    ElseIf modDebugLog.DEBUG_MODE And Not logSaved Then
+        msg = msg & vbCrLf & vbCrLf & "Debug log could not be saved."
+    End If
+
+    Dim exportErrCount As Long
+    On Error Resume Next
+    exportErrCount = Application.Run("PleadingsEngine.GetRuleErrorCount")
+    If Err.Number <> 0 Then exportErrCount = 0: Err.Clear
+    On Error GoTo 0
+    If exportErrCount > 0 Then
+        msg = msg & vbCrLf & vbCrLf & exportErrCount & " rule(s) failed during the run."
     End If
 
     MsgBox msg, vbInformation, "Pleadings Checker"

@@ -46,36 +46,47 @@ End Function
 '  Returns True if any part of the range is italic.
 ' ------------------------------------------------------------
 Private Function IsRangeItalic(rng As Range) As Boolean
+    Dim italVal As Long
+
     On Error Resume Next
+    italVal = rng.Font.Italic
+    If Err.Number <> 0 Then Err.Clear: On Error GoTo 0: IsRangeItalic = False: Exit Function
+    On Error GoTo 0
 
     ' If Font.Italic is True the whole range is italic
-    If rng.Font.Italic = True Then
+    If italVal = True Then
+        IsRangeItalic = True
+        Exit Function
+    End If
+
+    ' wdToggle treated as italic present
+    If italVal = wdToggle Then
         IsRangeItalic = True
         Exit Function
     End If
 
     ' If Font.Italic is wdUndefined (9999999) the range has
     ' mixed formatting -- check individual characters
-    If rng.Font.Italic = wdUndefined Then
+    If italVal = wdUndefined Then
         Dim i As Long
         Dim charRng As Range
         For i = rng.Start To rng.End - 1
+            On Error Resume Next
             Set charRng = rng.Document.Range(i, i + 1)
-            If charRng.Font.Italic = True Then
+            If Err.Number <> 0 Then Err.Clear: On Error GoTo 0: GoTo NextCharItalic
+            Dim charItal As Long
+            charItal = charRng.Font.Italic
+            If Err.Number <> 0 Then Err.Clear: On Error GoTo 0: GoTo NextCharItalic
+            On Error GoTo 0
+            If charItal = True Then
                 IsRangeItalic = True
                 Exit Function
             End If
+NextCharItalic:
         Next i
     End If
 
-    ' wdToggle treated as italic present
-    If rng.Font.Italic = wdToggle Then
-        IsRangeItalic = True
-        Exit Function
-    End If
-
     IsRangeItalic = False
-    On Error GoTo 0
 End Function
 
 ' ============================================================

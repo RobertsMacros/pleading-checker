@@ -1385,7 +1385,7 @@ Public Sub ApplySuggestionsAsTrackedChanges(doc As Document, _
                 End If
             End If
 NextApplyIssue:
-            On Error GoTo 0
+            On Error GoTo TrackedCleanup
         Else
             ' Invalid range -- skip silently (don't comment at document start)
             TraceStep "ApplyTrackedChanges", "SKIPPED i=" & i & _
