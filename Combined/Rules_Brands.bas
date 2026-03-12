@@ -276,6 +276,22 @@ Private Function CreateIssueDict(ByVal ruleName_ As String, _
 End Function
 
 
+' ============================================================
+'  PUBLIC: Default brand-rules file path (cross-platform)
+'  Called by frmPleadingsChecker and PleadingsLauncher via
+'  Application.Run so the path is defined in one place.
+' ============================================================
+Public Function GetDefaultBrandRulesPath() As String
+    Dim sep As String
+    sep = Application.PathSeparator
+    #If Mac Then
+        GetDefaultBrandRulesPath = Environ("HOME") & sep & "Library" & sep & _
+                                    "Application Support" & sep & "PleadingsChecker" & sep & "brand_rules.txt"
+    #Else
+        GetDefaultBrandRulesPath = Environ("APPDATA") & sep & "PleadingsChecker" & sep & "brand_rules.txt"
+    #End If
+End Function
+
 ' ----------------------------------------------------------------
 '  Late-bound wrapper: PleadingsEngine.IsInPageRange
 ' ----------------------------------------------------------------

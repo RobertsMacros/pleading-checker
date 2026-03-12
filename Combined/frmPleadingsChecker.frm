@@ -919,15 +919,26 @@ Private Sub btnLoadBrands_Click()
 End Sub
 
 ' -- Helper: cross-platform brand rules file path --
+' Delegates to Rules_Brands.GetDefaultBrandRulesPath (single source of truth).
+' Falls back to a local construction if the module is not imported.
 Private Function GetBrandRulesPath() As String
-    Dim sep As String
-    sep = Application.PathSeparator
-    #If Mac Then
-        GetBrandRulesPath = Environ("HOME") & sep & "Library" & sep & _
-                            "Application Support" & sep & "PleadingsChecker" & sep & "brand_rules.txt"
-    #Else
-        GetBrandRulesPath = Environ("APPDATA") & sep & "PleadingsChecker" & sep & "brand_rules.txt"
-    #End If
+    On Error Resume Next
+    GetBrandRulesPath = Application.Run("Rules_Brands.GetDefaultBrandRulesPath")
+    If Err.Number <> 0 Then
+        Err.Clear
+        On Error GoTo 0
+        ' Fallback: build the path locally
+        Dim sep As String
+        sep = Application.PathSeparator
+        #If Mac Then
+            GetBrandRulesPath = Environ("HOME") & sep & "Library" & sep & _
+                                "Application Support" & sep & "PleadingsChecker" & sep & "brand_rules.txt"
+        #Else
+            GetBrandRulesPath = Environ("APPDATA") & sep & "PleadingsChecker" & sep & "brand_rules.txt"
+        #End If
+        Exit Function
+    End If
+    On Error GoTo 0
 End Function
 
 ' ============================================================

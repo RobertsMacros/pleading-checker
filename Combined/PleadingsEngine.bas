@@ -1268,6 +1268,9 @@ Public Sub ApplySuggestionsAsTrackedChanges(doc As Document, _
     wasScreenUpdating = Application.ScreenUpdating
     Application.ScreenUpdating = False
 
+    ' Enable tracking for the entire batch; restored once in cleanup.
+    doc.TrackRevisions = True
+
     On Error GoTo TrackedCleanup
 
     ' Process from end of document backwards so tracked-change
@@ -1291,10 +1294,6 @@ Public Sub ApplySuggestionsAsTrackedChanges(doc As Document, _
                     If Len(sugText) = 0 Then sugText = GetIssueProp(finding, "Suggestion")
 
                     ' --- WHITESPACE VALIDATION GATE ---
-                    ' Before amending any tracked deletion, verify the
-                    ' deleted content is actually whitespace, not substantive text.
-                    ' This prevents accidental deletion of letters, digits,
-                    ' periods, or other punctuation.
                     Dim origText As String
                     origText = rng.Text
                     If Err.Number <> 0 Then origText = "": Err.Clear
@@ -1308,7 +1307,6 @@ Public Sub ApplySuggestionsAsTrackedChanges(doc As Document, _
                         Dim ch As String
                         For chIdx = 1 To Len(origText)
                             ch = Mid$(origText, chIdx, 1)
-                            ' Refuse to delete letters, digits, periods, or non-space punctuation
                             If (ch >= "A" And ch <= "Z") Or _
                                (ch >= "a" And ch <= "z") Or _
                                (ch >= "0" And ch <= "9") Or _
@@ -1321,9 +1319,7 @@ Public Sub ApplySuggestionsAsTrackedChanges(doc As Document, _
                     End If
 
                     ' For replacements, verify we are only changing whitespace
-                    ' (e.g. double space to single space)
                     If Len(sugText) > 0 And Len(origText) > 0 Then
-                        ' Check that what we're replacing is only spaces/whitespace
                         Dim isOnlyWhitespace As Boolean
                         isOnlyWhitespace = True
                         For chIdx = 1 To Len(origText)
@@ -1334,14 +1330,8 @@ Public Sub ApplySuggestionsAsTrackedChanges(doc As Document, _
                             End If
                         Next chIdx
 
-                        ' If original is only whitespace, allow the replacement
-                        ' If original contains non-whitespace, check it's not
-                        ' trying to remove periods/letters
                         If Not isOnlyWhitespace Then
-                            ' Allow the replacement (it's a text correction, not whitespace fix)
-                            ' But still refuse if we'd be deleting a period
                             If Len(sugText) < Len(origText) Then
-                                ' Shrinking text - verify we're not losing periods
                                 Dim origHasPeriod As Boolean
                                 origHasPeriod = (InStr(1, origText, ".") > 0)
                                 Dim sugHasPeriod As Boolean
@@ -1357,7 +1347,6 @@ Public Sub ApplySuggestionsAsTrackedChanges(doc As Document, _
                     If skipAmendment Then
                         TraceStep "ApplyTrackedChanges", "SKIPPED amendment i=" & i & _
                                   " orig=""" & Left$(origText, 30) & """ sug=""" & Left$(sugText, 30) & """"
-                        ' Still add comment to explain the issue, but don't auto-fix
                         If addComments Then
                             doc.Comments.Add Range:=rng, Text:=BuildCommentText(finding)
                             Err.Clear
@@ -1369,15 +1358,11 @@ Public Sub ApplySuggestionsAsTrackedChanges(doc As Document, _
                     TraceStep "ApplyTrackedChanges", "APPLYING i=" & i & _
                               " range=" & origStart & "-" & (origStart + origLen) & _
                               " orig=""" & Left$(origText, 30) & """ -> """ & Left$(sugText, 30) & """"
-                    doc.TrackRevisions = True
                     rng.Text = sugText
                     If Err.Number <> 0 Then
                         DebugLogError "ApplyTrackedChanges", "rng.Text= i=" & i, Err.Number, Err.Description
                         Err.Clear
                     End If
-                    doc.TrackRevisions = wasTrackingChanges
-                    ' No comment for auto-fixed items: the tracked change
-                    ' itself is self-explanatory.
                 Else
                     If addComments Then
                         doc.Comments.Add Range:=rng, Text:=BuildCommentText(finding)
@@ -1387,7 +1372,6 @@ Public Sub ApplySuggestionsAsTrackedChanges(doc As Document, _
 NextApplyIssue:
             On Error GoTo TrackedCleanup
         Else
-            ' Invalid range -- skip silently (don't comment at document start)
             TraceStep "ApplyTrackedChanges", "SKIPPED i=" & i & _
                       " -- invalid range start=" & GetIssueProp(finding, "RangeStart") & _
                       " end=" & GetIssueProp(finding, "RangeEnd")
@@ -1395,7 +1379,7 @@ NextApplyIssue:
     Next i
 
 TrackedCleanup:
-    ' Restore state (always runs, even on error)
+    ' Single cleanup path: always restore document and application state.
     On Error Resume Next
     doc.TrackRevisions = wasTrackingChanges
     Application.ScreenUpdating = wasScreenUpdating
