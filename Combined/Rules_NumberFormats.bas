@@ -83,6 +83,99 @@ Private Sub FindWithWildcard(doc As Document, ByVal pattern As String, _
     Loop
 End Sub
 
+' -- Helper: check if a time match looks like a clause reference,
+'  ratio, date component, or other non-time pattern.
+'  Examines characters before and after the HH:MM match.
+' ----------------------------------------------------------------
+Private Function LooksLikeNonTimeContext(doc As Document, _
+        ByVal matchStart As Long, ByVal matchEnd As Long) As Boolean
+    LooksLikeNonTimeContext = False
+    On Error Resume Next
+
+    ' Check character before the match
+    If matchStart > 0 Then
+        Dim bRng As Range
+        Set bRng = doc.Range(matchStart - 1, matchStart)
+        If Err.Number = 0 Then
+            Dim bc As String
+            bc = bRng.Text
+            If Err.Number = 0 Then
+                ' Preceded by letter -> probably part of a word or reference
+                If (bc >= "A" And bc <= "Z") Or (bc >= "a" And bc <= "z") Then
+                    LooksLikeNonTimeContext = True
+                    Err.Clear: On Error GoTo 0: Exit Function
+                End If
+                ' Preceded by another digit -> could be ratio like 1:12:45
+                If bc >= "0" And bc <= "9" Then
+                    ' Check two chars back for another colon (chained ratio)
+                    If matchStart > 1 Then
+                        Dim b2Rng As Range
+                        Set b2Rng = doc.Range(matchStart - 2, matchStart - 1)
+                        If Err.Number = 0 Then
+                            Dim b2c As String
+                            b2c = b2Rng.Text
+                            If b2c = ":" Or b2c = "." Then
+                                LooksLikeNonTimeContext = True
+                                Err.Clear: On Error GoTo 0: Exit Function
+                            End If
+                        Else
+                            Err.Clear
+                        End If
+                    End If
+                End If
+            Else
+                Err.Clear
+            End If
+        Else
+            Err.Clear
+        End If
+    End If
+
+    ' Check character after the match
+    If matchEnd < doc.Content.End Then
+        Dim aRng As Range
+        Set aRng = doc.Range(matchEnd, matchEnd + 1)
+        If Err.Number = 0 Then
+            Dim ac As String
+            ac = aRng.Text
+            If Err.Number = 0 Then
+                ' Followed by a colon or dot+digit -> ratio or version number
+                If ac = ":" Then
+                    LooksLikeNonTimeContext = True
+                    Err.Clear: On Error GoTo 0: Exit Function
+                End If
+                If ac = "." Then
+                    If matchEnd + 1 < doc.Content.End Then
+                        Dim a2Rng As Range
+                        Set a2Rng = doc.Range(matchEnd + 1, matchEnd + 2)
+                        If Err.Number = 0 Then
+                            Dim a2c As String
+                            a2c = a2Rng.Text
+                            If a2c >= "0" And a2c <= "9" Then
+                                LooksLikeNonTimeContext = True
+                                Err.Clear: On Error GoTo 0: Exit Function
+                            End If
+                        Else
+                            Err.Clear
+                        End If
+                    End If
+                End If
+                ' Followed by a letter -> part of a word
+                If (ac >= "A" And ac <= "Z") Or (ac >= "a" And ac <= "z") Then
+                    LooksLikeNonTimeContext = True
+                    Err.Clear: On Error GoTo 0: Exit Function
+                End If
+            Else
+                Err.Clear
+            End If
+        Else
+            Err.Clear
+        End If
+    End If
+
+    On Error GoTo 0
+End Function
+
 ' ============================================================
 '  PRIVATE HELPERS  -  Rule19 (Currency/Number)
 ' ============================================================
@@ -286,12 +379,12 @@ Private Sub CheckISOCodeFormat(doc As Document, _
 
     Do
         On Error Resume Next
-        Dim found As Boolean
-        found = rng.Find.Execute
+        Dim isoFound As Boolean
+        isoFound = rng.Find.Execute
         If Err.Number <> 0 Then Err.Clear: On Error GoTo 0: Exit Do
         On Error GoTo 0
 
-        If Not found Then Exit Do
+        If Not isoFound Then Exit Do
 
         If EngineIsInPageRange(rng) Then
             isoCount = isoCount + 1
@@ -361,6 +454,9 @@ End Function
 '  document. Identifies UK, US, and numeric date formats,
 '  determines the dominant style, and flags deviations.
 '  Also checks for mixed 12-hour / 24-hour time formats.
+'
+'  24-hour detection recognises 00:00 through 23:59 with
+'  context filtering to exclude clause references and ratios.
 ' ================================================================
 Public Function Check_DateTimeFormat(doc As Document) As Collection
     Dim issues As New Collection
@@ -497,6 +593,10 @@ Public Function Check_DateTimeFormat(doc As Document) As Collection
 
     ' ==========================================================
     '  PASS 2: Find time format inconsistencies
+    '
+    '  12-hour: explicit AM/PM marker (e.g. 2:30 PM, 11:00 am)
+    '  24-hour: HH:MM where HH is 00-23, no AM/PM follows,
+    '           and context does not suggest clause ref or ratio.
     ' ==========================================================
     Dim timeFinds As New Collection
     Dim timeCounts As Object
@@ -513,7 +613,20 @@ Public Function Check_DateTimeFormat(doc As Document) As Collection
         timeCounts("12hr") = timeCounts("12hr") + 1
     Next i
 
-    ' -- 24-hour format: "14:30", "23:00" (hour >= 13) --------
+    ' Also catch dot-separated 12hr times: "2.30 pm"
+    Dim time12DotResults As New Collection
+    FindWithWildcard doc, "[0-9]{1,2}.[0-9]{2} [AaPp][Mm]", time12DotResults, "12hr"
+
+    For i = 1 To time12DotResults.Count
+        timeFinds.Add time12DotResults(i)
+        timeCounts("12hr") = timeCounts("12hr") + 1
+    Next i
+
+    ' -- 24-hour format: HH:MM (00:00 through 23:59) ----------
+    '  Search for two-digit colon two-digit patterns.
+    '  Filter: must be valid 00-23 hour and 00-59 minute.
+    '  Exclude matches followed by AM/PM (those are 12-hour).
+    '  Exclude matches in non-time context (clause refs, ratios).
     Dim time24Results As New Collection
     FindWithWildcard doc, "[0-9]{2}:[0-9]{2}", time24Results, "24hr"
 
@@ -523,32 +636,40 @@ Public Function Check_DateTimeFormat(doc As Document) As Collection
         Dim t24Text As String
         t24Text = CStr(t24Info(1))
 
-        ' Extract hour portion and check if >= 13
+        ' Parse hour and minute
         Dim colonPos As Long
         colonPos = InStr(1, t24Text, ":")
         If colonPos > 0 Then
             Dim hourStr As String
             hourStr = Left$(t24Text, colonPos - 1)
+            Dim minStr As String
+            minStr = Mid$(t24Text, colonPos + 1)
             Dim hourVal As Long
+            Dim minVal As Long
             hourVal = -1
+            minVal = -1
             If IsNumeric(hourStr) Then hourVal = CLng(hourStr)
-            If hourVal >= 0 And hourVal <= 23 Then
+            If IsNumeric(minStr) Then minVal = CLng(minStr)
+
+            ' Valid time: hour 0-23, minute 0-59
+            If hourVal >= 0 And hourVal <= 23 And minVal >= 0 And minVal <= 59 Then
                 Dim is24hrTime As Boolean
                 is24hrTime = True
-                ' Hours 0-12 could be 12-hour without AM/PM marker --
-                ' check whether AM/PM follows to avoid double-counting
-                If hourVal <= 12 Then
-                    Dim peekEnd As Long
-                    peekEnd = CLng(t24Info(3)) + 4
-                    If peekEnd > doc.Content.End Then peekEnd = doc.Content.End
-                    If peekEnd > CLng(t24Info(3)) Then
-                        Dim peekRng As Range
-                        Set peekRng = doc.Range(CLng(t24Info(3)), peekEnd)
-                        Dim peekTxt As String
-                        peekTxt = ""
-                        peekTxt = UCase$(peekRng.Text)
-                        If Err.Number <> 0 Then peekTxt = "": Err.Clear
-                        ' Followed by AM/PM (with or without space) = 12-hour
+
+                ' Check whether AM/PM follows (with or without space)
+                ' to avoid double-counting 12-hour times
+                Dim peekEnd As Long
+                peekEnd = CLng(t24Info(3)) + 4
+                If peekEnd > doc.Content.End Then peekEnd = doc.Content.End
+                If peekEnd > CLng(t24Info(3)) Then
+                    Dim peekRng As Range
+                    Set peekRng = doc.Range(CLng(t24Info(3)), peekEnd)
+                    Dim peekTxt As String
+                    peekTxt = ""
+                    peekTxt = UCase$(peekRng.Text)
+                    If Err.Number <> 0 Then peekTxt = "": Err.Clear
+                    ' Followed by AM/PM (with or without space) = 12-hour
+                    If Len(peekTxt) >= 2 Then
                         If Left$(peekTxt, 2) = "AM" Or Left$(peekTxt, 2) = "PM" Then
                             is24hrTime = False
                         ElseIf Len(peekTxt) >= 3 Then
@@ -558,6 +679,19 @@ Public Function Check_DateTimeFormat(doc As Document) As Collection
                         End If
                     End If
                 End If
+
+                ' Context check: exclude clause refs, ratios, etc.
+                If is24hrTime Then
+                    If LooksLikeNonTimeContext(doc, CLng(t24Info(2)), CLng(t24Info(3))) Then
+                        is24hrTime = False
+                    End If
+                End If
+
+                ' For hours 1-9 with leading zero (01:xx-09:xx), the leading
+                ' zero strongly suggests 24-hour format intentionally.
+                ' For hours 10-12 without AM/PM, accept as 24-hour if
+                ' context doesn't suggest otherwise (already filtered above).
+
                 If is24hrTime Then
                     timeFinds.Add t24Info
                     timeCounts("24hr") = timeCounts("24hr") + 1

@@ -4,6 +4,13 @@ Attribute VB_Name = "Rules_Formatting"
 ' Combined module for formatting-related rules:
 '   - Rule06: Paragraph break consistency (headings)
 '   - Rule11: Font consistency (headings, body, footnotes)
+'
+' IsBlockQuotePara is a public helper used by other modules.
+' It requires STRONG indicators beyond mere indentation:
+'   - Quote-related style name (definitive)
+'   - Indentation + quotation-mark wrapping
+'   - Indentation + entirely italic text
+' Indentation + smaller font alone is NOT sufficient.
 ' ============================================================
 Option Explicit
 
@@ -82,12 +89,12 @@ End Function
 ' ------------------------------------------------------------
 '  PUBLIC: Detect block quote / indented extract paragraphs.
 '
-'  HARD RULE: Indentation alone is NEVER enough.
+'  STRICT RULE: Indentation alone is NEVER enough.
+'  Smaller font + indentation alone is NEVER enough.
 '  A block quote must have at least one of:
 '    1. A block-quote style (name contains "quote"/"block"/"extract")
 '    2. Enclosing quotation marks AND indentation
 '    3. Entirely italic text AND indentation
-'    4. Smaller font than body text AND indentation
 '  Lists, numbered paragraphs, and bullet items are explicitly excluded.
 ' ------------------------------------------------------------
 Public Function IsBlockQuotePara(para As Paragraph) As Boolean
@@ -104,7 +111,6 @@ Public Function IsBlockQuotePara(para As Paragraph) As Boolean
     If Err.Number <> 0 Then listLvl = 0: Err.Clear
     ' ListLevelNumber > 0 means this paragraph is in a list
     If listLvl > 0 Then
-        Debug.Print "IsBlockQuotePara SKIP: list paragraph (ListLevel=" & listLvl & ")"
         On Error GoTo 0
         Exit Function
     End If
@@ -126,7 +132,6 @@ Public Function IsBlockQuotePara(para As Paragraph) As Boolean
         If Left$(pTextTrimmed, 1) = ChrW(8226) Or _
            Left$(pTextTrimmed, 1) = ChrW(8211) & " " Or _
            firstTwo = "- " Or firstTwo = "* " Then
-            Debug.Print "IsBlockQuotePara SKIP: bullet-like paragraph"
             On Error GoTo 0
             Exit Function
         End If
@@ -135,7 +140,6 @@ Public Function IsBlockQuotePara(para As Paragraph) As Boolean
            pTextTrimmed Like "([a-z])*" Or pTextTrimmed Like "([ivx])*" Or _
            pTextTrimmed Like "#.*" Or pTextTrimmed Like "##.*" Or _
            pTextTrimmed Like "[a-z].*" Then
-            Debug.Print "IsBlockQuotePara SKIP: numbered/lettered list item"
             On Error GoTo 0
             Exit Function
         End If
@@ -147,7 +151,6 @@ Public Function IsBlockQuotePara(para As Paragraph) As Boolean
     listStr = para.Range.ListFormat.ListString
     If Err.Number <> 0 Then listStr = "": Err.Clear
     If Len(listStr) > 0 Then
-        Debug.Print "IsBlockQuotePara SKIP: auto-numbered list (ListString='" & listStr & "')"
         On Error GoTo 0
         Exit Function
     End If
@@ -167,7 +170,8 @@ Public Function IsBlockQuotePara(para As Paragraph) As Boolean
     End If
 
     ' ==========================================================
-    '  GATHER INDICATORS (only used if indented)
+    '  INDENTATION CHECK
+    '  All remaining indicators require indentation.
     ' ==========================================================
     Dim leftInd As Single
     leftInd = para.Format.LeftIndent
@@ -179,13 +183,10 @@ Public Function IsBlockQuotePara(para As Paragraph) As Boolean
         Exit Function
     End If
 
-    ' -- Font size (lightweight check: use paragraph-level first) --
-    Dim fontSize As Single
-    fontSize = para.Range.Font.Size
-    If Err.Number <> 0 Then fontSize = 0: Err.Clear
-    If fontSize <= 0 Or fontSize > 1000 Then fontSize = 0
-
-    ' -- Quotation marks enclosing the paragraph --
+    ' ==========================================================
+    '  CHECK 2: Indentation + quotation marks wrapping
+    '  Starts or ends with a quotation mark character.
+    ' ==========================================================
     Dim startsWithQuote As Boolean
     Dim endsWithQuote As Boolean
     startsWithQuote = False
@@ -199,18 +200,6 @@ Public Function IsBlockQuotePara(para As Paragraph) As Boolean
         endsWithQuote = (lcChar = Chr(34) Or lcChar = ChrW(8221) Or lcChar = ChrW(8217))
     End If
 
-    ' -- Entirely italic check --
-    Dim isItalic As Boolean
-    isItalic = False
-    Dim italVal As Long
-    italVal = para.Range.Font.Italic
-    If Err.Number <> 0 Then italVal = 0: Err.Clear
-    If italVal = -1 Then isItalic = True  ' wdTrue = -1 means ALL italic
-
-    ' ==========================================================
-    '  DECISION: Indentation PLUS at least one strong indicator
-    ' ==========================================================
-
     ' Block quote if indented AND wrapped in quotation marks
     If startsWithQuote Or endsWithQuote Then
         IsBlockQuotePara = True
@@ -218,26 +207,25 @@ Public Function IsBlockQuotePara(para As Paragraph) As Boolean
         Exit Function
     End If
 
-    ' Block quote if indented AND entirely italic
-    If isItalic Then
-        IsBlockQuotePara = True
-        On Error GoTo 0
-        Exit Function
-    End If
-
-    ' Block quote if indented AND noticeably smaller font (< 11pt)
-    ' This is the weakest indicator so it requires clear font difference
-    If fontSize > 0 And fontSize < 11 Then
+    ' ==========================================================
+    '  CHECK 3: Indentation + entirely italic
+    '  wdTrue (-1) means ALL text in the range is italic.
+    ' ==========================================================
+    Dim italVal As Long
+    italVal = para.Range.Font.Italic
+    If Err.Number <> 0 Then italVal = 0: Err.Clear
+    If italVal = -1 Then  ' wdTrue = -1 means ALL italic
         IsBlockQuotePara = True
         On Error GoTo 0
         Exit Function
     End If
 
     ' ==========================================================
-    '  DEFAULT: Indented but no strong indicator = NOT a block quote
-    '  (likely a list, definition, or indented body text)
+    '  DEFAULT: Indented but no strong indicator = NOT a block quote.
+    '  Smaller font + indentation alone is deliberately NOT enough.
+    '  This prevents indented lists, definitions, and body text
+    '  from being misclassified.
     ' ==========================================================
-    Debug.Print "IsBlockQuotePara SKIP: indented (" & leftInd & "pt) but no strong indicator (fontSize=" & fontSize & ", italic=" & isItalic & ", quotes=" & startsWithQuote & "/" & endsWithQuote & ")"
 
     On Error GoTo 0
 End Function
@@ -418,6 +406,12 @@ End Function
 '  Type-based approach: classify paragraphs into heading,
 '  body, block-quote; compute dominant font per type;
 '  flag outliers within each type.
+'
+'  Block-quote classification in font consistency uses the
+'  same strict criteria as IsBlockQuotePara: indentation
+'  plus italic, or indentation plus quotation wrapping.
+'  Indentation + smaller font alone does NOT classify as
+'  block quote here either.
 ' ============================================================
 Public Function Check_FontConsistency(doc As Document) As Collection
     Dim issues As New Collection
@@ -426,13 +420,7 @@ Public Function Check_FontConsistency(doc As Document) As Collection
 
     ' ==========================================================
     '  SINGLE MERGED PASS: Classify paragraphs and collect font
-    '  tallies in one scan (was 2 separate passes, a major
-    '  regression cause since each pass iterates all paragraphs
-    '  with heavy object-model access).
-    '
-    '  Strategy: First pass collects body-text indent/size tallies
-    '  AND caches paragraph metadata. Then we determine dominants
-    '  and classify in memory without re-scanning the document.
+    '  tallies in one scan.
     ' ==========================================================
     Dim bodyIndents As Object   ' LeftIndent (rounded) -> count
     Set bodyIndents = CreateObject("Scripting.Dictionary")
@@ -555,6 +543,11 @@ NextScanPara:
     domBodySize = CSng(domBodySizeTenths) / 10#
 
     ' -- Classify paragraphs and tally fonts (in memory, no doc access) --
+    ' Block-quote classification uses STRICT criteria:
+    '   - Indentation + full italic (font.Italic = wdTrue)
+    '   - Indentation + quote wrapping (first/last char is quote mark)
+    '   - Style name with "quote"/"block"/"extract"
+    ' Indentation + smaller font alone = classified as body, NOT block_quote.
     Dim pi As Long
     For pi = 0 To totalParas - 1
         If Not pInRange(pi) Then GoTo NextClassify
@@ -567,17 +560,66 @@ NextScanPara:
         If isHeading Then
             paraType = "heading"
         ElseIf pLevels(pi) = wdOutlineLevelBodyText Then
-            ' Classify as body or block_quote using cached metrics
-            Dim isExtraIndented As Boolean
-            isExtraIndented = (pIndents(pi) > domBodyIndent + 18)
-            Dim isSmallerFont As Boolean
-            isSmallerFont = (pFontSizes(pi) > 0 And domBodySize > 0 And pFontSizes(pi) < domBodySize - 0.5)
+            ' Use IsBlockQuotePara for strict classification
+            ' This requires doc access but is per-paragraph, not per-run
+            Dim bqPara As Paragraph
+            Set bqPara = Nothing
+            Dim bqRng As Range
+            Set bqRng = doc.Range(pStarts(pi), pEnds(pi))
+            If Err.Number = 0 Then
+                ' Try to get the paragraph object
+                ' Use a lightweight check: if IsBlockQuotePara was already
+                ' determined during the scan, use it.  Otherwise classify
+                ' conservatively as body.
+                Dim isBQ As Boolean
+                isBQ = False
 
-            If isExtraIndented And isSmallerFont Then
-                paraType = "block_quote"
-            ElseIf pIndents(pi) > domBodyIndent + 54 And isSmallerFont Then
-                paraType = "block_quote"
+                ' Check style name
+                Dim paraStyleName As String
+                paraStyleName = ""
+                paraStyleName = bqRng.ParagraphStyle
+                If Err.Number <> 0 Then paraStyleName = "": Err.Clear
+                Dim lsn As String
+                lsn = LCase$(paraStyleName)
+                If InStr(lsn, "quote") > 0 Or InStr(lsn, "block") > 0 Or _
+                   InStr(lsn, "extract") > 0 Then
+                    isBQ = True
+                End If
+
+                ' Check indentation + italic
+                If Not isBQ And pIndents(pi) > domBodyIndent + 18 Then
+                    Dim italCheck As Long
+                    italCheck = bqRng.Font.Italic
+                    If Err.Number <> 0 Then italCheck = 0: Err.Clear
+                    If italCheck = -1 Then isBQ = True  ' wdTrue = all italic
+                End If
+
+                ' Check indentation + quotation wrapping
+                If Not isBQ And pIndents(pi) > domBodyIndent + 18 Then
+                    Dim bqText As String
+                    bqText = ""
+                    bqText = bqRng.Text
+                    If Err.Number <> 0 Then bqText = "": Err.Clear
+                    bqText = Trim$(Replace(Replace(bqText, vbCr, ""), vbTab, ""))
+                    If Len(bqText) > 1 Then
+                        Dim bqFirst As String
+                        Dim bqLast As String
+                        bqFirst = Left$(bqText, 1)
+                        bqLast = Right$(bqText, 1)
+                        If bqFirst = Chr(34) Or bqFirst = ChrW(8220) Or bqFirst = ChrW(8216) Or _
+                           bqLast = Chr(34) Or bqLast = ChrW(8221) Or bqLast = ChrW(8217) Then
+                            isBQ = True
+                        End If
+                    End If
+                End If
+
+                If isBQ Then
+                    paraType = "block_quote"
+                Else
+                    paraType = "body"
+                End If
             Else
+                Err.Clear
                 paraType = "body"
             End If
         End If
@@ -657,9 +699,6 @@ NextFootnote:
 
     ' ==========================================================
     '  PASS 3: Flag deviations using cached data.
-    '  Paragraph-level checks use cached font info (no doc access).
-    '  Run-level checks only done when paragraph font is mixed
-    '  (indicated by empty/zero cached font info).
     ' ==========================================================
     Dim paraFontName As String
     Dim paraFontSize As Single

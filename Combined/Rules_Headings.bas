@@ -5,6 +5,12 @@ Attribute VB_Name = "Rules_Headings"
 '   - Rule 04: Heading capitalisation consistency
 '   - Rule 21: Title (honorific) formatting consistency
 '
+' Rule 04 uses LOCAL heading families rather than one global
+' dominant per outline level.  Headings are grouped into
+' contiguous runs separated by structural boundaries
+' (appendix/schedule/annex headings, or large gaps of body
+' text).  Each family is judged independently.
+'
 ' Dependencies:
 '   - PleadingsEngine.bas (IsInPageRange, GetLocationString)
 ' ============================================================
@@ -12,6 +18,10 @@ Option Explicit
 
 Private Const RULE_NAME_CAPITALISATION As String = "heading_capitalisation"
 Private Const RULE_NAME_TITLE As String = "title_formatting"
+
+' Maximum body-text paragraphs between headings before we treat
+' the next heading as a new structural family.
+Private Const MAX_GAP_PARAS As Long = 40
 
 ' --------------------------------------------------------------
 '  PRIVATE HELPERS  (from Rule04 - heading capitalisation)
@@ -206,14 +216,47 @@ Private Function CountWords(ByVal txt As String) As Long
         CountWords = 0
         Exit Function
     End If
-    Dim parts() As String
-    parts = Split(cleanText, " ")
+    Dim wParts() As String
+    wParts = Split(cleanText, " ")
     Dim cnt As Long
     Dim p As Variant
-    For Each p In parts
+    For Each p In wParts
         If Len(Trim$(CStr(p))) > 0 Then cnt = cnt + 1
     Next p
     CountWords = cnt
+End Function
+
+' -- Check if a heading text indicates a structural boundary --
+'  Returns True for schedule, appendix, annex, part, exhibit etc.
+Private Function IsStructuralBoundary(ByVal headingText As String) As Boolean
+    Dim lText As String
+    lText = LCase$(Trim$(Replace(headingText, vbCr, "")))
+    IsStructuralBoundary = False
+
+    ' Check for section-divider keywords at the start
+    If Left$(lText, 8) = "schedule" Or Left$(lText, 8) = "appendix" Or _
+       Left$(lText, 5) = "annex" Or Left$(lText, 7) = "exhibit" Or _
+       Left$(lText, 10) = "attachment" Then
+        IsStructuralBoundary = True
+        Exit Function
+    End If
+
+    ' Also match "SCHEDULE", "APPENDIX" etc. in ALL_CAPS
+    If Left$(lText, 4) = "part" Then
+        ' "Part" followed by a number or letter is structural
+        If Len(lText) > 4 Then
+            Dim afterPart As String
+            afterPart = Trim$(Mid$(lText, 5))
+            If Len(afterPart) > 0 Then
+                Dim fc As String
+                fc = Left$(afterPart, 1)
+                If (fc >= "0" And fc <= "9") Or _
+                   (fc >= "a" And fc <= "z") Then
+                    IsStructuralBoundary = True
+                End If
+            End If
+        End If
+    End If
 End Function
 
 ' --------------------------------------------------------------
@@ -226,13 +269,8 @@ Private Function CountWordInDoc(doc As Document, word As String) As Long
     Dim rng As Range
     Dim cnt As Long
     Dim found As Boolean
-    Dim useWildcards As Boolean
 
     cnt = 0
-
-    ' For dotted abbreviations like "Q.C.", use non-wildcard search
-    ' For simple words like "Mr", use whole-word matching
-    useWildcards = False
 
     Set rng = doc.Content.Duplicate
     With rng.Find
@@ -315,23 +353,45 @@ End Sub
 
 ' ============================================================
 '  PUBLIC: Check heading capitalisation  (Rule 04)
+'
+'  LOCAL-FAMILY APPROACH:
+'  1. Collect all headings into an ordered list.
+'  2. Walk the ordered list and split into "families" whenever:
+'     a) A structural boundary heading is encountered
+'        (schedule, appendix, annex, etc.), or
+'     b) More than MAX_GAP_PARAS non-heading paragraphs
+'        separate two consecutive headings.
+'  3. Within each family, determine dominant capitalisation
+'     per outline level and flag outliers.
 ' ============================================================
 Public Function Check_HeadingCapitalisation(doc As Document) As Collection
     Dim issues As New Collection
     Dim para As Paragraph
     Dim paraIdx As Long
     Dim lvl As Long
-    Dim info() As Variant
 
     On Error Resume Next
 
-    ' -- Dictionaries keyed by outline level -----------------
-    ' levelPatterns: level -> Dictionary(pattern -> count)
-    ' levelHeadings: level -> Collection of Array(paraIdx, text, pattern, rangeStart, rangeEnd)
-    Dim levelPatterns As Object
-    Set levelPatterns = CreateObject("Scripting.Dictionary")
-    Dim levelHeadings As Object
-    Set levelHeadings = CreateObject("Scripting.Dictionary")
+    ' -------------------------------------------------------
+    '  PASS 1: Collect all headings into an ordered array
+    ' -------------------------------------------------------
+    ' Each entry: Array(paraIdx, headingText, pattern, rangeStart, rangeEnd, outlineLevel)
+    Dim hCap As Long
+    hCap = 128
+    Dim hCount As Long
+    hCount = 0
+    Dim hParaIdx() As Long
+    Dim hTexts() As String
+    Dim hPatterns() As String
+    Dim hStarts() As Long
+    Dim hEnds() As Long
+    Dim hLevels() As Long
+    ReDim hParaIdx(0 To hCap - 1)
+    ReDim hTexts(0 To hCap - 1)
+    ReDim hPatterns(0 To hCap - 1)
+    ReDim hStarts(0 To hCap - 1)
+    ReDim hEnds(0 To hCap - 1)
+    ReDim hLevels(0 To hCap - 1)
 
     paraIdx = 0
     For Each para In doc.Paragraphs
@@ -339,6 +399,7 @@ Public Function Check_HeadingCapitalisation(doc As Document) As Collection
 
         ' Check if this is a heading (outline levels 1-9)
         lvl = para.OutlineLevel
+        If Err.Number <> 0 Then lvl = wdOutlineLevelBodyText: Err.Clear
         If lvl >= wdOutlineLevel1 And lvl <= wdOutlineLevel9 Then
 
             ' Page range filter
@@ -346,6 +407,7 @@ Public Function Check_HeadingCapitalisation(doc As Document) As Collection
 
             Dim headingText As String
             headingText = para.Range.Text
+            If Err.Number <> 0 Then headingText = "": Err.Clear
 
             ' Skip single-word headings
             If CountWords(headingText) <= 1 Then GoTo NextPara
@@ -354,92 +416,192 @@ Public Function Check_HeadingCapitalisation(doc As Document) As Collection
             Dim pattern As String
             pattern = ClassifyCapitalisation(headingText)
 
-            ' Store pattern count per level
-            If Not levelPatterns.Exists(lvl) Then
-                levelPatterns.Add lvl, CreateObject("Scripting.Dictionary")
-            End If
-            Dim patDict As Object
-            Set patDict = levelPatterns(lvl)
-            If patDict.Exists(pattern) Then
-                patDict(pattern) = patDict(pattern) + 1
-            Else
-                patDict.Add pattern, 1
+            ' Grow arrays if needed
+            If hCount >= hCap Then
+                hCap = hCap * 2
+                ReDim Preserve hParaIdx(0 To hCap - 1)
+                ReDim Preserve hTexts(0 To hCap - 1)
+                ReDim Preserve hPatterns(0 To hCap - 1)
+                ReDim Preserve hStarts(0 To hCap - 1)
+                ReDim Preserve hEnds(0 To hCap - 1)
+                ReDim Preserve hLevels(0 To hCap - 1)
             End If
 
-            ' Store heading info per level
-            If Not levelHeadings.Exists(lvl) Then
-                levelHeadings.Add lvl, New Collection
-            End If
-            ReDim info(0 To 4)
-            info(0) = paraIdx
-            info(1) = headingText
-            info(2) = pattern
-            info(3) = para.Range.Start
-            info(4) = para.Range.End
-            levelHeadings(lvl).Add info
+            hParaIdx(hCount) = paraIdx
+            hTexts(hCount) = headingText
+            hPatterns(hCount) = pattern
+            hStarts(hCount) = para.Range.Start
+            If Err.Number <> 0 Then hStarts(hCount) = 0: Err.Clear
+            hEnds(hCount) = para.Range.End
+            If Err.Number <> 0 Then hEnds(hCount) = 0: Err.Clear
+            hLevels(hCount) = lvl
+            hCount = hCount + 1
         End If
 NextPara:
     Next para
 
-    ' -- Determine dominant pattern per level and flag outliers --
-    Dim lvlKey As Variant
-    For Each lvlKey In levelPatterns.keys
-        Set patDict = levelPatterns(lvlKey)
+    If hCount < 2 Then
+        On Error GoTo 0
+        Set Check_HeadingCapitalisation = issues
+        Exit Function
+    End If
 
-        ' Find dominant pattern
-        Dim dominantPattern As String
-        Dim maxCount As Long
-        Dim patKey As Variant
-        dominantPattern = ""
-        maxCount = 0
-        For Each patKey In patDict.keys
-            If patDict(patKey) > maxCount Then
-                maxCount = patDict(patKey)
-                dominantPattern = CStr(patKey)
+    ' -------------------------------------------------------
+    '  PASS 2: Split headings into local families
+    '
+    '  familyStarts() and familyEnds() mark index ranges
+    '  within the heading arrays.
+    ' -------------------------------------------------------
+    Dim fsCap As Long
+    fsCap = 32
+    Dim fsCount As Long
+    fsCount = 0
+    Dim familyStarts() As Long
+    Dim familyEnds() As Long
+    ReDim familyStarts(0 To fsCap - 1)
+    ReDim familyEnds(0 To fsCap - 1)
+
+    Dim curFamilyStart As Long
+    curFamilyStart = 0
+
+    Dim hi As Long
+    For hi = 1 To hCount - 1
+        Dim newFamily As Boolean
+        newFamily = False
+
+        ' Check for structural boundary
+        If IsStructuralBoundary(hTexts(hi)) Then
+            newFamily = True
+        End If
+
+        ' Check for large gap between consecutive headings
+        If Not newFamily Then
+            Dim gap As Long
+            gap = hParaIdx(hi) - hParaIdx(hi - 1)
+            If gap > MAX_GAP_PARAS Then
+                newFamily = True
             End If
-        Next patKey
+        End If
 
-        ' Skip if only one heading at this level
-        If Not levelHeadings.Exists(lvlKey) Then GoTo NextLevel
-        Dim headings As Collection
-        Set headings = levelHeadings(lvlKey)
-        If headings.Count <= 1 Then GoTo NextLevel
-
-        ' Flag headings that don't match dominant pattern
-        Dim h As Long
-        For h = 1 To headings.Count
-            Dim hInfo As Variant
-            hInfo = headings(h)
-            Dim hPattern As String
-            hPattern = CStr(hInfo(2))
-            If hPattern <> dominantPattern Then
-                Dim finding As Object
-                Dim loc As String
-                Dim rng As Range
-                Set rng = doc.Range(CLng(hInfo(3)), CLng(hInfo(4)))
-                loc = EngineGetLocationString(rng, doc)
-
-                Dim cleanHText As String
-                cleanHText = Trim$(Replace(CStr(hInfo(1)), vbCr, ""))
-
-                Dim suggestion As String
-                Select Case dominantPattern
-                    Case "ALL_CAPS"
-                        suggestion = "Convert to ALL CAPS to match other level " & CLng(lvlKey) & " headings"
-                    Case "TITLE_CASE"
-                        suggestion = "Convert to Title Case to match other level " & CLng(lvlKey) & " headings"
-                    Case "SENTENCE_CASE"
-                        suggestion = "Convert to Sentence case to match other level " & CLng(lvlKey) & " headings"
-                    Case Else
-                        suggestion = "Review capitalisation for consistency with other level " & CLng(lvlKey) & " headings"
-                End Select
-
-                Set finding = CreateIssueDict(RULE_NAME_CAPITALISATION, loc, "Heading capitalisation mismatch: '" & cleanHText & "' uses " & hPattern & " but dominant pattern is " & dominantPattern, suggestion, CLng(hInfo(3)), CLng(hInfo(4)), "possible_error")
-                issues.Add finding
+        If newFamily Then
+            ' Close the current family
+            If fsCount >= fsCap Then
+                fsCap = fsCap * 2
+                ReDim Preserve familyStarts(0 To fsCap - 1)
+                ReDim Preserve familyEnds(0 To fsCap - 1)
             End If
-        Next h
-NextLevel:
-    Next lvlKey
+            familyStarts(fsCount) = curFamilyStart
+            familyEnds(fsCount) = hi - 1
+            fsCount = fsCount + 1
+            curFamilyStart = hi
+        End If
+    Next hi
+
+    ' Close the last family
+    If fsCount >= fsCap Then
+        fsCap = fsCap * 2
+        ReDim Preserve familyStarts(0 To fsCap - 1)
+        ReDim Preserve familyEnds(0 To fsCap - 1)
+    End If
+    familyStarts(fsCount) = curFamilyStart
+    familyEnds(fsCount) = hCount - 1
+    fsCount = fsCount + 1
+
+    ' -------------------------------------------------------
+    '  PASS 3: Within each family, find dominant per level
+    '  and flag outliers
+    ' -------------------------------------------------------
+    Dim fi As Long
+    For fi = 0 To fsCount - 1
+        Dim fStart As Long
+        fStart = familyStarts(fi)
+        Dim fEnd As Long
+        fEnd = familyEnds(fi)
+
+        ' Build pattern counts per level within this family
+        Dim levelPats As Object
+        Set levelPats = CreateObject("Scripting.Dictionary")
+        ' levelPats: level -> Dictionary(pattern -> count)
+
+        Dim hj As Long
+        For hj = fStart To fEnd
+            lvl = hLevels(hj)
+            If Not levelPats.Exists(lvl) Then
+                levelPats.Add lvl, CreateObject("Scripting.Dictionary")
+            End If
+            Dim patDict As Object
+            Set patDict = levelPats(lvl)
+            If patDict.Exists(hPatterns(hj)) Then
+                patDict(hPatterns(hj)) = patDict(hPatterns(hj)) + 1
+            Else
+                patDict.Add hPatterns(hj), 1
+            End If
+        Next hj
+
+        ' For each level in this family, find dominant and flag outliers
+        Dim lvlKey As Variant
+        For Each lvlKey In levelPats.keys
+            Set patDict = levelPats(lvlKey)
+
+            ' Count total headings at this level in this family
+            Dim levelTotal As Long
+            levelTotal = 0
+            Dim patKey As Variant
+            For Each patKey In patDict.keys
+                levelTotal = levelTotal + patDict(patKey)
+            Next patKey
+
+            ' Need at least 2 headings to compare
+            If levelTotal < 2 Then GoTo NextFamilyLevel
+
+            ' Find dominant pattern
+            Dim dominantPattern As String
+            Dim maxCount As Long
+            dominantPattern = ""
+            maxCount = 0
+            For Each patKey In patDict.keys
+                If patDict(patKey) > maxCount Then
+                    maxCount = patDict(patKey)
+                    dominantPattern = CStr(patKey)
+                End If
+            Next patKey
+
+            ' Flag headings in this family+level that deviate
+            For hj = fStart To fEnd
+                If hLevels(hj) = CLng(lvlKey) Then
+                    If hPatterns(hj) <> dominantPattern Then
+                        Dim finding As Object
+                        Dim loc As String
+                        Dim rng As Range
+                        Set rng = doc.Range(hStarts(hj), hEnds(hj))
+                        If Err.Number <> 0 Then Err.Clear: GoTo NextFamilyHeading
+                        loc = EngineGetLocationString(rng, doc)
+                        If Err.Number <> 0 Then loc = "unknown location": Err.Clear
+
+                        Dim cleanHText As String
+                        cleanHText = Trim$(Replace(hTexts(hj), vbCr, ""))
+
+                        Dim suggn As String
+                        Select Case dominantPattern
+                            Case "ALL_CAPS"
+                                suggn = "Convert to ALL CAPS to match nearby level " & CLng(lvlKey) & " headings"
+                            Case "TITLE_CASE"
+                                suggn = "Convert to Title Case to match nearby level " & CLng(lvlKey) & " headings"
+                            Case "SENTENCE_CASE"
+                                suggn = "Convert to Sentence case to match nearby level " & CLng(lvlKey) & " headings"
+                            Case Else
+                                suggn = "Review capitalisation for consistency with nearby level " & CLng(lvlKey) & " headings"
+                        End Select
+
+                        Set finding = CreateIssueDict(RULE_NAME_CAPITALISATION, loc, "Heading capitalisation mismatch: '" & cleanHText & "' uses " & hPatterns(hj) & " but nearby dominant pattern is " & dominantPattern, suggn, hStarts(hj), hEnds(hj), "possible_error")
+                        issues.Add finding
+                    End If
+                End If
+NextFamilyHeading:
+            Next hj
+NextFamilyLevel:
+        Next lvlKey
+    Next fi
 
     On Error GoTo 0
     Set Check_HeadingCapitalisation = issues

@@ -5,6 +5,10 @@ Attribute VB_Name = "Rules_Terms"
 '   Rule05 - Custom term whitelist
 '   Rule07 - Defined terms
 '   Rule23 - Phrase consistency
+'
+' Phrase matching (Rule23) uses MatchWholeWord=True for single
+' words and word-boundary validation for multi-word phrases to
+' prevent false matches inside larger words.
 ' ============================================================
 Option Explicit
 
@@ -21,7 +25,7 @@ Private Const RULE23_NAME As String = "phrase_consistency"
 Private Function LooksLikeSentence(ByVal txt As String) As Boolean
     LooksLikeSentence = False
 
-    ' Contains a question mark — it's a question, not a term
+    ' Contains a question mark -- it's a question, not a term
     If InStr(1, txt, "?") > 0 Then
         LooksLikeSentence = True
         Exit Function
@@ -109,6 +113,11 @@ End Function
 '  PRIVATE HELPERS (Rule23)
 ' ============================================================
 
+' -- Determine if a phrase is a single word (no spaces) ------
+Private Function IsSingleWord(ByVal phrase As String) As Boolean
+    IsSingleWord = (InStr(1, phrase, " ") = 0)
+End Function
+
 ' -- Check a single phrase group for consistency -------------
 '  Counts each phrase, determines dominant, flags minorities.
 ' ------------------------------------------------------------
@@ -155,27 +164,33 @@ Private Sub CheckPhraseGroup(doc As Document, _
 End Sub
 
 ' -- Count occurrences of a phrase in the document -----------
-'  Uses Find with MatchWildcards=False, MatchWholeWord=False
-'  (necessary for multi-word phrases).  Word-boundary check
-'  prevents matching fragments inside larger words.
+'  Single words use MatchWholeWord=True for proper boundaries.
+'  Multi-word phrases use MatchWholeWord=False with manual
+'  word-boundary validation at both ends to prevent matching
+'  fragments inside larger words.
 ' ------------------------------------------------------------
 Private Function CountPhrase(doc As Document, phrase As String) As Long
     Dim rng As Range
     Dim cnt As Long
     Dim found As Boolean
+    Dim singleWord As Boolean
 
     cnt = 0
+    singleWord = IsSingleWord(phrase)
 
     Set rng = doc.Content.Duplicate
     With rng.Find
         .ClearFormatting
         .Text = phrase
-        .MatchWholeWord = False
+        .MatchWholeWord = singleWord    ' True for single words
         .MatchCase = False
         .MatchWildcards = False
         .Wrap = wdFindStop
         .Forward = True
     End With
+
+    Dim lastMatchStart As Long
+    lastMatchStart = -1
 
     Do
         On Error Resume Next
@@ -185,13 +200,19 @@ Private Function CountPhrase(doc As Document, phrase As String) As Long
 
         If Not found Then Exit Do
 
-        ' Word-boundary check: char before/after match must not be a letter
-        If Not IsWordBoundaryMatch(rng, doc) Then
-            On Error Resume Next
-            rng.Collapse wdCollapseEnd
-            If Err.Number <> 0 Then Err.Clear: On Error GoTo 0: Exit Do
-            On Error GoTo 0
-            GoTo NextCountMatch
+        ' Stall guard
+        If rng.Start <= lastMatchStart Then Exit Do
+        lastMatchStart = rng.Start
+
+        ' For multi-word phrases, verify word boundaries manually
+        If Not singleWord Then
+            If Not IsWordBoundaryMatch(rng, doc) Then
+                On Error Resume Next
+                rng.Collapse wdCollapseEnd
+                If Err.Number <> 0 Then Err.Clear: On Error GoTo 0: Exit Do
+                On Error GoTo 0
+                GoTo NextCountMatch
+            End If
         End If
 
         If EngineIsInPageRange(rng) Then
@@ -209,6 +230,7 @@ NextCountMatch:
 End Function
 
 ' -- Flag all occurrences of a minority phrase ---------------
+'  Uses same boundary logic as CountPhrase.
 Private Sub FlagPhraseOccurrences(doc As Document, _
                                    minorityPhrase As String, _
                                    dominantPhrase As String, _
@@ -217,17 +239,23 @@ Private Sub FlagPhraseOccurrences(doc As Document, _
     Dim found As Boolean
     Dim finding As Object
     Dim locStr As String
+    Dim singleWord As Boolean
+
+    singleWord = IsSingleWord(minorityPhrase)
 
     Set rng = doc.Content.Duplicate
     With rng.Find
         .ClearFormatting
         .Text = minorityPhrase
-        .MatchWholeWord = False
+        .MatchWholeWord = singleWord    ' True for single words
         .MatchCase = False
         .MatchWildcards = False
         .Wrap = wdFindStop
         .Forward = True
     End With
+
+    Dim lastMatchStart As Long
+    lastMatchStart = -1
 
     Do
         On Error Resume Next
@@ -237,13 +265,19 @@ Private Sub FlagPhraseOccurrences(doc As Document, _
 
         If Not found Then Exit Do
 
-        ' Word-boundary check: reject partial-word matches
-        If Not IsWordBoundaryMatch(rng, doc) Then
-            On Error Resume Next
-            rng.Collapse wdCollapseEnd
-            If Err.Number <> 0 Then Err.Clear: On Error GoTo 0: Exit Do
-            On Error GoTo 0
-            GoTo NextFlagMatch
+        ' Stall guard
+        If rng.Start <= lastMatchStart Then Exit Do
+        lastMatchStart = rng.Start
+
+        ' For multi-word phrases, verify word boundaries manually
+        If Not singleWord Then
+            If Not IsWordBoundaryMatch(rng, doc) Then
+                On Error Resume Next
+                rng.Collapse wdCollapseEnd
+                If Err.Number <> 0 Then Err.Clear: On Error GoTo 0: Exit Do
+                On Error GoTo 0
+                GoTo NextFlagMatch
+            End If
         End If
 
         If EngineIsInPageRange(rng) Then
@@ -679,8 +713,9 @@ End Function
 
 ' ----------------------------------------------------------------
 '  PRIVATE: Check that a Find match sits on word boundaries
-'  (char before/after is not a letter). Prevents partial matches
-'  inside larger words, e.g. "prior to" inside "a priori to".
+'  (char before/after is not a letter/digit). Prevents partial
+'  matches inside larger words or compounds.
+'  Used for multi-word phrases where MatchWholeWord is False.
 ' ----------------------------------------------------------------
 Private Function IsWordBoundaryMatch(rng As Range, doc As Document) As Boolean
     IsWordBoundaryMatch = True
@@ -692,10 +727,14 @@ Private Function IsWordBoundaryMatch(rng As Range, doc As Document) As Boolean
         If Err.Number = 0 Then
             Dim bc As String
             bc = bRng.Text
-            If (bc >= "A" And bc <= "Z") Or (bc >= "a" And bc <= "z") Then
-                IsWordBoundaryMatch = False
-                Err.Clear: On Error GoTo 0
-                Exit Function
+            If Err.Number = 0 Then
+                If IsWordChar(bc) Then
+                    IsWordBoundaryMatch = False
+                    Err.Clear: On Error GoTo 0
+                    Exit Function
+                End If
+            Else
+                Err.Clear
             End If
         Else
             Err.Clear
@@ -708,10 +747,14 @@ Private Function IsWordBoundaryMatch(rng As Range, doc As Document) As Boolean
         If Err.Number = 0 Then
             Dim ac As String
             ac = aRng.Text
-            If (ac >= "A" And ac <= "Z") Or (ac >= "a" And ac <= "z") Then
-                IsWordBoundaryMatch = False
-                Err.Clear: On Error GoTo 0
-                Exit Function
+            If Err.Number = 0 Then
+                If IsWordChar(ac) Then
+                    IsWordBoundaryMatch = False
+                    Err.Clear: On Error GoTo 0
+                    Exit Function
+                End If
+            Else
+                Err.Clear
             End If
         Else
             Err.Clear
@@ -721,7 +764,16 @@ Private Function IsWordBoundaryMatch(rng As Range, doc As Document) As Boolean
 End Function
 
 ' ----------------------------------------------------------------
-'  PRIVATE: Late-bound wrapper for EngineSetWhitelist ' ----------------------------------------------------------------
+'  Word character test: letters (A-Z, a-z), digits, and extended
+'  Latin characters. Used for boundary checking.
+' ----------------------------------------------------------------
+Private Function IsWordChar(ByVal ch As String) As Boolean
+    If Len(ch) = 0 Then Exit Function
+    IsWordChar = (ch >= "A" And ch <= "Z") Or _
+                 (ch >= "a" And ch <= "z") Or _
+                 (ch >= "0" And ch <= "9") Or _
+                 (AscW(ch) >= 192 And AscW(ch) <= 687)
+End Function
 
 ' ----------------------------------------------------------------
 '  PRIVATE: Create a dictionary-based finding (no class dependency)
@@ -749,7 +801,8 @@ End Function
 
 
 ' ----------------------------------------------------------------
-'  Late-bound wrapper: EngineSetWhitelist ' ----------------------------------------------------------------
+'  Late-bound wrapper: EngineSetWhitelist
+' ----------------------------------------------------------------
 
 ' ----------------------------------------------------------------
 '  Late-bound wrapper: PleadingsEngine.IsInPageRange

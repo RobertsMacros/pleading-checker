@@ -8,6 +8,11 @@ Attribute VB_Name = "Rules_Lists"
 '     of formal list items, final-item full stop, penultimate
 '     conjunction)
 '
+' Rule 10 uses LOCAL-CONTEXT grouping: only inline lists that
+' are structurally close (within the same section-like region)
+' are compared for consistency.  Unrelated lists in different
+' sections are judged independently.
+'
 ' Dependencies:
 '   - PleadingsEngine.bas (IsInPageRange, GetLocationString)
 ' ============================================================
@@ -21,6 +26,9 @@ Private Const RULE_NAME_LISTPN  As String = "list_punctuation"
 Private Const MARKER_LETTER As String = "letter"   ' (a), (b), (c)
 Private Const MARKER_ROMAN  As String = "roman"    ' (i), (ii), (iii)
 Private Const MARKER_NUMBER As String = "number"   ' (1), (2), (3)
+
+' Max paragraphs between inline lists to consider them related
+Private Const MAX_LIST_GAP As Long = 30
 
 ' ==============================================================
 '  RULE 10 - PRIVATE HELPERS
@@ -256,23 +264,166 @@ Private Function DetectConjunction(ByVal textBefore As String) As String
     DetectConjunction = "none"
 End Function
 
+' -- Helper: analyse one inline list paragraph and return its style key --
+'  Returns "" if the paragraph is not a valid inline list.
+Private Function AnalyseInlineList(ByVal paraText As String, _
+        markers As Collection) As String
+
+    ' Need at least 2 markers to form an inline list
+    If markers.Count < 2 Then
+        AnalyseInlineList = ""
+        Exit Function
+    End If
+
+    ' Verify markers are of the same type and sequential
+    Dim firstType As String
+    Dim mk As Variant
+    mk = markers(1)
+    firstType = CStr(mk(3))
+
+    Dim sameType As Boolean
+    sameType = True
+    Dim mi As Long
+    For mi = 2 To markers.Count
+        mk = markers(mi)
+        If CStr(mk(3)) <> firstType Then
+            sameType = False
+            Exit For
+        End If
+    Next mi
+    If Not sameType Then
+        AnalyseInlineList = ""
+        Exit Function
+    End If
+
+    ' -- Analyse separator style --------------------------
+    Dim separators As New Collection
+    For mi = 2 To markers.Count
+        Dim prevMk As Variant
+        prevMk = markers(mi - 1)
+        Dim currMk As Variant
+        currMk = markers(mi)
+
+        Dim prevEnd As Long
+        prevEnd = CLng(prevMk(0)) + Len(CStr(prevMk(1)))
+        Dim currStart As Long
+        currStart = CLng(currMk(0))
+
+        If currStart > prevEnd Then
+            Dim between As String
+            between = Mid$(paraText, prevEnd, currStart - prevEnd)
+            separators.Add DetectSeparator(between)
+        Else
+            separators.Add "none"
+        End If
+    Next mi
+
+    ' Determine dominant separator for this list
+    Dim sepSemi As Long, sepComma As Long, sepNone As Long
+    sepSemi = 0: sepComma = 0: sepNone = 0
+    Dim s As Variant
+    For Each s In separators
+        Select Case CStr(s)
+            Case "semicolon": sepSemi = sepSemi + 1
+            Case "comma": sepComma = sepComma + 1
+            Case "none": sepNone = sepNone + 1
+        End Select
+    Next s
+
+    Dim listSep As String
+    If sepSemi >= sepComma And sepSemi >= sepNone Then
+        listSep = "semicolon"
+    ElseIf sepComma >= sepSemi And sepComma >= sepNone Then
+        listSep = "comma"
+    Else
+        listSep = "none"
+    End If
+
+    ' -- Check conjunction before final marker ----------------
+    Dim lastMk As Variant
+    lastMk = markers(markers.Count)
+    Dim lastMkStart As Long
+    lastMkStart = CLng(lastMk(0))
+
+    Dim secondLastMk As Variant
+    secondLastMk = markers(markers.Count - 1)
+    Dim slEnd As Long
+    slEnd = CLng(secondLastMk(0)) + Len(CStr(secondLastMk(1)))
+
+    Dim conjText As String
+    If lastMkStart > slEnd Then
+        conjText = Mid$(paraText, slEnd, lastMkStart - slEnd)
+    Else
+        conjText = ""
+    End If
+    Dim conjunction As String
+    conjunction = DetectConjunction(conjText)
+
+    ' -- Check ending punctuation -----------------------------
+    Dim lastMkEnd As Long
+    lastMkEnd = CLng(lastMk(0)) + Len(CStr(lastMk(1)))
+    Dim afterLast As String
+    If lastMkEnd <= Len(paraText) Then
+        afterLast = Mid$(paraText, lastMkEnd)
+    Else
+        afterLast = ""
+    End If
+    Dim ending As String
+    Dim cleanAfter As String
+    cleanAfter = Trim$(Replace(afterLast, vbCr, ""))
+    cleanAfter = Trim$(Replace(cleanAfter, vbLf, ""))
+    If Len(cleanAfter) > 0 Then
+        Dim lastChar As String
+        lastChar = Right$(cleanAfter, 1)
+        If lastChar = "." Then
+            ending = "fullstop"
+        ElseIf lastChar = ";" Then
+            ending = "semicolon"
+        Else
+            ending = "none"
+        End If
+    Else
+        ending = "none"
+    End If
+
+    ' -- Build style key --------------------------------------
+    AnalyseInlineList = listSep & "|" & conjunction & "|" & ending
+End Function
+
 ' ==============================================================
 '  RULE 10 - PUBLIC FUNCTION: Check_InlineListFormat
+'
+'  LOCAL-CONTEXT APPROACH:
+'  1. Collect all inline-list paragraphs with their style keys.
+'  2. Group consecutive inline lists that are within MAX_LIST_GAP
+'     paragraphs of each other into a "cluster".
+'  3. Within each cluster, determine dominant style and flag
+'     deviations.
 ' ==============================================================
 Public Function Check_InlineListFormat(doc As Document) As Collection
     Dim issues As New Collection
 
     On Error Resume Next
 
-    ' Track list styles: "separator|conjunction|ending" -> count
-    Dim styleCounts As Object
-    Set styleCounts = CreateObject("Scripting.Dictionary")
-    ' Store list details for flagging: Collection of Array(styleKey, paraIdx, rangeStart, rangeEnd, paraText)
-    Dim listDetails As New Collection
+    ' -- Collect all inline list paragraphs --------------------
+    ' Each entry: Array(styleKey, paraIdx, rangeStart, rangeEnd, previewText)
+    Dim listCap As Long
+    listCap = 64
+    Dim listCount As Long
+    listCount = 0
+    Dim lStyles() As String
+    Dim lParaIdx() As Long
+    Dim lStarts() As Long
+    Dim lEnds() As Long
+    Dim lPreviews() As String
+    ReDim lStyles(0 To listCap - 1)
+    ReDim lParaIdx(0 To listCap - 1)
+    ReDim lStarts(0 To listCap - 1)
+    ReDim lEnds(0 To listCap - 1)
+    ReDim lPreviews(0 To listCap - 1)
 
     Dim para As Paragraph
     Dim paraIdx As Long
-    Dim lDetail() As Variant
 
     paraIdx = 0
     For Each para In doc.Paragraphs
@@ -283,147 +434,114 @@ Public Function Check_InlineListFormat(doc As Document) As Collection
 
         Dim paraText As String
         paraText = para.Range.Text
+        If Err.Number <> 0 Then paraText = "": Err.Clear
 
         ' Find all markers in this paragraph
         Dim markers As Collection
         Set markers = FindMarkersInPara(paraText)
 
-        ' Need at least 2 markers to form an inline list
-        If markers.Count < 2 Then GoTo NextPara
-
-        ' Verify markers are of the same type and sequential
-        Dim firstType As String
-        Dim mk As Variant
-        mk = markers(1)
-        firstType = CStr(mk(3))
-
-        Dim sameType As Boolean
-        sameType = True
-        Dim mi As Long
-        For mi = 2 To markers.Count
-            mk = markers(mi)
-            If CStr(mk(3)) <> firstType Then
-                sameType = False
-                Exit For
-            End If
-        Next mi
-        If Not sameType Then GoTo NextPara
-
-        ' -- Analyse separator style --------------------------
-        Dim separators As New Collection
-        For mi = 2 To markers.Count
-            Dim prevMk As Variant
-            prevMk = markers(mi - 1)
-            Dim currMk As Variant
-            currMk = markers(mi)
-
-            Dim prevEnd As Long
-            prevEnd = CLng(prevMk(0)) + Len(CStr(prevMk(1)))
-            Dim currStart As Long
-            currStart = CLng(currMk(0))
-
-            If currStart > prevEnd Then
-                Dim between As String
-                between = Mid$(paraText, prevEnd, currStart - prevEnd)
-                separators.Add DetectSeparator(between)
-            Else
-                separators.Add "none"
-            End If
-        Next mi
-
-        ' Determine dominant separator for this list
-        Dim sepSemi As Long, sepComma As Long, sepNone As Long
-        sepSemi = 0: sepComma = 0: sepNone = 0
-        Dim s As Variant
-        For Each s In separators
-            Select Case CStr(s)
-                Case "semicolon": sepSemi = sepSemi + 1
-                Case "comma": sepComma = sepComma + 1
-                Case "none": sepNone = sepNone + 1
-            End Select
-        Next s
-
-        Dim listSep As String
-        If sepSemi >= sepComma And sepSemi >= sepNone Then
-            listSep = "semicolon"
-        ElseIf sepComma >= sepSemi And sepComma >= sepNone Then
-            listSep = "comma"
-        Else
-            listSep = "none"
-        End If
-
-        ' -- Check conjunction before final marker ------------
-        Dim lastMk As Variant
-        lastMk = markers(markers.Count)
-        Dim lastMkStart As Long
-        lastMkStart = CLng(lastMk(0))
-
-        Dim secondLastMk As Variant
-        secondLastMk = markers(markers.Count - 1)
-        Dim slEnd As Long
-        slEnd = CLng(secondLastMk(0)) + Len(CStr(secondLastMk(1)))
-
-        Dim conjText As String
-        If lastMkStart > slEnd Then
-            conjText = Mid$(paraText, slEnd, lastMkStart - slEnd)
-        Else
-            conjText = ""
-        End If
-        Dim conjunction As String
-        conjunction = DetectConjunction(conjText)
-
-        ' -- Check ending punctuation -------------------------
-        Dim lastMkEnd As Long
-        lastMkEnd = CLng(lastMk(0)) + Len(CStr(lastMk(1)))
-        Dim afterLast As String
-        If lastMkEnd <= Len(paraText) Then
-            afterLast = Mid$(paraText, lastMkEnd)
-        Else
-            afterLast = ""
-        End If
-        ' Find the end of the last item (next paragraph mark or end)
-        Dim ending As String
-        Dim cleanAfter As String
-        cleanAfter = Trim$(Replace(afterLast, vbCr, ""))
-        cleanAfter = Trim$(Replace(cleanAfter, vbLf, ""))
-        If Len(cleanAfter) > 0 Then
-            Dim lastChar As String
-            lastChar = Right$(cleanAfter, 1)
-            If lastChar = "." Then
-                ending = "fullstop"
-            ElseIf lastChar = ";" Then
-                ending = "semicolon"
-            Else
-                ending = "none"
-            End If
-        Else
-            ending = "none"
-        End If
-
-        ' -- Build style key and track ------------------------
+        ' Analyse as inline list
         Dim styleKey As String
-        styleKey = listSep & "|" & conjunction & "|" & ending
+        styleKey = AnalyseInlineList(paraText, markers)
+        If Len(styleKey) = 0 Then GoTo NextPara
 
-        If styleCounts.Exists(styleKey) Then
-            styleCounts(styleKey) = styleCounts(styleKey) + 1
-        Else
-            styleCounts.Add styleKey, 1
+        ' Grow arrays if needed
+        If listCount >= listCap Then
+            listCap = listCap * 2
+            ReDim Preserve lStyles(0 To listCap - 1)
+            ReDim Preserve lParaIdx(0 To listCap - 1)
+            ReDim Preserve lStarts(0 To listCap - 1)
+            ReDim Preserve lEnds(0 To listCap - 1)
+            ReDim Preserve lPreviews(0 To listCap - 1)
         End If
 
-        ReDim lDetail(0 To 4)
-        lDetail(0) = styleKey
-        lDetail(1) = paraIdx
-        lDetail(2) = para.Range.Start
-        lDetail(3) = para.Range.End
-        lDetail(4) = Trim$(Replace(Left$(paraText, 80), vbCr, ""))
-        listDetails.Add lDetail
+        lStyles(listCount) = styleKey
+        lParaIdx(listCount) = paraIdx
+        lStarts(listCount) = para.Range.Start
+        If Err.Number <> 0 Then lStarts(listCount) = 0: Err.Clear
+        lEnds(listCount) = para.Range.End
+        If Err.Number <> 0 Then lEnds(listCount) = 0: Err.Clear
+        lPreviews(listCount) = Trim$(Replace(Left$(paraText, 80), vbCr, ""))
+        listCount = listCount + 1
 
-        Set separators = Nothing
 NextPara:
     Next para
 
-    ' -- Determine dominant list style ------------------------
-    If styleCounts.Count > 1 And listDetails.Count > 1 Then
+    If listCount < 2 Then
+        On Error GoTo 0
+        Set Check_InlineListFormat = issues
+        Exit Function
+    End If
+
+    ' -- Group into local clusters ----------------------------
+    ' A new cluster starts when the paragraph gap exceeds MAX_LIST_GAP
+    Dim csCap As Long
+    csCap = 16
+    Dim csCount As Long
+    csCount = 0
+    Dim clusterStarts() As Long
+    Dim clusterEnds() As Long
+    ReDim clusterStarts(0 To csCap - 1)
+    ReDim clusterEnds(0 To csCap - 1)
+
+    Dim curClusterStart As Long
+    curClusterStart = 0
+
+    Dim li As Long
+    For li = 1 To listCount - 1
+        Dim gap As Long
+        gap = lParaIdx(li) - lParaIdx(li - 1)
+        If gap > MAX_LIST_GAP Then
+            ' Close current cluster
+            If csCount >= csCap Then
+                csCap = csCap * 2
+                ReDim Preserve clusterStarts(0 To csCap - 1)
+                ReDim Preserve clusterEnds(0 To csCap - 1)
+            End If
+            clusterStarts(csCount) = curClusterStart
+            clusterEnds(csCount) = li - 1
+            csCount = csCount + 1
+            curClusterStart = li
+        End If
+    Next li
+
+    ' Close last cluster
+    If csCount >= csCap Then
+        csCap = csCap * 2
+        ReDim Preserve clusterStarts(0 To csCap - 1)
+        ReDim Preserve clusterEnds(0 To csCap - 1)
+    End If
+    clusterStarts(csCount) = curClusterStart
+    clusterEnds(csCount) = listCount - 1
+    csCount = csCount + 1
+
+    ' -- Within each cluster, find dominant and flag -----------
+    Dim ci As Long
+    For ci = 0 To csCount - 1
+        Dim cStart As Long
+        cStart = clusterStarts(ci)
+        Dim cEnd As Long
+        cEnd = clusterEnds(ci)
+
+        ' Need at least 2 lists in cluster to compare
+        If cEnd - cStart < 1 Then GoTo NextCluster
+
+        ' Count styles in this cluster
+        Dim styleCounts As Object
+        Set styleCounts = CreateObject("Scripting.Dictionary")
+        Dim cj As Long
+        For cj = cStart To cEnd
+            If styleCounts.Exists(lStyles(cj)) Then
+                styleCounts(lStyles(cj)) = styleCounts(lStyles(cj)) + 1
+            Else
+                styleCounts.Add lStyles(cj), 1
+            End If
+        Next cj
+
+        ' Only flag if more than one style in this cluster
+        If styleCounts.Count < 2 Then GoTo NextCluster
+
+        ' Find dominant style
         Dim domStyle As String
         Dim maxCnt As Long
         domStyle = ""
@@ -436,17 +554,16 @@ NextPara:
             End If
         Next sk
 
-        ' -- Flag deviations ----------------------------------
-        Dim li As Long
-        For li = 1 To listDetails.Count
-            Dim ld As Variant
-            ld = listDetails(li)
-            If CStr(ld(0)) <> domStyle Then
+        ' Flag deviations
+        For cj = cStart To cEnd
+            If lStyles(cj) <> domStyle Then
                 Dim finding As Object
                 Dim rng As Range
-                Set rng = doc.Range(CLng(ld(2)), CLng(ld(3)))
+                Set rng = doc.Range(lStarts(cj), lEnds(cj))
+                If Err.Number <> 0 Then Err.Clear: GoTo NextClusterItem
                 Dim loc As String
                 loc = EngineGetLocationString(rng, doc)
+                If Err.Number <> 0 Then loc = "unknown location": Err.Clear
 
                 ' Parse dominant style for suggestion
                 Dim domParts() As String
@@ -457,11 +574,13 @@ NextPara:
                 If UBound(domParts) >= 1 Then suggStr = suggStr & ", '" & domParts(1) & "' conjunction"
                 If UBound(domParts) >= 2 Then suggStr = suggStr & ", " & domParts(2) & " ending"
 
-                Set finding = CreateIssueDict(RULE_NAME_INLINE, loc, "Inline list format inconsistency near: '" & CStr(ld(4)) & "...'", suggStr, CLng(ld(2)), CLng(ld(3)), "possible_error")
+                Set finding = CreateIssueDict(RULE_NAME_INLINE, loc, "Inline list format inconsistency near: '" & lPreviews(cj) & "...'", suggStr, lStarts(cj), lEnds(cj), "possible_error")
                 issues.Add finding
             End If
-        Next li
-    End If
+NextClusterItem:
+        Next cj
+NextCluster:
+    Next ci
 
     On Error GoTo 0
     Set Check_InlineListFormat = issues
@@ -501,7 +620,7 @@ End Function
 ' -- Classify the ending punctuation of a list item ------------
 Private Function ClassifyEnding(ByVal text As String) As String
     Dim trimmed As String
-    Dim lastChar As String
+    Dim endChar As String
 
     trimmed = StripTrailingCr(text)
     trimmed = Trim(trimmed)
@@ -511,9 +630,9 @@ Private Function ClassifyEnding(ByVal text As String) As String
         Exit Function
     End If
 
-    lastChar = Right(trimmed, 1)
+    endChar = Right(trimmed, 1)
 
-    Select Case lastChar
+    Select Case endChar
         Case ";"
             ClassifyEnding = "semicolon"
         Case "."

@@ -3,7 +3,7 @@ Attribute VB_Name = "Rules_Quotes"
 ' Rules_Quotes.bas
 ' Quotation-mark rules for UK legal proofreading:
 '   Rule 17: quotation mark consistency (straight vs smart)
-'   Rule 32: single quotes as default outer marks
+'   Rule 32: single quotes as default outer marks (nesting-aware)
 '   Rule 33: smart quote consistency (prefers smart)
 '
 ' Performance notes:
@@ -184,17 +184,18 @@ End Function
 ' ================================================================
 '  RULE 32 -- SINGLE / DOUBLE QUOTES DEFAULT (nesting-aware)
 '
-'  Configurable: Single outer (UK convention) or Double outer (US).
-'  One pass over paragraphs.  Per paragraph: a byte-array scan
-'  that tracks nesting depth, so inner quotes (which correctly
-'  alternate with the outer style) are NOT flagged.
+'  Proper nesting-aware scanner that classifies each non-apostrophe
+'  quote character as outer-level or inner-level, then only flags
+'  quotes that use the wrong type AT THEIR NESTING LEVEL.
 '
 '  UK convention (nestMode="SINGLE"):
-'    Outer = single, Inner = double -- only flag outer doubles
-'  US convention (nestMode="DOUBLE"):
-'    Outer = double, Inner = single -- only flag outer singles
+'    Depth 0 (outer) should use single quotes.
+'    Depth 1 (inner) should use double quotes.
+'    Any deeper level alternates.
 '
-'  Uses a single reusable Range for location lookups.
+'  The scanner uses explicit nesting stacks per paragraph.
+'  Apostrophes (letter-flanked ' chars) are always skipped.
+'  Straight quotes toggle; smart quotes have open/close directionality.
 ' ================================================================
 Public Function Check_SingleQuotesDefault( _
         doc As Document) As Collection
@@ -214,19 +215,9 @@ Public Function Check_SingleQuotesDefault( _
     Dim nestMode As String
     nestMode = EngineGetQuoteNesting()  ' "SINGLE" or "DOUBLE"
 
-    Dim issueMsg As String
-    Dim suggMsg As String
-    If nestMode = "DOUBLE" Then
-        issueMsg = "Outer quotation marks should use double quotation marks, not single quotation marks."
-        suggMsg = ""
-    Else
-        issueMsg = "Outer quotation marks should use single quotation marks, not double quotation marks."
-        suggMsg = ""
-    End If
-
     ' Outer and inner quote codes based on nesting mode
-    ' For SINGLE outer: outer = single quotes, inner = double quotes
-    ' For DOUBLE outer: outer = double quotes, inner = single quotes
+    ' For SINGLE outer: even depths (0,2,4..) use single, odd depths use double
+    ' For DOUBLE outer: even depths use double, odd depths use single
     Dim outerOpen As Long, outerClose As Long, outerStraight As Long
     Dim innerOpen As Long, innerClose As Long, innerStraight As Long
     If nestMode = "DOUBLE" Then
@@ -270,115 +261,167 @@ Public Function Check_SingleQuotesDefault( _
         Dim r32ListPrefixLen As Long
         r32ListPrefixLen = GetQListPrefixLen(para, pText)
 
-        ' -- Nesting-aware scan --
-        ' Track depth: 0 = outside quotes, 1 = inside outer,
-        ' 2 = inside inner (nested).  Only flag wrong-type quotes
-        ' that appear at depth 0 (outer level).
+        ' ======================================================
+        '  NESTING-AWARE SCAN
+        '
+        '  nestDepth tracks how many quote levels deep we are.
+        '  At even depths (0, 2, ...) we expect the "outer" type.
+        '  At odd depths (1, 3, ...) we expect the "inner" type.
+        '
+        '  A quote character is "expected" if its type matches
+        '  the expected type for the current depth.
+        '  It is "wrong" if used at a depth where the other
+        '  type should appear.
+        '
+        '  We only FLAG wrong-type characters that OPEN a new
+        '  level at the wrong type. We still track depth for
+        '  them so that their matching close isn't misflagged.
+        ' ======================================================
         Dim nestDepth As Long
         nestDepth = 0
+
+        ' Track what type each nesting level was opened with:
+        ' True = opened with outer-type, False = opened with inner-type.
+        ' Max 10 levels deep (more than enough for legal text).
+        Dim levelIsOuter(0 To 9) As Boolean
 
         For i = 0 To bMax Step 2
             code = b(i) Or (CLng(b(i + 1)) * 256&)
 
-            ' --- Track outer quote open/close ---
-            If code = outerOpen Then
+            ' -- Apostrophe skip for any single-quote character --
+            Dim isApostrophe As Boolean
+            isApostrophe = False
+            If code = QS Or code = QSC Or code = QSO Then
+                ' Extended apostrophe detection: letter/digit on both sides
+                isApostrophe = ByteIsApostropheExt(b, i, bMax)
+            End If
+            If isApostrophe Then GoTo NxtChar32
+
+            ' -- Classify this character --
+            Dim isOuterOpen As Boolean
+            Dim isOuterClose As Boolean
+            Dim isInnerOpen As Boolean
+            Dim isInnerClose As Boolean
+            Dim isStraightOuter As Boolean
+            Dim isStraightInner As Boolean
+            isOuterOpen = (code = outerOpen)
+            isOuterClose = (code = outerClose)
+            isInnerOpen = (code = innerOpen)
+            isInnerClose = (code = innerClose)
+            isStraightOuter = (code = outerStraight)
+            isStraightInner = (code = innerStraight)
+
+            ' Skip non-quote characters
+            If Not (isOuterOpen Or isOuterClose Or isInnerOpen Or _
+                    isInnerClose Or isStraightOuter Or isStraightInner) Then
+                GoTo NxtChar32
+            End If
+
+            ' -- Determine if this is an opening or closing quote --
+            Dim isOpening As Boolean
+            Dim isClosing As Boolean
+            Dim isOuterType As Boolean  ' True = outer-style char, False = inner-style
+
+            isOuterType = (isOuterOpen Or isOuterClose Or isStraightOuter)
+
+            ' Smart quotes have directionality
+            If isOuterOpen Or isInnerOpen Then
+                isOpening = True
+                isClosing = False
+            ElseIf isOuterClose Or isInnerClose Then
+                isOpening = False
+                isClosing = True
+            Else
+                ' Straight quote: determine open vs close from context
+                ' At depth 0 or if last action was a close -> opening
+                ' Otherwise -> closing (heuristic)
+                If nestDepth = 0 Then
+                    isOpening = True
+                    isClosing = False
+                Else
+                    ' Check if the matching level was opened with same type
+                    Dim curLevelOuter As Boolean
+                    If nestDepth <= 10 Then
+                        curLevelOuter = levelIsOuter(nestDepth - 1)
+                    Else
+                        curLevelOuter = ((nestDepth Mod 2) = 0)
+                    End If
+                    ' If the current level was opened with same type, this closes it
+                    If curLevelOuter = isOuterType Then
+                        isOpening = False
+                        isClosing = True
+                    Else
+                        ' Different type at this level - treat as opening new level
+                        isOpening = True
+                        isClosing = False
+                    End If
+                End If
+            End If
+
+            ' -- Determine expected type for current depth --
+            ' Even depth (0,2,4..) -> outer type expected
+            ' Odd depth (1,3,5..) -> inner type expected
+            Dim expectOuter As Boolean
+            expectOuter = ((nestDepth Mod 2) = 0)
+
+            ' -- Process opening quotes --
+            If isOpening Then
+                ' Check if this is the wrong type for the current level
+                Dim wrongTypeOpen As Boolean
+                wrongTypeOpen = (isOuterType <> expectOuter)
+
+                If wrongTypeOpen Then
+                    ' FLAG: wrong quote type at this nesting level
+                    Dim issMsg As String
+                    If expectOuter Then
+                        If nestMode = "DOUBLE" Then
+                            issMsg = "Outer quotation marks should use double quotation marks, not single."
+                        Else
+                            issMsg = "Outer quotation marks should use single quotation marks, not double."
+                        End If
+                    Else
+                        If nestMode = "DOUBLE" Then
+                            issMsg = "Inner quotation marks should use single quotation marks, not double."
+                        Else
+                            issMsg = "Inner quotation marks should use double quotation marks, not single."
+                        End If
+                    End If
+
+                    pos = pStart + (i \ 2) - r32ListPrefixLen
+                    Err.Clear
+                    locRng.SetRange pos, pos + 1
+                    If Err.Number <> 0 Then
+                        locStr = "unknown location": Err.Clear
+                    Else
+                        Err.Clear
+                        locStr = EngineGetLocationString(locRng, doc)
+                        If Err.Number <> 0 Then
+                            locStr = "unknown location": Err.Clear
+                        End If
+                    End If
+
+                    issues.Add CreateIssueDict(RULE32, locStr, _
+                        issMsg, "", pos, pos + 1, "warning")
+                End If
+
+                ' Push nesting level regardless (so its close is tracked)
+                If nestDepth < 10 Then
+                    levelIsOuter(nestDepth) = isOuterType
+                End If
                 nestDepth = nestDepth + 1
                 GoTo NxtChar32
             End If
-            If code = outerClose Then
-                ' Skip if this is an apostrophe (smart close single)
-                If nestMode = "SINGLE" And code = QSC Then
-                    If ByteIsApostrophe(b, i, bMax) Then GoTo NxtChar32
+
+            ' -- Process closing quotes --
+            If isClosing Then
+                If nestDepth > 0 Then
+                    nestDepth = nestDepth - 1
                 End If
-                If nestDepth > 0 Then nestDepth = nestDepth - 1
+                ' Don't flag closing quotes - the opening was already
+                ' flagged if wrong type. Closing just pops the level.
                 GoTo NxtChar32
             End If
 
-            ' --- Track inner quote open/close ---
-            If code = innerOpen Then
-                ' Inner quotes at depth >= 1 are correct (nested)
-                If nestDepth > 0 Then
-                    nestDepth = nestDepth + 1
-                    GoTo NxtChar32
-                End If
-                ' Inner quote at depth 0 = WRONG (should be outer style)
-                ' Fall through to flagging below
-            End If
-            If code = innerClose Then
-                ' Skip apostrophes
-                If nestMode = "DOUBLE" And code = QSC Then
-                    If ByteIsApostrophe(b, i, bMax) Then GoTo NxtChar32
-                End If
-                If nestDepth > 1 Then
-                    nestDepth = nestDepth - 1
-                    GoTo NxtChar32
-                End If
-                ' At depth 0 or 1 with inner close = structural issue
-                ' Only flag at depth 0
-                If nestDepth > 0 Then GoTo NxtChar32
-                ' Fall through to flagging
-            End If
-
-            ' --- Handle straight quotes ---
-            If code = outerStraight Then
-                ' Skip apostrophes for straight single quote
-                If outerStraight = QS Then
-                    If ByteIsApostrophe(b, i, bMax) Then GoTo NxtChar32
-                End If
-                ' Toggle nesting
-                If nestDepth = 0 Then
-                    nestDepth = nestDepth + 1
-                Else
-                    nestDepth = nestDepth - 1
-                End If
-                GoTo NxtChar32
-            End If
-            If code = innerStraight Then
-                ' Skip apostrophes for straight single quote
-                If innerStraight = QS Then
-                    If ByteIsApostrophe(b, i, bMax) Then GoTo NxtChar32
-                End If
-                ' At depth >= 1, this is a correct inner quote
-                If nestDepth > 0 Then
-                    ' Toggle inner nesting
-                    GoTo NxtChar32
-                End If
-                ' At depth 0 = wrong type, fall through to flag
-            End If
-
-            ' --- Flag wrong-type quotes at outer level (depth 0) ---
-            Dim isWrongOuter As Boolean
-            isWrongOuter = False
-            If nestDepth = 0 Then
-                If code = innerOpen Or code = innerClose Or code = innerStraight Then
-                    ' Skip apostrophes
-                    If code = QS Or code = QSC Then
-                        If Not ByteIsApostrophe(b, i, bMax) Then
-                            isWrongOuter = True
-                        End If
-                    Else
-                        isWrongOuter = True
-                    End If
-                End If
-            End If
-
-            If isWrongOuter Then
-                pos = pStart + (i \ 2) - r32ListPrefixLen
-                Err.Clear
-                locRng.SetRange pos, pos + 1
-                If Err.Number <> 0 Then
-                    locStr = "unknown location": Err.Clear
-                Else
-                    Err.Clear
-                    locStr = EngineGetLocationString(locRng, doc)
-                    If Err.Number <> 0 Then
-                        locStr = "unknown location": Err.Clear
-                    End If
-                End If
-
-                issues.Add CreateIssueDict(RULE32, locStr, _
-                    issueMsg, suggMsg, pos, pos + 1, "warning")
-            End If
 NxtChar32:
         Next i
 
@@ -546,7 +589,7 @@ End Function
 ' ================================================================
 
 ' ------------------------------------------------------------
-'  Apostrophe check on raw byte data.
+'  Apostrophe check on raw byte data (original strict version).
 '  True when the character at byte offset bi is flanked by
 '  letters on both sides (= mid-word = apostrophe, not quote).
 '  Works directly on the byte array -- no Mid$/AscW overhead.
@@ -561,6 +604,22 @@ Private Function ByteIsApostrophe(b() As Byte, _
 End Function
 
 ' ------------------------------------------------------------
+'  Extended apostrophe check: letter or digit flanked.
+'  Treats letter+digit and digit+letter combos as apostrophes
+'  too (e.g. 90's, '80s).  Used by the nesting scanner.
+' ------------------------------------------------------------
+Private Function ByteIsApostropheExt(b() As Byte, _
+        ByVal bi As Long, ByVal bMax As Long) As Boolean
+    Dim pc As Long, nc As Long
+    If bi < 2 Or bi + 3 > bMax Then Exit Function  ' False
+    pc = b(bi - 2) Or (CLng(b(bi - 1)) * 256&)
+    nc = b(bi + 2) Or (CLng(b(bi + 3)) * 256&)
+    ' Both sides must be letter or digit
+    ByteIsApostropheExt = (IsLetterCode(pc) Or IsDigitCode(pc)) And _
+                          (IsLetterCode(nc) Or IsDigitCode(nc))
+End Function
+
+' ------------------------------------------------------------
 '  Letter test by code point (A-Z, a-z, extended Latin U+00C0
 '  through U+02AF).  Covers accented characters common in UK
 '  legal text (cafe, naive, resume, etc.).
@@ -569,6 +628,13 @@ Private Function IsLetterCode(ByVal c As Long) As Boolean
     IsLetterCode = (c >= 65 And c <= 90) Or _
                    (c >= 97 And c <= 122) Or _
                    (c >= 192 And c <= 687)
+End Function
+
+' ------------------------------------------------------------
+'  Digit test by code point (0-9).
+' ------------------------------------------------------------
+Private Function IsDigitCode(ByVal c As Long) As Boolean
+    IsDigitCode = (c >= 48 And c <= 57)
 End Function
 
 ' ------------------------------------------------------------
