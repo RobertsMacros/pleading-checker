@@ -1439,7 +1439,8 @@ Private Sub SearchFinancialBatch(searchRange As Range, _
             Set finding = CreateIssueDict(RULE_NAME_CHECK, locStr, _
                 "UK spelling: '" & rng.Text & "' should be '" & _
                 CStr(suggestions(ti)) & "' in UK English.", _
-                CStr(suggestions(ti)), rng.Start, rng.End, "possible_error", True)
+                "Use '" & CStr(suggestions(ti)) & "'", rng.Start, rng.End, _
+                "possible_error", True, CStr(suggestions(ti)))
             issues.Add finding
 
 NextFinMatch:
@@ -1654,7 +1655,8 @@ Private Function CreateIssueDict(ByVal ruleName_ As String, _
                                  ByVal rangeStart_ As Long, _
                                  ByVal rangeEnd_ As Long, _
                                  Optional ByVal severity_ As String = "error", _
-                                 Optional ByVal autoFixSafe_ As Boolean = False) As Object
+                                 Optional ByVal autoFixSafe_ As Boolean = False, _
+                                 Optional ByVal replacementText_ As String = "") As Object
     Dim d As Object
     Set d = CreateObject("Scripting.Dictionary")
     d("RuleName") = ruleName_
@@ -1665,6 +1667,7 @@ Private Function CreateIssueDict(ByVal ruleName_ As String, _
     d("RangeEnd") = rangeEnd_
     d("Severity") = severity_
     d("AutoFixSafe") = autoFixSafe_
+    If autoFixSafe_ Then d("ReplacementText") = replacementText_
     Set CreateIssueDict = d
 End Function
 

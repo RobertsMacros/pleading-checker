@@ -127,7 +127,7 @@ Public Function Check_DoubleSpaces(doc As Document) As Collection
 
             ' Range covers only the EXTRA space(s) — keep the first one
             Set finding = CreateIssueDict(RULE_DOUBLE_SPACES, locStr, _
-                dsMsg, "", dsStart + 1, dsEnd, "error", True)
+                dsMsg, "Remove extra space(s)", dsStart + 1, dsEnd, "error", True, "")
             issues.Add finding
 
 NextDoubleMatch:
@@ -164,8 +164,8 @@ NextDoubleMatch:
                     ' Suggestion replaces ". " with ".  " (insert extra space)
                     Set finding = CreateIssueDict(RULE_DOUBLE_SPACES, locStr, _
                         "Missing second space after sentence-ending full stop.", _
-                        ".  ", msStart, msEnd, _
-                        "warning", True)
+                        "Add a second space after the full stop", msStart, msEnd, _
+                        "warning", True, ".  ")
                     issues.Add finding
                 End If
             Next ms
@@ -223,8 +223,8 @@ Public Function Check_DoubleCommas(doc As Document) As Collection
             End If
 
             Set finding = CreateIssueDict(RULE_DOUBLE_COMMAS, locStr, _
-                "Double comma found.", ",", _
-                dcStart, dcEnd, "error", True)
+                "Double comma found.", "Replace with a single comma", _
+                dcStart, dcEnd, "error", True, ",")
             issues.Add finding
 
             pos = InStr(pos + 2, paraText, ",,")
@@ -279,7 +279,7 @@ Public Function Check_SpaceBeforePunct(doc As Document) As Collection
         ' Range covers only the space (not the punctuation character)
         Set finding = CreateIssueDict(RULE_SPACE_BEFORE_PUNCT, locStr, _
             "Unexpected space before '" & punctChar & "'.", _
-            "", rng.Start, rng.Start + 1, "error", True)
+            "Remove the space before punctuation", rng.Start, rng.Start + 1, "error", True, "")
         issues.Add finding
 
         rng.Collapse wdCollapseEnd
@@ -425,8 +425,8 @@ Public Function Check_TrailingSpaces(doc As Document) As Collection
                 End If
 
                 Set finding = CreateIssueDict(RULE_TRAILING_SPACES, locStr, _
-                    tsMsg, "", _
-                    tsStart, tsEnd, "warning", True)
+                    tsMsg, "Remove trailing space(s)", _
+                    tsStart, tsEnd, "warning", True, "")
                 issues.Add finding
             End If
         End If
@@ -565,7 +565,8 @@ Private Function CreateIssueDict(ByVal ruleName_ As String, _
                                  ByVal rangeStart_ As Long, _
                                  ByVal rangeEnd_ As Long, _
                                  Optional ByVal severity_ As String = "error", _
-                                 Optional ByVal autoFixSafe_ As Boolean = False) As Object
+                                 Optional ByVal autoFixSafe_ As Boolean = False, _
+                                 Optional ByVal replacementText_ As String = "") As Object
     Dim d As Object
     Set d = CreateObject("Scripting.Dictionary")
     d("RuleName") = ruleName_
@@ -576,6 +577,7 @@ Private Function CreateIssueDict(ByVal ruleName_ As String, _
     d("RangeEnd") = rangeEnd_
     d("Severity") = severity_
     d("AutoFixSafe") = autoFixSafe_
+    If autoFixSafe_ Then d("ReplacementText") = replacementText_
     Set CreateIssueDict = d
 End Function
 

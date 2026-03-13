@@ -1,6 +1,6 @@
 # Pleadings Checker VBA -- Targeted Audit Report
 
-**Date:** 2026-03-13 (pass 11 — verification only)
+**Date:** 2026-03-13 (pass 12)
 **Scope:** All 20 modules in `Code/` (18,824 lines total, fully inspected)
 **Approach:** Targeted fixes only; no broad rewrites
 
@@ -477,7 +477,6 @@ Currently no rules set `AutoFixSafe = True`, so no amendments are ever made. All
 
 ### Remaining live-testing limitations
 
-- No rules currently exercise the `AutoFixSafe = True` + `ReplacementText` path — it is correctly guarded but untested at runtime
 - `InsideWidth`/`InsideHeight` untested on Word 2007/2010
 - `CheckManualNumbering` per-paragraph `Application.Run` performance hotspot unchanged
 - No unit-test harness
@@ -485,3 +484,80 @@ Currently no rules set `AutoFixSafe = True`, so no amendments are ever made. All
 ### Modules changed (pass 11)
 
 None. AUDIT_REPORT.md updated for verification record only.
+
+---
+
+## Pass 12 — Replacement-Text Contract Enforcement
+
+### Confirmed defects fixed
+
+**23. 9 AutoFixSafe rules had literal replacement text in the wrong field**
+- 3 rule modules (`Rules_Spacing.bas`, `Rules_Punctuation.bas`, `Rules_Spelling.bas`) used the 8-key `CreateIssueDict` which had no `ReplacementText` key
+- 9 call sites set `AutoFixSafe = True` but passed literal replacement values (en-dash, comma, corrected spelling, empty-for-deletion) as the `Suggestion` parameter
+- Pass 10 correctly blocked `Suggestion` from being used as replacement text, but this broke all 9 auto-fixable rules: they silently degraded to comment-only
+
+**Fixes applied:**
+
+**a) Engine: distinguish missing key from empty value** (PleadingsEngine.bas)
+- Added `HasReplacementText(finding)` helper that uses `Dictionary.Exists("ReplacementText")` to check for key presence
+- Changed the guard from `If Len(sugText) = 0` (which blocks deletions) to `If Not HasReplacementText(finding)` (which only blocks genuinely missing keys)
+- Empty `ReplacementText` = "delete the range"; missing key = "no replacement available"
+
+**b) Three rule modules: add ReplacementText to CreateIssueDict**
+- Added `Optional ByVal replacementText_ As String = ""` parameter
+- Key added to dict only when `autoFixSafe_ = True` (non-autofix findings remain 8-key, preserving backward compat)
+
+**c) 9 call sites: move literal replacements from Suggestion to ReplacementText**
+
+| Module | Rule | Old Suggestion | New Suggestion | ReplacementText |
+|--------|------|---------------|----------------|-----------------|
+| Rules_Spacing | double_spaces (extra) | `""` | "Remove extra space(s)" | `""` (delete) |
+| Rules_Spacing | double_spaces (missing) | `".  "` | "Add a second space after the full stop" | `".  "` |
+| Rules_Spacing | double_commas | `","` | "Replace with a single comma" | `","` |
+| Rules_Spacing | space_before_punct | `""` | "Remove the space before punctuation" | `""` (delete) |
+| Rules_Spacing | trailing_spaces | `""` | "Remove trailing space(s)" | `""` (delete) |
+| Rules_Punctuation | dash_usage (hyphen→en) | `enDash` | "Replace hyphen with en-dash" | `enDash` |
+| Rules_Punctuation | dash_usage (double→em) | `emDash` | "Replace with em-dash" | `emDash` |
+| Rules_Punctuation | dash_usage (en→hyphen) | `"-"` | "Replace en-dash with hyphen" | `"-"` |
+| Rules_Spelling | check_cheque | `suggestions(ti)` | "Use '{corrected}'" | `suggestions(ti)` |
+
+### Replacement-text contract after patch
+
+| Field | Meaning | Used for |
+|-------|---------|----------|
+| `Suggestion` | Human-readable prose | Comments, reports, UI display |
+| `ReplacementText` | Machine-safe literal text (key present = amendment allowed; empty = delete) | Tracked-change amendments |
+| `AutoFixSafe` | Rule author asserts this finding is safe to auto-amend | Engine checks this flag + `HasReplacementText` before amending |
+
+Key existence semantics:
+- `ReplacementText` key **present** (even if empty): engine may amend (delete or replace)
+- `ReplacementText` key **absent**: engine skips amendment, adds comment only
+
+### Areas verified and left unchanged
+
+- **BuildCommentText**: uses `Suggestion` for comment text only — now contains human-readable prose
+- **IssueToJSON**: checks `Len(repText) > 0` before emitting — correct for both present-and-empty and absent
+- **ApplyHighlights**: highlight + comment only — unaffected
+- **fraRules.InsideWidth**: frame width set before use — no guard needed
+- **ProtectionType labels, export paths, form sizing**: all intact
+- **13 other rule modules**: none use `AutoFixSafe = True` — unaffected by this change
+
+### Remaining live-testing limitations
+
+- Deletion auto-fixes (empty `ReplacementText`) will hit the whitespace validation gate, which correctly guards against deleting substantive content
+- `InsideWidth`/`InsideHeight` untested on Word 2007/2010
+- `CheckManualNumbering` performance hotspot unchanged
+- No unit-test harness
+
+### Exact modules/procedures changed (pass 12)
+
+| Module | Procedure | Change |
+|--------|-----------|--------|
+| `PleadingsEngine.bas` | `HasReplacementText` (new) | Dictionary key-existence check for `ReplacementText` |
+| `PleadingsEngine.bas` | `ApplySuggestionsAsTrackedChanges` | Guard changed from `Len(sugText) = 0` to `Not HasReplacementText(finding)` |
+| `Rules_Spacing.bas` | `CreateIssueDict` | Added `replacementText_` parameter + conditional key |
+| `Rules_Spacing.bas` | 5 call sites | Moved literals from `Suggestion` to `ReplacementText`; human prose in `Suggestion` |
+| `Rules_Punctuation.bas` | `CreateIssueDict` | Added `replacementText_` parameter + conditional key |
+| `Rules_Punctuation.bas` | 3 call sites | Moved en-dash/em-dash/hyphen from `Suggestion` to `ReplacementText` |
+| `Rules_Spelling.bas` | `CreateIssueDict` | Added `replacementText_` parameter + conditional key |
+| `Rules_Spelling.bas` | 1 call site | Moved corrected spelling from `Suggestion` to `ReplacementText` |

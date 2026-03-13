@@ -1354,9 +1354,10 @@ Public Sub ApplySuggestionsAsTrackedChanges(doc As Document, _
                     origLen = rng.End - rng.Start
                     ' Use ReplacementText only.  Suggestion is human-readable
                     ' prose and must NEVER be applied as literal replacement text.
+                    ' An empty ReplacementText means "delete the range" -- distinct
+                    ' from a MISSING key which means "no replacement available".
                     sugText = ""
-                    sugText = CStr(GetIssueProp(finding, "ReplacementText"))
-                    If Len(sugText) = 0 Then
+                    If Not HasReplacementText(finding) Then
                         ' No machine-safe replacement -- skip amendment, add comment
                         TraceStep "ApplyTrackedChanges", "NO ReplacementText for i=" & i & _
                                   " rule=" & GetIssueProp(finding, "RuleName") & "; comment-only"
@@ -1366,6 +1367,7 @@ Public Sub ApplySuggestionsAsTrackedChanges(doc As Document, _
                         End If
                         GoTo NextApplyIssue
                     End If
+                    sugText = CStr(GetIssueProp(finding, "ReplacementText"))
 
                     ' --- WHITESPACE VALIDATION GATE ---
                     Dim origText As String
@@ -1911,6 +1913,26 @@ Private Function GetIssueProp(finding As Object, ByVal propName As String) As Va
         GetIssueProp = ""
         Err.Clear
     End If
+    On Error GoTo 0
+End Function
+
+' ================================================================
+'  PRIVATE: Check whether a finding has a ReplacementText key
+'  Distinguishes "key exists with empty value" (= delete) from
+'  "key does not exist" (= no replacement available).
+' ================================================================
+Private Function HasReplacementText(finding As Object) As Boolean
+    On Error Resume Next
+    HasReplacementText = False
+    If TypeName(finding) = "Dictionary" Then
+        HasReplacementText = finding.Exists("ReplacementText")
+    Else
+        ' For non-dictionary objects, try to read the property
+        Dim tmp As Variant
+        tmp = CallByName(finding, "ReplacementText", VbGet)
+        HasReplacementText = (Err.Number = 0)
+    End If
+    If Err.Number <> 0 Then Err.Clear
     On Error GoTo 0
 End Function
 

@@ -750,7 +750,8 @@ Private Function CreateIssueDict(ByVal ruleName_ As String, _
                                  ByVal rangeStart_ As Long, _
                                  ByVal rangeEnd_ As Long, _
                                  Optional ByVal severity_ As String = "error", _
-                                 Optional ByVal autoFixSafe_ As Boolean = False) As Object
+                                 Optional ByVal autoFixSafe_ As Boolean = False, _
+                                 Optional ByVal replacementText_ As String = "") As Object
     Dim d As Object
     Set d = CreateObject("Scripting.Dictionary")
     d("RuleName") = ruleName_
@@ -761,6 +762,7 @@ Private Function CreateIssueDict(ByVal ruleName_ As String, _
     d("RangeEnd") = rangeEnd_
     d("Severity") = severity_
     d("AutoFixSafe") = autoFixSafe_
+    If autoFixSafe_ Then d("ReplacementText") = replacementText_
     Set CreateIssueDict = d
 End Function
 
@@ -848,7 +850,7 @@ Public Function Check_DashUsage(doc As Document) As Collection
 
             Set finding = CreateIssueDict(RULE_NAME_DASH, locStr, _
                 "Hyphen used in number range. Use an en-dash (" & enDash & ") for ranges.", _
-                enDash, hyphenPos, hrEnd, "error", True)
+                "Replace hyphen with en-dash", hyphenPos, hrEnd, "error", True, enDash)
             issues.Add finding
         Next hm
 
@@ -874,7 +876,7 @@ Public Function Check_DashUsage(doc As Document) As Collection
 
             Set finding = CreateIssueDict(RULE_NAME_DASH, locStr, _
                 "Double-hyphen found. Use an em-dash (" & emDash & ") instead.", _
-                emDash, dhStart, dhEnd, "error", True)
+                "Replace with em-dash", dhStart, dhEnd, "error", True, emDash)
             issues.Add finding
         Next dhm
 
@@ -914,7 +916,7 @@ Public Function Check_DashUsage(doc As Document) As Collection
 
                     Set finding = CreateIssueDict(RULE_NAME_DASH, locStr, _
                         "En-dash (" & enDash & ") used between words. Use a hyphen (-) for compound words.", _
-                        "-", enStart, enEnd, "error", True)
+                        "Replace en-dash with hyphen", enStart, enEnd, "error", True, "-")
                     issues.Add finding
                 End If
 
