@@ -270,6 +270,7 @@ Public Function Check_ParagraphBreakConsistency(doc As Document) As Collection
     paraIdx = 0
     For Each para In doc.Paragraphs
         paraIdx = paraIdx + 1
+        If paraIdx Mod 200 = 0 Then DoEvents
 
         lvl = para.OutlineLevel
         If lvl < wdOutlineLevel1 Or lvl > wdOutlineLevel9 Then GoTo NextPara
@@ -425,6 +426,7 @@ Public Function Check_FontConsistency(doc As Document) As Collection
     Dim issues As New Collection
 
     On Error Resume Next
+    PerfTimerStart "font_consist:scan"
 
     ' ==========================================================
     '  SINGLE MERGED PASS: Classify paragraphs and collect font
@@ -471,6 +473,7 @@ Public Function Check_FontConsistency(doc As Document) As Collection
     ' -- Single scan: collect all paragraph metadata --
     paraIdx = 0
     For Each para In doc.Paragraphs
+        If paraIdx Mod 200 = 0 And paraIdx > 0 Then DoEvents
         ' Grow arrays if needed
         If paraIdx >= paraCap Then
             paraCap = paraCap * 2
@@ -550,7 +553,9 @@ NextScanPara:
     If Len(tmpDomKey) > 0 Then domBodySizeTenths = CLng(tmpDomKey) Else domBodySizeTenths = 0
     domBodySize = CSng(domBodySizeTenths) / 10#
 
-    ' -- Classify paragraphs and tally fonts (in memory, no doc access) --
+    PerfTimerEnd "font_consist:scan"
+    PerfTimerStart "font_consist:classify"
+    ' -- Classify paragraphs and tally fonts --
     ' Block-quote classification uses STRICT criteria:
     '   - Indentation + full italic (font.Italic = wdTrue)
     '   - Indentation + quote wrapping (first/last char is quote mark)
@@ -568,66 +573,63 @@ NextScanPara:
         If isHeading Then
             paraType = "heading"
         ElseIf pLevels(pi) = wdOutlineLevelBodyText Then
-            ' Use IsBlockQuotePara for strict classification
-            ' This requires doc access but is per-paragraph, not per-run
-            Dim bqPara As Paragraph
-            Set bqPara = Nothing
-            Dim bqRng As Range
-            Set bqRng = doc.Range(pStarts(pi), pEnds(pi))
-            If Err.Number = 0 Then
-                ' Try to get the paragraph object
-                ' Use a lightweight check: if IsBlockQuotePara was already
-                ' determined during the scan, use it.  Otherwise classify
-                ' conservatively as body.
-                Dim isBQ As Boolean
-                isBQ = False
+            ' Lightweight block-quote classification.
+            ' Only create a Range object when indentation is high enough
+            ' to potentially qualify as a block quote (saves COM calls).
+            Dim isBQ As Boolean
+            isBQ = False
 
-                ' Check style name
-                Dim paraStyleName As String
-                paraStyleName = ""
-                paraStyleName = bqRng.ParagraphStyle
-                If Err.Number <> 0 Then paraStyleName = "": Err.Clear
-                Dim lsn As String
-                lsn = LCase$(paraStyleName)
-                If InStr(lsn, "quote") > 0 Or InStr(lsn, "block") > 0 Or _
-                   InStr(lsn, "extract") > 0 Then
-                    isBQ = True
-                End If
+            If pIndents(pi) > domBodyIndent + 18 Then
+                ' Indented enough — need Range for italic/quote checks
+                Dim bqRng As Range
+                Set bqRng = doc.Range(pStarts(pi), pEnds(pi))
+                If Err.Number = 0 Then
+                    ' Check style name
+                    Dim paraStyleName As String
+                    paraStyleName = ""
+                    paraStyleName = bqRng.ParagraphStyle
+                    If Err.Number <> 0 Then paraStyleName = "": Err.Clear
+                    Dim lsn As String
+                    lsn = LCase$(paraStyleName)
+                    If InStr(lsn, "quote") > 0 Or InStr(lsn, "block") > 0 Or _
+                       InStr(lsn, "extract") > 0 Then
+                        isBQ = True
+                    End If
 
-                ' Check indentation + italic
-                If Not isBQ And pIndents(pi) > domBodyIndent + 18 Then
-                    Dim italCheck As Long
-                    italCheck = bqRng.Font.Italic
-                    If Err.Number <> 0 Then italCheck = 0: Err.Clear
-                    If italCheck = -1 Then isBQ = True  ' wdTrue = all italic
-                End If
+                    ' Check indentation + italic
+                    If Not isBQ Then
+                        Dim italCheck As Long
+                        italCheck = bqRng.Font.Italic
+                        If Err.Number <> 0 Then italCheck = 0: Err.Clear
+                        If italCheck = -1 Then isBQ = True
+                    End If
 
-                ' Check indentation + quotation wrapping
-                If Not isBQ And pIndents(pi) > domBodyIndent + 18 Then
-                    Dim bqText As String
-                    bqText = ""
-                    bqText = bqRng.Text
-                    If Err.Number <> 0 Then bqText = "": Err.Clear
-                    bqText = Trim$(Replace(Replace(bqText, vbCr, ""), vbTab, ""))
-                    If Len(bqText) > 1 Then
-                        Dim bqFirst As String
-                        Dim bqLast As String
-                        bqFirst = Left$(bqText, 1)
-                        bqLast = Right$(bqText, 1)
-                        If bqFirst = Chr(34) Or bqFirst = ChrW(8220) Or bqFirst = ChrW(8216) Or _
-                           bqLast = Chr(34) Or bqLast = ChrW(8221) Or bqLast = ChrW(8217) Then
-                            isBQ = True
+                    ' Check indentation + quotation wrapping
+                    If Not isBQ Then
+                        Dim bqText As String
+                        bqText = ""
+                        bqText = bqRng.Text
+                        If Err.Number <> 0 Then bqText = "": Err.Clear
+                        bqText = Trim$(Replace(Replace(bqText, vbCr, ""), vbTab, ""))
+                        If Len(bqText) > 1 Then
+                            Dim bqFirst As String
+                            Dim bqLast As String
+                            bqFirst = Left$(bqText, 1)
+                            bqLast = Right$(bqText, 1)
+                            If bqFirst = Chr(34) Or bqFirst = ChrW(8220) Or bqFirst = ChrW(8216) Or _
+                               bqLast = Chr(34) Or bqLast = ChrW(8221) Or bqLast = ChrW(8217) Then
+                                isBQ = True
+                            End If
                         End If
                     End If
-                End If
-
-                If isBQ Then
-                    paraType = "block_quote"
                 Else
-                    paraType = "body"
+                    Err.Clear
                 End If
+            End If
+
+            If isBQ Then
+                paraType = "block_quote"
             Else
-                Err.Clear
                 paraType = "body"
             End If
         End If
@@ -682,6 +684,8 @@ NextClassify:
 NextFootnote:
     Next fn
 
+    PerfTimerEnd "font_consist:classify"
+    PerfTimerStart "font_consist:flag"
     ' ==========================================================
     '  PASS 2: Determine dominant fonts per type
     ' ==========================================================
@@ -858,6 +862,8 @@ NextParaFont2:
 NextFN2:
         Next fn
     End If
+
+    PerfTimerEnd "font_consist:flag"
 
     If Err.Number <> 0 Then
         Debug.Print "Check_FontConsistency: exiting with Err " & Err.Number & ": " & Err.Description

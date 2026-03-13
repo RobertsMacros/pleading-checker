@@ -20,10 +20,14 @@ Public Function Check_SequentialNumbering(doc As Document) As Collection
     Dim issues As New Collection
 
     ' -- Check Word-native numbered lists ------------------
+    PerfTimerStart "seq_num:native_lists"
     CheckNativeListNumbering doc, issues
+    PerfTimerEnd "seq_num:native_lists"
 
     ' -- Check manually typed numbering --------------------
+    PerfTimerStart "seq_num:manual_num"
     CheckManualNumbering doc, issues
+    PerfTimerEnd "seq_num:manual_num"
 
     Set Check_SequentialNumbering = issues
 End Function
@@ -58,10 +62,15 @@ Private Sub CheckNativeListNumbering(doc As Document, _
     Dim prevLevelDict As Object  ' listKey -> prevLevel
     Set prevLevelDict = CreateObject("Scripting.Dictionary")
 
+    Dim nativeParaCount As Long
+    nativeParaCount = 0
+
     On Error Resume Next
 
     For Each para In doc.Paragraphs
         Err.Clear
+        nativeParaCount = nativeParaCount + 1
+        If nativeParaCount Mod 200 = 0 Then DoEvents
 
         Set paraRange = para.Range
         If Err.Number <> 0 Then
@@ -263,10 +272,15 @@ Private Sub CheckManualNumbering(doc As Document, _
     Dim blankLineRun As Long
     blankLineRun = 0
 
+    Dim manualParaCount As Long
+    manualParaCount = 0
+
     On Error Resume Next
 
     For Each para In doc.Paragraphs
         Err.Clear
+        manualParaCount = manualParaCount + 1
+        If manualParaCount Mod 200 = 0 Then DoEvents
 
         Set paraRange = para.Range
         If Err.Number <> 0 Then
@@ -281,11 +295,46 @@ Private Sub CheckManualNumbering(doc As Document, _
         End If
 
         ' -- Skip block quotes (they have their own numbering) --
+        '    Inline lightweight check avoids expensive cross-module
+        '    Application.Run dispatch per paragraph.
         Dim isBlockQ As Boolean
         isBlockQ = False
         On Error Resume Next
-        isBlockQ = Application.Run("Rules_Formatting.IsBlockQuotePara", para)
-        If Err.Number <> 0 Then isBlockQ = False: Err.Clear
+        ' Check 1: style name
+        Dim bqStyle As String
+        bqStyle = LCase$(para.Style.NameLocal)
+        If Err.Number <> 0 Then bqStyle = "": Err.Clear
+        If InStr(bqStyle, "quote") > 0 Or InStr(bqStyle, "block") > 0 Or _
+           InStr(bqStyle, "extract") > 0 Then
+            isBlockQ = True
+        End If
+        ' Check 2: indentation + italic or indentation + quote marks
+        If Not isBlockQ Then
+            Dim bqIndent As Single
+            bqIndent = para.Format.LeftIndent
+            If Err.Number <> 0 Then bqIndent = 0: Err.Clear
+            If bqIndent > 18 Then
+                Dim bqItal As Long
+                bqItal = paraRange.Font.Italic
+                If Err.Number <> 0 Then bqItal = 0: Err.Clear
+                If bqItal = -1 Then
+                    isBlockQ = True
+                Else
+                    ' Check quote wrapping
+                    Dim bqTxt As String
+                    bqTxt = Trim$(Replace(Replace(paraText, vbCr, ""), vbTab, ""))
+                    If Len(bqTxt) > 1 Then
+                        Dim bqFC As String, bqLC As String
+                        bqFC = Left$(bqTxt, 1)
+                        bqLC = Right$(bqTxt, 1)
+                        If bqFC = Chr(34) Or bqFC = ChrW(8220) Or bqFC = ChrW(8216) Or _
+                           bqLC = Chr(34) Or bqLC = ChrW(8221) Or bqLC = ChrW(8217) Then
+                            isBlockQ = True
+                        End If
+                    End If
+                End If
+            End If
+        End If
         On Error Resume Next
         If isBlockQ Then GoTo NextManualPara
 
@@ -665,6 +714,7 @@ Public Function Check_ClauseNumberFormat(doc As Document) As Collection
     Dim paraIdx As Long
 
     On Error Resume Next
+    PerfTimerStart "clause_fmt:scan"
 
     ' Track format patterns: formatPattern -> Collection of Array(paraIdx, prefix, rangeStart, rangeEnd)
     Dim formatCounts As Object
@@ -675,6 +725,7 @@ Public Function Check_ClauseNumberFormat(doc As Document) As Collection
     paraIdx = 0
     For Each para In doc.Paragraphs
         paraIdx = paraIdx + 1
+        If paraIdx Mod 200 = 0 Then DoEvents
 
         ' Skip headings (they have their own numbering rules)
         If para.OutlineLevel >= wdOutlineLevel1 And _
@@ -710,6 +761,8 @@ Public Function Check_ClauseNumberFormat(doc As Document) As Collection
 NextClausePara:
     Next para
 
+    PerfTimerEnd "clause_fmt:scan"
+    PerfTimerStart "clause_fmt:analyse"
     ' -- Group into contiguous runs for local-context comparison --
     ' A new run starts when paragraph gap > MAX_CLAUSE_GAP.
     ' Within each run, compare formats per level category.
@@ -845,6 +898,7 @@ NextClausePara:
         End If
     Next ri
 ClauseFormatDone:
+    PerfTimerEnd "clause_fmt:analyse"
 
     On Error GoTo 0
     Set Check_ClauseNumberFormat = issues

@@ -23,34 +23,44 @@ Private Const RULE_NAME_TITLE As String = "title_formatting"
 ' the next heading as a new structural family.
 Private Const MAX_GAP_PARAS As Long = 40
 
+' -- Cached dictionaries (created once, reused) ----------------
+Private m_minorWords As Object
+Private m_properNouns As Object
+
 ' --------------------------------------------------------------
 '  PRIVATE HELPERS  (from Rule04 - heading capitalisation)
 ' --------------------------------------------------------------
 
 ' -- Minor words to skip when checking Title Case ------------
 Private Function GetMinorWords() As Object
-    Dim d As Object
-    Set d = CreateObject("Scripting.Dictionary")
-    Dim w As Variant
-    For Each w In Array("the", "a", "an", "in", "on", "at", "to", _
-                        "for", "of", "and", "but", "or", "nor", _
-                        "with", "by")
-        d.Add CStr(w), True
-    Next w
-    Set GetMinorWords = d
+    If m_minorWords Is Nothing Then
+        Dim d As Object
+        Set d = CreateObject("Scripting.Dictionary")
+        Dim w As Variant
+        For Each w In Array("the", "a", "an", "in", "on", "at", "to", _
+                            "for", "of", "and", "but", "or", "nor", _
+                            "with", "by")
+            d.Add CStr(w), True
+        Next w
+        Set m_minorWords = d
+    End If
+    Set GetMinorWords = m_minorWords
 End Function
 
 ' -- Proper nouns that are always capitalised ----------------
 Private Function GetProperNouns() As Object
-    Dim d As Object
-    Set d = CreateObject("Scripting.Dictionary")
-    Dim w As Variant
-    For Each w In Array("Court", "Claimant", "Defendant", "Respondent", _
-                        "Applicant", "Tribunal", "Parliament", "Crown", _
-                        "State", "Government", "Minister")
-        d.Add CStr(w), True
-    Next w
-    Set GetProperNouns = d
+    If m_properNouns Is Nothing Then
+        Dim d As Object
+        Set d = CreateObject("Scripting.Dictionary")
+        Dim w As Variant
+        For Each w In Array("Court", "Claimant", "Defendant", "Respondent", _
+                            "Applicant", "Tribunal", "Parliament", "Crown", _
+                            "State", "Government", "Minister")
+            d.Add CStr(w), True
+        Next w
+        Set m_properNouns = d
+    End If
+    Set GetProperNouns = m_properNouns
 End Function
 
 ' -- Classify a heading's capitalisation pattern -------------
@@ -263,93 +273,6 @@ End Function
 '  PRIVATE HELPERS  (from Rule21 - title formatting)
 ' --------------------------------------------------------------
 
-' -- Count occurrences of a word in the document -------------
-'  Uses Find with MatchWholeWord and MatchCase.
-Private Function CountWordInDoc(doc As Document, word As String) As Long
-    Dim rng As Range
-    Dim cnt As Long
-    Dim found As Boolean
-
-    cnt = 0
-
-    Set rng = doc.Content.Duplicate
-    With rng.Find
-        .ClearFormatting
-        .Text = word
-        .MatchWholeWord = True
-        .MatchCase = True
-        .MatchWildcards = False
-        .Wrap = wdFindStop
-        .Forward = True
-    End With
-
-    Do
-        On Error Resume Next
-        found = rng.Find.Execute
-        If Err.Number <> 0 Then Err.Clear: On Error GoTo 0: Exit Do
-        On Error GoTo 0
-
-        If Not found Then Exit Do
-
-        If EngineIsInPageRange(rng) Then
-            cnt = cnt + 1
-        End If
-
-        On Error Resume Next
-        rng.Collapse wdCollapseEnd
-        If Err.Number <> 0 Then Err.Clear: On Error GoTo 0: Exit Do
-        On Error GoTo 0
-    Loop
-
-    CountWordInDoc = cnt
-End Function
-
-' -- Flag all occurrences of a minority form -----------------
-Private Sub FlagOccurrences(doc As Document, _
-                             word As String, _
-                             issueText As String, _
-                             suggestionText As String, _
-                             ByRef issues As Collection)
-    Dim rng As Range
-    Dim found As Boolean
-    Dim finding As Object
-    Dim locStr As String
-
-    Set rng = doc.Content.Duplicate
-    With rng.Find
-        .ClearFormatting
-        .Text = word
-        .MatchWholeWord = True
-        .MatchCase = True
-        .MatchWildcards = False
-        .Wrap = wdFindStop
-        .Forward = True
-    End With
-
-    Do
-        On Error Resume Next
-        found = rng.Find.Execute
-        If Err.Number <> 0 Then Err.Clear: On Error GoTo 0: Exit Do
-        On Error GoTo 0
-
-        If Not found Then Exit Do
-
-        If EngineIsInPageRange(rng) Then
-            On Error Resume Next
-            locStr = EngineGetLocationString(rng, doc)
-            If Err.Number <> 0 Then locStr = "unknown location": Err.Clear
-            On Error GoTo 0
-
-            Set finding = CreateIssueDict(RULE_NAME_TITLE, locStr, issueText, suggestionText, rng.Start, rng.End, "error")
-            issues.Add finding
-        End If
-
-        On Error Resume Next
-        rng.Collapse wdCollapseEnd
-        If Err.Number <> 0 Then Err.Clear: On Error GoTo 0: Exit Do
-        On Error GoTo 0
-    Loop
-End Sub
 
 ' ============================================================
 '  PUBLIC: Check heading capitalisation  (Rule 04)
@@ -371,6 +294,7 @@ Public Function Check_HeadingCapitalisation(doc As Document) As Collection
     Dim lvl As Long
 
     On Error Resume Next
+    PerfTimerStart "heading_cap:scan"
 
     ' -------------------------------------------------------
     '  PASS 1: Collect all headings into an ordered array
@@ -396,6 +320,7 @@ Public Function Check_HeadingCapitalisation(doc As Document) As Collection
     paraIdx = 0
     For Each para In doc.Paragraphs
         paraIdx = paraIdx + 1
+        If paraIdx Mod 200 = 0 Then DoEvents
 
         ' Check if this is a heading (outline levels 1-9)
         lvl = para.OutlineLevel
@@ -440,12 +365,15 @@ Public Function Check_HeadingCapitalisation(doc As Document) As Collection
 NextPara:
     Next para
 
+    PerfTimerEnd "heading_cap:scan"
+
     If hCount < 2 Then
         On Error GoTo 0
         Set Check_HeadingCapitalisation = issues
         Exit Function
     End If
     On Error GoTo 0   ' Pass 1 complete; Pass 2 is pure VBA
+    PerfTimerStart "heading_cap:analyse"
 
     ' -------------------------------------------------------
     '  PASS 2: Split headings into local families
@@ -606,12 +534,18 @@ NextFamilyLevel:
         Next lvlKey
     Next fi
 
+    PerfTimerEnd "heading_cap:analyse"
     On Error GoTo 0
     Set Check_HeadingCapitalisation = issues
 End Function
 
 ' ============================================================
 '  PUBLIC: Check title formatting  (Rule 21)
+'
+'  OPTIMISED: One Find scan per form (max 18 scans total).
+'  Previously did CountWordInDoc + FlagOccurrences per pair
+'  = up to 36 scans.  Now we collect occurrences in a single
+'  pass per form and decide dominant vs minority in-memory.
 ' ============================================================
 Public Function Check_TitleFormatting(doc As Document) As Collection
     Dim issues As New Collection
@@ -624,33 +558,108 @@ Public Function Check_TitleFormatting(doc As Document) As Collection
     withDot = Array("Mr.", "Mrs.", "Ms.", "Dr.", "Prof.", "Q.C.", "K.C.", "M.P.", "J.P.")
 
     Dim i As Long
-    Dim noDotCount As Long
-    Dim withDotCount As Long
 
     For i = LBound(noDot) To UBound(noDot)
-        noDotCount = CountWordInDoc(doc, CStr(noDot(i)))
-        withDotCount = CountWordInDoc(doc, CStr(withDot(i)))
+        ' Collect all occurrences of both forms in one scan each
+        Dim noDotHits As Collection
+        Dim withDotHits As Collection
+        Set noDotHits = CollectWordHits(doc, CStr(noDot(i)))
+        Set withDotHits = CollectWordHits(doc, CStr(withDot(i)))
 
         ' Only flag if both forms exist
-        If noDotCount > 0 And withDotCount > 0 Then
-            If noDotCount >= withDotCount Then
-                ' noDot is dominant -- flag all withDot occurrences
-                FlagOccurrences doc, CStr(withDot(i)), _
-                    "Inconsistent title formatting: '" & withDot(i) & "' used", _
-                    "Use '" & noDot(i) & "' without full stop (dominant style)", _
-                    issues
+        If noDotHits.Count > 0 And withDotHits.Count > 0 Then
+            Dim minorityHits As Collection
+            Dim minorityWord As String
+            Dim dominantWord As String
+            If noDotHits.Count >= withDotHits.Count Then
+                ' noDot is dominant -- flag withDot occurrences
+                Set minorityHits = withDotHits
+                minorityWord = CStr(withDot(i))
+                dominantWord = CStr(noDot(i))
+                EmitTitleIssues minorityHits, minorityWord, dominantWord, _
+                    "without full stop", doc, issues
             Else
-                ' withDot is dominant -- flag all noDot occurrences
-                FlagOccurrences doc, CStr(noDot(i)), _
-                    "Inconsistent title formatting: '" & noDot(i) & "' used", _
-                    "Use '" & withDot(i) & "' with full stop (dominant style)", _
-                    issues
+                ' withDot is dominant -- flag noDot occurrences
+                Set minorityHits = noDotHits
+                minorityWord = CStr(noDot(i))
+                dominantWord = CStr(withDot(i))
+                EmitTitleIssues minorityHits, minorityWord, dominantWord, _
+                    "with full stop", doc, issues
             End If
         End If
     Next i
 
     Set Check_TitleFormatting = issues
 End Function
+
+' -- Collect all in-page-range occurrences of a word ----------
+'  Returns a Collection of Array(rangeStart, rangeEnd).
+'  Single Find scan per word form.
+Private Function CollectWordHits(doc As Document, word As String) As Collection
+    Dim hits As New Collection
+    Dim rng As Range
+    Dim found As Boolean
+
+    Set rng = doc.Content.Duplicate
+    With rng.Find
+        .ClearFormatting
+        .Text = word
+        .MatchWholeWord = True
+        .MatchCase = True
+        .MatchWildcards = False
+        .Wrap = wdFindStop
+        .Forward = True
+    End With
+
+    On Error Resume Next
+    Do
+        found = rng.Find.Execute
+        If Err.Number <> 0 Then Err.Clear: Exit Do
+        If Not found Then Exit Do
+
+        If EngineIsInPageRange(rng) Then
+            hits.Add Array(rng.Start, rng.End)
+        End If
+
+        rng.Collapse wdCollapseEnd
+        If Err.Number <> 0 Then Err.Clear: Exit Do
+    Loop
+    On Error GoTo 0
+
+    Set CollectWordHits = hits
+End Function
+
+' -- Emit title-formatting issues from pre-collected hits ------
+Private Sub EmitTitleIssues(hits As Collection, _
+                            minorityWord As String, _
+                            dominantWord As String, _
+                            styleDesc As String, _
+                            doc As Document, _
+                            ByRef issues As Collection)
+    Dim h As Long
+    Dim hitArr As Variant
+    Dim rng As Range
+    Dim locStr As String
+    Dim finding As Object
+
+    On Error Resume Next
+    For h = 1 To hits.Count
+        hitArr = hits(h)
+        Set rng = doc.Range(CLng(hitArr(0)), CLng(hitArr(1)))
+        If Err.Number <> 0 Then Err.Clear: GoTo NextHit
+
+        locStr = EngineGetLocationString(rng, doc)
+        If Err.Number <> 0 Then locStr = "unknown location": Err.Clear
+
+        Set finding = CreateIssueDict(RULE_NAME_TITLE, locStr, _
+            "Inconsistent title formatting: '" & minorityWord & "' used", _
+            "Use '" & dominantWord & "' " & styleDesc & " (dominant style)", _
+            CLng(hitArr(0)), CLng(hitArr(1)), "error")
+        issues.Add finding
+NextHit:
+    Next h
+    On Error GoTo 0
+End Sub
 
 
 ' ----------------------------------------------------------------
