@@ -508,7 +508,7 @@ End Function
 
 # Pleadings Checker VBA -- Targeted Audit Report
 
-**Date:** 2026-03-13 (pass 10)
+**Date:** 2026-03-13 (pass 11 — verification only)
 **Scope:** All 20 modules in `Code/` (18,824 lines total, fully inspected)
 **Approach:** Targeted fixes only; no broad rewrites
 
@@ -932,3 +932,64 @@ No files were truncated or partially read. All line counts verified via `wc -l`.
 - `InsideWidth`/`InsideHeight` fallback to `Width`/`Height` is untested on Word 2007/2010
 - Rules with `AutoFixSafe = True` but no `ReplacementText` now produce comments instead of tracked changes — this is correct behavior but will change user experience for those rules
 - The four-dimension debug line assumes `Me.InsideWidth`/`Me.InsideHeight` are readable even after the `On Error GoTo 0` — if the property doesn't exist, the debug line itself would error (extremely unlikely on any supported Word version)
+
+---
+
+## Pass 11 — Full Verification (no code changes)
+
+### Confirmed: no new defects found
+
+All items requested in this pass were already fixed in pass 10 or earlier. Full verification details below.
+
+### Areas verified and left unchanged
+
+**1. ApplySuggestionsAsTrackedChanges Suggestion-as-replacement** (PleadingsEngine.bas:1355-1368)
+- Already fixed in pass 10. Lines 1355-1356 comment: "Use ReplacementText only. Suggestion is human-readable prose and must NEVER be applied as literal replacement text."
+- When `ReplacementText` is blank: logs via `TraceStep` with rule name, adds comment via `TryAddComment`, then `GoTo NextApplyIssue`. Correct.
+
+**2. AutoFixSafe contract audit**
+- No rule in the entire codebase currently sets `AutoFixSafe = True`. All 16 rule modules' `CreateIssueDict` functions default `autoFixSafe_` to `False`. All call sites either omit the parameter or pass `False` explicitly.
+- `PleadingsEngine.CreateIssue` also defaults `autoFixSafe_` to `False`.
+- The AutoFixSafe branch in `ApplySuggestionsAsTrackedChanges` is correctly guarded but currently a prepared path for future rules only.
+
+**3. Replacement-text contract consistency**
+- `CreateIssueDict` (16 rule modules): 8 keys, no `ReplacementText` key (correct — rule modules use `Suggestion` for human-readable text only)
+- `CreateIssue` (engine): 9 keys including `ReplacementText`, defaults to `""`
+- `GetIssueProp`: returns `""` for missing keys via `Err.Clear` — safe for both 8-key and 9-key findings
+- `BuildCommentText` (engine:1471): uses `Suggestion` for comment text only — correct
+- `IssueToJSON` (engine:1929): checks `Len(repText) > 0` before emitting `replacement_text` — correct
+- `ApplyHighlights` (engine:1248): uses `rng.HighlightColorIndex = wdYellow` and `TryAddComment` only — never touches `ReplacementText` or `Suggestion` as literal text — correct
+- `GenerateReport` summary/count logic: uses `RuleName` only — correct
+
+**4. fraRules.InsideWidth guard** (frmPleadingsChecker.frm:514)
+- Frame created at line 129 with `.Width = 976` before `BuildRuleCheckboxList` called at line 139
+- `InsideWidth` = ~960pt (width minus frame chrome) — always valid
+- No guard needed
+
+**5. ProtectionType labels** (modDebugLog.bas:242-249)
+- Correct: `-1`=NoProtection, `0`=AllowOnlyRevisions, `1`=AllowOnlyComments, `2`=AllowOnlyFormFields, `3`=AllowOnlyReading, `Else`=Unknown
+
+**6. Export/debug-log path logic** (form:720-727, launcher:250-270)
+- Both use `GetWritableTempDir` -> `GetParentDirectory` -> `EnsureDirectoryExists` chain — consistent
+- Debug log path derived from report path (same directory) — always valid
+
+### Replacement-text contract after patch
+
+| Field | Meaning | Used for |
+|-------|---------|----------|
+| `Suggestion` | Human-readable guidance | Comments, reports, UI display |
+| `ReplacementText` | Machine-safe literal text | Tracked-change amendments (only when non-blank) |
+| `AutoFixSafe` | Engine may auto-amend | Only when `True` AND `ReplacementText` is non-blank |
+
+Currently no rules set `AutoFixSafe = True`, so no amendments are ever made. All issues produce comments or highlights only.
+
+### Remaining live-testing limitations
+
+- No rules currently exercise the `AutoFixSafe = True` + `ReplacementText` path — it is correctly guarded but untested at runtime
+- `InsideWidth`/`InsideHeight` untested on Word 2007/2010
+- `CheckManualNumbering` per-paragraph `Application.Run` performance hotspot unchanged
+- No unit-test harness
+
+### Modules changed (pass 11)
+
+None. AUDIT_REPORT.md updated for verification record only.
