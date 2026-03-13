@@ -1,6 +1,4 @@
-===============================================================================
-FILE: frmPleadingsChecker.frm
-===============================================================================
+========== FILE: frmPleadingsChecker.frm ==========
 
 VERSION 5.00
 Begin {C62A69F0-16DC-11CE-9E98-00AA00574A4F} frmPleadingsChecker
@@ -765,6 +763,7 @@ Private Function GetTempReportPath(sep As String) As String
     #Else
         tmpDir = Environ("TEMP")
         If Len(tmpDir) = 0 Then tmpDir = Environ("TMP")
+        If Len(tmpDir) = 0 Then tmpDir = Environ("USERPROFILE")
         If Len(tmpDir) = 0 Then tmpDir = "C:\Temp"
         If Right$(tmpDir, 1) = sep Then tmpDir = Left$(tmpDir, Len(tmpDir) - 1)
     #End If
@@ -954,9 +953,7 @@ Private Sub btnClose_Click()
 End Sub
 
 
-===============================================================================
-FILE: modDebugLog.bas
-===============================================================================
+========== FILE: modDebugLog.bas ==========
 
 Attribute VB_Name = "modDebugLog"
 ' ============================================================
@@ -1675,9 +1672,7 @@ Public Function TryProtectDocument(ByVal doc As Document, _
 End Function
 
 
-===============================================================================
-FILE: PleadingsEngine.bas
-===============================================================================
+========== FILE: PleadingsEngine.bas ==========
 
 Attribute VB_Name = "PleadingsEngine"
 ' ============================================================
@@ -2212,7 +2207,11 @@ Public Function RunAllPleadingsRules(doc As Document, _
     ' -- Initialise profiling --
     ResetProfiling
 
-    ' -- Suppress screen redraws for performance ----
+    ' -- Capture and suppress screen redraws for performance ----
+    Dim wasScreenUpdating As Boolean
+    wasScreenUpdating = Application.ScreenUpdating
+    Dim wasStatusBar As Variant
+    wasStatusBar = Application.StatusBar
     Application.ScreenUpdating = False
 
     On Error GoTo RunnerCleanup
@@ -2529,8 +2528,8 @@ Public Function RunAllPleadingsRules(doc As Document, _
 RunnerCleanup:
     ' -- Restore application state (always runs) ----------------
     On Error Resume Next
-    Application.ScreenUpdating = True
-    Application.StatusBar = ""
+    Application.ScreenUpdating = wasScreenUpdating
+    Application.StatusBar = wasStatusBar
     On Error GoTo 0
 
     ' -- Filter out issues inside block quotes / quoted text -----
@@ -2932,6 +2931,7 @@ Public Sub ApplyHighlights(doc As Document, _
     Dim finding As Object
     Dim rng As Range
     Dim i As Long
+    Dim cmtRef As Comment
 
     ' Suppress screen updates during batch comment insertion
     Dim wasScreenUpdating As Boolean
@@ -2956,11 +2956,8 @@ Public Sub ApplyHighlights(doc As Document, _
                     Err.Clear
                 End If
                 If addComments Then
-                    doc.Comments.Add Range:=rng, Text:=BuildCommentText(finding)
-                    If Err.Number <> 0 Then
-                        DebugLogError "ApplyHighlights", "comment i=" & i, Err.Number, Err.Description
-                        Err.Clear
-                    End If
+                    TryAddComment doc, rng, BuildCommentText(finding), cmtRef, _
+                        "ApplyHighlights", "comment i=" & i
                 End If
             Else
                 DebugLogError "ApplyHighlights", "doc.Range i=" & i & _
@@ -2997,6 +2994,7 @@ Public Sub ApplySuggestionsAsTrackedChanges(doc As Document, _
     Dim finding As Object
     Dim rng As Range
     Dim i As Long
+    Dim cmtRef As Comment
     Dim wasTrackingChanges As Boolean
     wasTrackingChanges = doc.TrackRevisions
 
@@ -3090,11 +3088,8 @@ Public Sub ApplySuggestionsAsTrackedChanges(doc As Document, _
                         TraceStep "ApplyTrackedChanges", "SKIPPED amendment i=" & i & _
                                   " orig=""" & Left$(origText, 30) & """ sug=""" & Left$(sugText, 30) & """"
                         If addComments Then
-                            doc.Comments.Add Range:=rng, Text:=BuildCommentText(finding)
-                            If Err.Number <> 0 Then
-                                DebugLogError "ApplyTrackedChanges", "skip-comment i=" & i, Err.Number, Err.Description
-                                Err.Clear
-                            End If
+                            TryAddComment doc, rng, BuildCommentText(finding), cmtRef, _
+                                "ApplyTrackedChanges", "skip-comment i=" & i
                         End If
                         GoTo NextApplyIssue
                     End If
@@ -3103,21 +3098,12 @@ Public Sub ApplySuggestionsAsTrackedChanges(doc As Document, _
                     TraceStep "ApplyTrackedChanges", "APPLYING i=" & i & _
                               " range=" & origStart & "-" & (origStart + origLen) & _
                               " orig=""" & Left$(origText, 30) & """ -> """ & Left$(sugText, 30) & """"
-                    rng.Text = sugText
-                    If Err.Number <> 0 Then
-                        DebugLogError "ApplyTrackedChanges", "rng.Text= i=" & i, Err.Number, Err.Description
-                        Err.Clear
-                    End If
+                    TrySetRangeText rng, sugText, _
+                        "ApplyTrackedChanges", "apply i=" & i
                 Else
                     If addComments Then
-                        TraceStep "ApplyTrackedChanges", "COMMENT-ONLY i=" & i & _
-                                  " range=" & rng.Start & "-" & rng.End & _
-                                  " rule=" & GetIssueProp(finding, "RuleName")
-                        doc.Comments.Add Range:=rng, Text:=BuildCommentText(finding)
-                        If Err.Number <> 0 Then
-                            DebugLogError "ApplyTrackedChanges", "comment-only i=" & i, Err.Number, Err.Description
-                            Err.Clear
-                        End If
+                        TryAddComment doc, rng, BuildCommentText(finding), cmtRef, _
+                            "ApplyTrackedChanges", "comment-only i=" & i
                     End If
                 End If
             Else
@@ -3616,9 +3602,7 @@ Private Function IssueToJSON(finding As Object) As String
 End Function
 
 
-===============================================================================
-FILE: PleadingsLauncher.bas
-===============================================================================
+========== FILE: PleadingsLauncher.bas ==========
 
 Attribute VB_Name = "PleadingsLauncher"
 ' ============================================================
@@ -3884,6 +3868,7 @@ Private Sub ExportReport(issues As Collection)
         #Else
             tmpDir = Environ("TEMP")
             If Len(tmpDir) = 0 Then tmpDir = Environ("TMP")
+            If Len(tmpDir) = 0 Then tmpDir = Environ("USERPROFILE")
             If Len(tmpDir) = 0 Then tmpDir = "C:\Temp"
             If Right$(tmpDir, 1) = sep Then tmpDir = Left$(tmpDir, Len(tmpDir) - 1)
         #End If
@@ -3955,9 +3940,7 @@ End Function
 
 
 
-===============================================================================
-FILE: Rules_Brands.bas
-===============================================================================
+========== FILE: Rules_Brands.bas ==========
 
 Attribute VB_Name = "Rules_Brands"
 ' ============================================================
@@ -4286,9 +4269,7 @@ Private Function EngineGetLocationString(rng As Object, doc As Document) As Stri
 End Function
 
 
-===============================================================================
-FILE: Rules_FootnoteHarts.bas
-===============================================================================
+========== FILE: Rules_FootnoteHarts.bas ==========
 
 Attribute VB_Name = "Rules_FootnoteHarts"
 ' ============================================================
@@ -4939,9 +4920,7 @@ Private Function EngineGetLocationString(rng As Object, doc As Document) As Stri
 End Function
 
 
-===============================================================================
-FILE: Rules_FootnoteIntegrity.bas
-===============================================================================
+========== FILE: Rules_FootnoteIntegrity.bas ==========
 
 Attribute VB_Name = "Rules_FootnoteIntegrity"
 ' ============================================================
@@ -5447,9 +5426,7 @@ Private Function EngineGetLocationString(rng As Object, doc As Document) As Stri
 End Function
 
 
-===============================================================================
-FILE: Rules_Formatting.bas
-===============================================================================
+========== FILE: Rules_Formatting.bas ==========
 
 Attribute VB_Name = "Rules_Formatting"
 ' ============================================================
@@ -6375,9 +6352,7 @@ Private Function EngineGetLocationString(rng As Object, doc As Document) As Stri
 End Function
 
 
-===============================================================================
-FILE: Rules_Headings.bas
-===============================================================================
+========== FILE: Rules_Headings.bas ==========
 
 Attribute VB_Name = "Rules_Headings"
 ' ============================================================
@@ -7088,9 +7063,7 @@ Private Function EngineGetLocationString(rng As Object, doc As Document) As Stri
 End Function
 
 
-===============================================================================
-FILE: Rules_Italics.bas
-===============================================================================
+========== FILE: Rules_Italics.bas ==========
 
 Attribute VB_Name = "Rules_Italics"
 ' ============================================================
@@ -7476,9 +7449,7 @@ Private Function MergeArrays(a1 As Variant, a2 As Variant, a3 As Variant) As Var
 End Function
 
 
-===============================================================================
-FILE: Rules_LegalTerms.bas
-===============================================================================
+========== FILE: Rules_LegalTerms.bas ==========
 
 Attribute VB_Name = "Rules_LegalTerms"
 ' ============================================================
@@ -7969,9 +7940,7 @@ Private Function MergeArrays2(a1 As Variant, a2 As Variant) As Variant
 End Function
 
 
-===============================================================================
-FILE: Rules_Lists.bas
-===============================================================================
+========== FILE: Rules_Lists.bas ==========
 
 Attribute VB_Name = "Rules_Lists"
 ' ============================================================
@@ -8949,9 +8918,7 @@ Private Function EngineGetLocationString(rng As Object, doc As Document) As Stri
 End Function
 
 
-===============================================================================
-FILE: Rules_NumberFormats.bas
-===============================================================================
+========== FILE: Rules_NumberFormats.bas ==========
 
 Attribute VB_Name = "Rules_NumberFormats"
 ' ============================================================
@@ -9904,9 +9871,7 @@ Private Function EngineGetDateFormatPref() As String
 End Function
 
 
-===============================================================================
-FILE: Rules_Numbering.bas
-===============================================================================
+========== FILE: Rules_Numbering.bas ==========
 
 Attribute VB_Name = "Rules_Numbering"
 ' ============================================================
@@ -10815,9 +10780,7 @@ Private Function EngineGetLocationString(rng As Object, doc As Document) As Stri
 End Function
 
 
-===============================================================================
-FILE: Rules_Punctuation.bas
-===============================================================================
+========== FILE: Rules_Punctuation.bas ==========
 
 Attribute VB_Name = "Rules_Punctuation"
 ' ============================================================
@@ -11786,9 +11749,7 @@ Private Function EngineGetLocationString(rng As Object, doc As Document) As Stri
 End Function
 
 
-===============================================================================
-FILE: Rules_Quotes.bas
-===============================================================================
+========== FILE: Rules_Quotes.bas ==========
 
 Attribute VB_Name = "Rules_Quotes"
 ' ============================================================
@@ -12611,9 +12572,7 @@ Private Function EngineGetSmartQuotePref() As String
 End Function
 
 
-===============================================================================
-FILE: Rules_Spacing.bas
-===============================================================================
+========== FILE: Rules_Spacing.bas ==========
 
 Attribute VB_Name = "Rules_Spacing"
 ' ============================================================
@@ -13239,9 +13198,7 @@ Private Function EngineGetSpaceStylePref() As String
 End Function
 
 
-===============================================================================
-FILE: Rules_Spelling.bas
-===============================================================================
+========== FILE: Rules_Spelling.bas ==========
 
 Attribute VB_Name = "Rules_Spelling"
 ' ============================================================
@@ -14971,9 +14928,7 @@ Private Function EngineGetSpellingMode() As String
 End Function
 
 
-===============================================================================
-FILE: Rules_Terms.bas
-===============================================================================
+========== FILE: Rules_Terms.bas ==========
 
 Attribute VB_Name = "Rules_Terms"
 ' ============================================================
@@ -15908,9 +15863,7 @@ Private Function EngineGetTermFormatPref() As String
 End Function
 
 
-===============================================================================
-FILE: Rules_TextScan.bas
-===============================================================================
+========== FILE: Rules_TextScan.bas ==========
 
 Attribute VB_Name = "Rules_TextScan"
 ' ============================================================

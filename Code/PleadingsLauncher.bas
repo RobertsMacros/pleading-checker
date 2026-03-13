@@ -262,6 +262,7 @@ Private Sub ExportReport(issues As Collection)
         #Else
             tmpDir = Environ("TEMP")
             If Len(tmpDir) = 0 Then tmpDir = Environ("TMP")
+            If Len(tmpDir) = 0 Then tmpDir = Environ("USERPROFILE")
             If Len(tmpDir) = 0 Then tmpDir = "C:\Temp"
             If Right$(tmpDir, 1) = sep Then tmpDir = Left$(tmpDir, Len(tmpDir) - 1)
         #End If

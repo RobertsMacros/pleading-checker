@@ -1,6 +1,6 @@
 # Pleadings Checker VBA -- Targeted Audit Report
 
-**Date:** 2026-03-13 (pass 5)
+**Date:** 2026-03-13 (pass 6)
 **Scope:** All 20 modules in `Code/`
 **Approach:** Targeted fixes only; no broad rewrites
 
@@ -150,18 +150,50 @@ VBA has no native test framework. All fixes verified by code inspection. Manual 
 
 **Unchanged modules pass 5:** All other 14 rule modules, frmPleadingsChecker.frm, PleadingsLauncher.bas, modDebugLog.bas, Rules_Formatting.bas
 
-## Pass 5 Regression Verification
+## Exact Procedures Changed (Pass 6)
 
-All prior fixes confirmed intact:
-- StatusBar capture/restore in `ApplyHighlights` and `ApplySuggestionsAsTrackedChanges` ✓
-- Scripting Runtime installation note removed; late-binding note present ✓
-- Instrumentation: 20+ `DebugLogError`/`TraceEnter`/`TraceExit`/`TraceStep` calls in PleadingsEngine.bas ✓
-- Retired rules: `Debug.Print "WARNING: ..."` in Rules_NumberFormats (Rule 18) and Rules_Terms (Rule 23) ✓
-- Engine header: "23 RETIRED" and "18 RETIRED" annotations ✓
-- 42/42 Engine wrapper fallbacks log `Err.Number` + `Err.Description` (automated count) ✓
-- OERN tightening from pass 1 (`IsException`, `GetQListPrefixLen`, `GetSOListPrefixLen`) ✓
-- OERN tightening from pass 4 (`IsBlockQuotePara`) ✓
-- Quote-family deduplication at line 755 intact ✓
-- CreateIssueDict 8-key consistency across all 16 rule modules ✓
+| Module | Procedure | Change |
+|--------|-----------|--------|
+| `PleadingsEngine.bas` | `RunAllPleadingsRules` | Capture `Application.ScreenUpdating` and `Application.StatusBar` on entry; restore both in `RunnerCleanup` (was hardcoded `True` / `""`) |
+| `PleadingsEngine.bas` | `ApplyHighlights` | Replaced raw `doc.Comments.Add` with `TryAddComment` wrapper from `modDebugLog` |
+| `PleadingsEngine.bas` | `ApplySuggestionsAsTrackedChanges` | Replaced raw `rng.Text = sugText` with `TrySetRangeText`; replaced 2x raw `doc.Comments.Add` with `TryAddComment`; all three now get range-level diagnostics via `modDebugLog` wrappers |
+| `frmPleadingsChecker.frm` | `GetTempReportPath` | Added `Environ("USERPROFILE")` fallback before hardcoded `C:\Temp` |
+| `PleadingsLauncher.bas` | `ExportReport` | Same `Environ("USERPROFILE")` fallback added |
+
+**Unchanged modules pass 6:** All 16 rule modules, modDebugLog.bas
+
+## Pass 6 Verification
+
+### Confirmed defects fixed this pass
+
+**8. `RunAllPleadingsRules` did not restore prior application state**
+- Cleanup forced `ScreenUpdating = True` and `StatusBar = ""` regardless of prior values
+- Now captures both on entry and restores in `RunnerCleanup`
+
+**9. Raw mutation calls lacked wrapper-level diagnostics**
+- `rng.Text = sugText`, `doc.Comments.Add` in `ApplySuggestionsAsTrackedChanges` and `ApplyHighlights` replaced with `TrySetRangeText` / `TryAddComment` from `modDebugLog`
+- Wrappers log `DebugLogRange` before mutation and `DebugLogError` on failure (when `DEBUG_MODE = True`)
+- Zero overhead when `DEBUG_MODE = False` (fast path)
+
+**10. Export temp-path fallback could hit non-existent `C:\Temp`**
+- Added `Environ("USERPROFILE")` as intermediate fallback in both form and launcher
+- Chain now: document path → `%TEMP%` → `%TMP%` → `%USERPROFILE%` → `C:\Temp`
+
+### Areas verified as acceptable
+
+- `CreateIssue` 9-key vs `CreateIssueDict` 8-key: compatible — `GetIssueProp` handles missing keys via `Err.Clear`; no runtime issue
+- 42/42 Engine wrapper fallbacks log `Err.Number` + `Err.Description` (automated count)
+- OERN: all 12 specified modules re-verified in passes 4-5; no new targets in pass 6
+- Brand API: `SaveBrandRules`/`LoadBrandRules` return Boolean; form and launcher delegate with fallback
+- All prior fixes intact (StatusBar, Scripting Runtime note, retired rules, quote dedupe, Lists wiring, etc.)
+
+### Assumptions and source-coverage limits
+- All 13 scoped modules inspected from the full repo files (not truncated)
+- `Rules_Numbering.bas`, `Rules_Punctuation.bas`, `Rules_Quotes.bas`, `Rules_Spacing.bas`, `Rules_Spelling.bas`, `Rules_Terms.bas`, `Rules_TextScan.bas` not in scope this pass but verified in passes 1-5
+
+### Remaining limitations (need live Word testing)
+- Broad OERN in paragraph-iteration loops (7 modules, 50-440 lines each)
+- Find.Execute loop OERN (`rng.Collapse wdCollapseEnd` itself fragile)
+- No unit-test harness
 - Rules_Lists ENGINE WIRING NOTE accurate ✓
 - Brand persistence API (`SaveBrandRules`/`LoadBrandRules`) returns Boolean ✓
