@@ -601,6 +601,42 @@ Public Function Check_BracketIntegrity(doc As Document) As Collection
                 curlyClose & " closed"
         End If
 
+        ' -- Stack-based nesting check (only when counts balance) --
+        If parenOpen = parenClose And sqOpen = sqClose _
+           And curlyOpen = curlyClose _
+           And (parenOpen + sqOpen + curlyOpen) > 0 Then
+            Dim stk() As Long, stkTop As Long
+            stkTop = 0
+            ReDim stk(1 To parenOpen + sqOpen + curlyOpen)
+            Dim nestBad As Boolean, nestPos As Long
+            nestBad = False
+            For i = 0 To bMax Step 2
+                code = b(i) Or (CLng(b(i + 1)) * 256&)
+                Select Case code
+                    Case 40, 91, 123  ' open bracket
+                        stkTop = stkTop + 1
+                        If stkTop > UBound(stk) Then ReDim Preserve stk(1 To stkTop + 4)
+                        stk(stkTop) = code
+                    Case 41, 93, 125  ' close bracket
+                        If stkTop = 0 Then
+                            nestBad = True
+                            nestPos = paraStart + (i \ 2) - bktListPrefixLen
+                            Exit For
+                        End If
+                        If Not CodesMatch(stk(stkTop), code) Then
+                            nestBad = True
+                            nestPos = paraStart + (i \ 2) - bktListPrefixLen
+                            Exit For
+                        End If
+                        stkTop = stkTop - 1
+                End Select
+            Next i
+            If nestBad Then
+                CreateBracketIssue doc, issues, nestPos, "()", _
+                    "Improperly nested brackets (e.g. overlapping pairs)"
+            End If
+        End If
+
 NxtPara:
     Next para
 
@@ -655,15 +691,16 @@ Private Sub CreateBracketIssue(doc As Document, _
 
     ' Determine suggestion based on bracket type
     Dim suggestion As String
-    If bracketChar = "(" Or bracketChar = ")" Then
-        suggestion = "Add or correct matching parenthesis"
-    ElseIf bracketChar = "[" Or bracketChar = "]" Then
-        suggestion = "Add or correct matching square bracket"
-    ElseIf bracketChar = "{" Or bracketChar = "}" Then
-        suggestion = "Add or correct matching curly brace"
-    Else
-        suggestion = "Review bracket pairing"
-    End If
+    Select Case bracketChar
+        Case "()", "(", ")"
+            suggestion = "Add or correct matching parenthesis"
+        Case "[]", "[", "]"
+            suggestion = "Add or correct matching square bracket"
+        Case "{}", "{", "}"
+            suggestion = "Add or correct matching curly brace"
+        Case Else
+            suggestion = "Review bracket pairing"
+    End Select
 
     Set finding = CreateIssueDict(RULE_NAME_BRACKET, locStr, issueText, suggestion, pos, pos + 1, "error")
     issues.Add finding

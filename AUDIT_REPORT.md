@@ -1,7 +1,7 @@
 # Pleadings Checker VBA -- Targeted Audit Report
 
-**Date:** 2026-03-13 (pass 6)
-**Scope:** All 20 modules in `Code/`
+**Date:** 2026-03-13 (pass 7)
+**Scope:** 17 modules in `Code/` (all except Rules_FootnoteHarts, Rules_TextScan, Rules_Brands)
 **Approach:** Targeted fixes only; no broad rewrites
 
 ---
@@ -197,3 +197,56 @@ VBA has no native test framework. All fixes verified by code inspection. Manual 
 - No unit-test harness
 - Rules_Lists ENGINE WIRING NOTE accurate ✓
 - Brand persistence API (`SaveBrandRules`/`LoadBrandRules`) returns Boolean ✓
+
+---
+
+## Exact Procedures Changed (Pass 7)
+
+| Module | Procedure | Change |
+|--------|-----------|--------|
+| `Rules_Lists.bas` | `Check_ListPunctuation` | Fixed list ID computation: now uses `List.ListParagraphs(1).Range.Start` (unique per list) instead of `ListParagraphs.Count` (non-unique). Grouping loop now breaks groups when `paraListID` changes between consecutive list paragraphs. |
+| `Rules_Punctuation.bas` | `CreateBracketIssue` | Fixed suggestion logic: `Select Case` now matches `"()"`, `"[]"`, `"{}"` (the values actually passed) instead of individual characters that never matched. |
+| `Rules_Punctuation.bas` | `Check_BracketIntegrity` | Added stack-based nesting check for `([)]` patterns. Runs only when counts balance (avoids duplicate reports). Uses existing `CodesMatch` helper. |
+
+**Unchanged modules pass 7:** PleadingsEngine.bas, frmPleadingsChecker.frm, PleadingsLauncher.bas, modDebugLog.bas, all 15 other rule modules
+
+## Pass 7 Verification
+
+### Confirmed defects fixed this pass
+
+**11. List-grouping bug merged adjacent distinct lists**
+- `Check_ListPunctuation` grouped consecutive list paragraphs purely by `paraIsList` flag
+- `paraListID` was computed but never used in grouping
+- The ID computation itself was broken: `ListParagraphs.Count` is not a unique list identifier (two lists with the same item count get the same "ID")
+- Fixed: ID now uses start position of first paragraph in the Word List object (`List.ListParagraphs(1).Range.Start`), which is unique per list. Grouping loop breaks groups when IDs differ (with guard for `0` = unknown).
+
+**12. Bracket suggestion never matched passed values**
+- `Check_BracketIntegrity` passes `"()"`, `"[]"`, `"{}"` as `bracketChar`
+- `CreateBracketIssue` compared against `"("`, `")"`, `"["`, etc. — individual characters that never match
+- All bracket issues fell through to the generic `"Review bracket pairing"` suggestion
+- Fixed: `Select Case` now matches the pair strings (`"()"`, `"[]"`, `"{}"`) plus individual characters for forward compatibility
+
+**13. No nesting check in bracket integrity**
+- Header claimed checks for "improperly nested brackets" but code only compared open/close counts
+- `([)]` would pass undetected (1 open paren, 1 close paren, 1 open bracket, 1 close bracket — all balanced)
+- Fixed: stack-based nesting check runs when counts balance. Uses existing `CodesMatch` helper. Reports at the position of the first nesting violation.
+
+### Areas verified as acceptable and left alone
+
+- **Items 1, 2, 6 (pass 6 fixes):** `RunAllPleadingsRules` state capture/restore, `TrySetRangeText`/`TryAddComment` wrappers, `USERPROFILE` temp-path fallback — all intact
+- **Item 7 (issue payload):** `CreateIssue` (9 keys) vs `CreateIssueDict` (8 keys) — compatible. All access through `GetIssueProp` which returns `""` on missing keys via `Err.Clear`. No runtime problem.
+- **Item 8 (OERN):** All 10 specified modules re-audited. No new safe tightening targets found. Previous fixes intact (`IsException`, `GetQListPrefixLen`, `GetSOListPrefixLen`, `IsBlockQuotePara`). Paragraph-loop and Find.Execute OERN intentionally preserved.
+- **42/42 Engine wrapper fallbacks** log `Err.Number` + `Err.Description` (verified across all scoped rule modules)
+- **Rules_Spacing.bas** fully audited (623 lines): 5 public functions, 3 engine wrappers all logging properly, no defects found, OERN patterns all intentionally broad or already tightened
+
+### Assumptions and source-coverage limits
+
+- All 17 scoped modules inspected from the full repo files (not truncated)
+- `Rules_FootnoteHarts.bas`, `Rules_TextScan.bas`, `Rules_Brands.bas` not in scope this pass but verified in passes 1-6
+
+### Remaining limitations (need live Word testing)
+
+- **Performance:** `CheckManualNumbering` calls `Application.Run("Rules_Formatting.IsBlockQuotePara", para)` per paragraph via late-bound dispatch. Caching would improve performance on large documents but requires live testing to validate.
+- Broad OERN in paragraph-iteration loops (7 modules, 50-440 lines each)
+- Find.Execute loop OERN (`rng.Collapse wdCollapseEnd` itself fragile)
+- No unit-test harness
