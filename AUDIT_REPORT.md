@@ -1,6 +1,6 @@
 # Pleadings Checker VBA -- Targeted Audit Report
 
-**Date:** 2026-03-13 (pass 4)
+**Date:** 2026-03-13 (pass 5)
 **Scope:** All 20 modules in `Combined/`
 **Approach:** Targeted fixes only; no broad rewrites
 
@@ -29,6 +29,9 @@
 | `GenerateReport` | No `TraceEnter`/`TraceExit`; file-open failure logged in return string only | Added `TraceEnter`/`TraceExit` with issue count; `DebugLogError` on file-open failure and write-error paths |
 
 **Fix (pass 3):** 7 new `DebugLogError` calls, 1 new `DebugLogDoc`, 1 new `TraceEnter`, 2 new `TraceExit`, 1 new `TraceStep` for skipped highlights. All use existing `modDebugLog` helpers. Zero overhead when `DEBUG_MODE = False`.
+**Fix (pass 5):** Two remaining gaps in `ApplySuggestionsAsTrackedChanges`:
+  - `doc.Range` failure was completely silent (unlike `ApplyHighlights` which had an `Else` branch). Added `DebugLogError` with range coordinates on `doc.Range` failure.
+  - Comment-only path (non-autofix items) had no pre-call diagnostic. Added `TraceStep "COMMENT-ONLY"` with range, rule name before `doc.Comments.Add`.
 
 ### 4. Silent fallback in 10 Engine* wrapper functions
 **Modules:** `Rules_Spelling.bas`, `Rules_Quotes.bas`, `Rules_NumberFormats.bas`, `Rules_Terms.bas`, `Rules_Spacing.bas`
@@ -39,6 +42,7 @@
 **Modules:** `Rules_NumberFormats.bas` (Rule 18), `Rules_Terms.bas` (Rule 23)
 **Defect:** Public functions `Check_PageRange`, `SetRange`, `Check_PhraseConsistency` looked like ordinary active entry points despite comments saying "RETIRED".
 **Fix:** Engine header annotated `(Rules 5, 7; 23 RETIRED)` and `(Rules 9, 19; 18 RETIRED)`. Function-level comments strengthened to "NOT dispatched" / "Kept ONLY for backwards compatibility". Runtime `Debug.Print "WARNING: ..."` added to each retired function body.
+**Fix (pass 5):** Retired-rule constants renamed: `RULE_NAME_PAGE_RANGE` → `RETIRED_RULE_NAME_PAGE_RANGE` (dead code, unused), `RULE23_NAME` → `RETIRED_RULE23_NAME` (used only within retired `Check_PhraseConsistency`). Makes retirement impossible to miss when scanning constant declarations.
 
 ### 6. On Error Resume Next tightened in safe helper functions
 **Modules:** `Rules_Spelling.bas`, `Rules_Quotes.bas`, `Rules_TextScan.bas`
@@ -83,6 +87,9 @@ ENGINE WIRING NOTE (lines 11-15) accurately documents single aggregate toggle `"
 
 ### OERN in paragraph-iteration and Find.Execute loops
 Broad OERN over paragraph loops and Find loops intentionally preserved.
+
+### Pass 5 OERN audit: all 12 specified modules re-verified
+All 12 modules re-audited. Previous fixes intact (`IsException`, `GetQListPrefixLen`, `GetSOListPrefixLen`, `IsBlockQuotePara`). No new safe tightening targets found. Two agent-reported candidates rejected on manual review: `FindTermRange` call in Rules_Terms.bas involves Word OM internally (OERN correctly needed); single `Len()` call in Rules_Formatting.bas between two OM calls (not worth toggling for 1 line).
 
 ### Pass 4 OERN audit: 5 newly-audited modules
 Modules `Rules_Formatting.bas`, `Rules_Headings.bas`, `Rules_Italics.bas`, `Rules_FootnoteIntegrity.bas`, `Rules_LegalTerms.bas` were audited for OERN tightening opportunities:
@@ -133,7 +140,17 @@ VBA has no native test framework. All fixes verified by code inspection. Manual 
 
 **Unchanged modules pass 4:** PleadingsEngine.bas, all other 15 rule modules, frmPleadingsChecker.frm, PleadingsLauncher.bas, modDebugLog.bas
 
-## Pass 4 Regression Verification
+## Exact Procedures Changed (Pass 5)
+
+| Module | Procedure | Change |
+|--------|-----------|--------|
+| `PleadingsEngine.bas` | `ApplySuggestionsAsTrackedChanges` | Added `DebugLogError` Else branch for `doc.Range` failure (was completely silent); added `TraceStep "COMMENT-ONLY"` before comment insertion on non-autofix items |
+| `Rules_NumberFormats.bas` | _(constant only)_ | Renamed `RULE_NAME_PAGE_RANGE` → `RETIRED_RULE_NAME_PAGE_RANGE` (dead code) |
+| `Rules_Terms.bas` | _(constant only)_ | Renamed `RULE23_NAME` → `RETIRED_RULE23_NAME` (and 1 reference in `Check_PhraseConsistency`) |
+
+**Unchanged modules pass 5:** All other 14 rule modules, frmPleadingsChecker.frm, PleadingsLauncher.bas, modDebugLog.bas, Rules_Formatting.bas
+
+## Pass 5 Regression Verification
 
 All prior fixes confirmed intact:
 - StatusBar capture/restore in `ApplyHighlights` and `ApplySuggestionsAsTrackedChanges` ✓
@@ -143,6 +160,7 @@ All prior fixes confirmed intact:
 - Engine header: "23 RETIRED" and "18 RETIRED" annotations ✓
 - 42/42 Engine wrapper fallbacks log `Err.Number` + `Err.Description` (automated count) ✓
 - OERN tightening from pass 1 (`IsException`, `GetQListPrefixLen`, `GetSOListPrefixLen`) ✓
+- OERN tightening from pass 4 (`IsBlockQuotePara`) ✓
 - Quote-family deduplication at line 755 intact ✓
 - CreateIssueDict 8-key consistency across all 16 rule modules ✓
 - Rules_Lists ENGINE WIRING NOTE accurate ✓

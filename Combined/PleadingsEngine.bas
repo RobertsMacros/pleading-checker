@@ -1429,6 +1429,9 @@ Public Sub ApplySuggestionsAsTrackedChanges(doc As Document, _
                     End If
                 Else
                     If addComments Then
+                        TraceStep "ApplyTrackedChanges", "COMMENT-ONLY i=" & i & _
+                                  " range=" & rng.Start & "-" & rng.End & _
+                                  " rule=" & GetIssueProp(finding, "RuleName")
                         doc.Comments.Add Range:=rng, Text:=BuildCommentText(finding)
                         If Err.Number <> 0 Then
                             DebugLogError "ApplyTrackedChanges", "comment-only i=" & i, Err.Number, Err.Description
@@ -1436,6 +1439,11 @@ Public Sub ApplySuggestionsAsTrackedChanges(doc As Document, _
                         End If
                     End If
                 End If
+            Else
+                DebugLogError "ApplyTrackedChanges", "doc.Range i=" & i & _
+                    " start=" & GetIssueProp(finding, "RangeStart") & _
+                    " end=" & GetIssueProp(finding, "RangeEnd"), Err.Number, Err.Description
+                Err.Clear
             End If
 NextApplyIssue:
             On Error GoTo TrackedCleanup

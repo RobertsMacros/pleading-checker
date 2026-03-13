@@ -21,8 +21,9 @@ Option Explicit
 
 ' -- Rule name constants ---------------------------------------
 Private Const RULE_NAME_DATE_TIME As String = "date_time_format"
-' RETIRED: page_range is not engine-wired; kept for backwards compat only
-Private Const RULE_NAME_PAGE_RANGE As String = "page_range"
+' RETIRED -- DEAD CODE: page_range is not engine-wired and this constant is unused.
+' Kept only so the module compiles if an external caller references it.
+Private Const RETIRED_RULE_NAME_PAGE_RANGE As String = "page_range"
 Private Const RULE_NAME_CURRENCY As String = "currency_number_format"
 
 ' -- Currency format category constants (Rule19) ---------------

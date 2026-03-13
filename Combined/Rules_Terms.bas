@@ -14,8 +14,8 @@ Option Explicit
 
 Private Const RULE05_NAME As String = "custom_term_whitelist"
 Private Const RULE07_NAME As String = "defined_terms"
-' RETIRED: phrase_consistency is not engine-wired; kept for backwards compat only
-Private Const RULE23_NAME As String = "phrase_consistency"
+' RETIRED -- NOT ENGINE-WIRED: phrase_consistency kept only for backwards compat
+Private Const RETIRED_RETIRED_RULE23_NAME As String = "phrase_consistency"
 
 ' ============================================================
 '  PRIVATE HELPERS (Rule07)
@@ -285,7 +285,7 @@ Private Sub FlagPhraseOccurrences(doc As Document, _
             If Err.Number <> 0 Then locStr = "unknown location": Err.Clear
             On Error GoTo 0
 
-            Set finding = CreateIssueDict(RULE23_NAME, locStr, "Inconsistent phrase: '" & rng.Text & "' used", "Use '" & dominantPhrase & "' for consistency (dominant style)", rng.Start, rng.End, "error")
+            Set finding = CreateIssueDict(RETIRED_RULE23_NAME, locStr, "Inconsistent phrase: '" & rng.Text & "' used", "Use '" & dominantPhrase & "' for consistency (dominant style)", rng.Start, rng.End, "error")
             issues.Add finding
         End If
 
