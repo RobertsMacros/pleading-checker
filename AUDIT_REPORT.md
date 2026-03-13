@@ -1,6 +1,6 @@
 # Pleadings Checker VBA -- Targeted Audit Report
 
-**Date:** 2026-03-13 (pass 8)
+**Date:** 2026-03-13 (pass 9)
 **Scope:** All 20 modules in `Code/` (18,824 lines total, fully inspected)
 **Approach:** Targeted fixes only; no broad rewrites
 
@@ -323,4 +323,56 @@ No files were truncated or partially read. All line counts verified via `wc -l`.
 - **Bracket count-mismatch anchoring:** Reports position of first bracket of that type, not necessarily the unmatched one
 - Broad OERN in paragraph-iteration loops (7 modules, 50-440 lines each)
 - Find.Execute loop OERN (`rng.Collapse wdCollapseEnd` itself fragile)
+- No unit-test harness
+
+---
+
+## Pass 9 — Final Hardening
+
+### Confirmed defects fixed
+
+**17. EnsureDirectoryExists broken on UNC paths**
+- `Split("\\server\share\dir", "\")` produces `["","","server","share","dir"]`
+- Old code: `built = parts(0)` = `""`, then builds `"\server"`, `"\\server"` — attempted `MkDir` on nonsensical intermediate paths before ever reaching `\\server\share`
+- Fixed: detect UNC prefix (`\\`), skip to index 4, treating `\\server\share` as the unsplittable root
+- Also fixed: empty path components from double separators now skipped instead of producing malformed paths
+
+**18. Temp-path fallback could target unwritable C:\Temp**
+- Old chain: `TEMP` -> `TMP` -> `USERPROFILE` -> `C:\Temp`
+- `C:\Temp` may not exist and is often unwritable on locked-down machines
+- `USERPROFILE` dropped the report in the user's home directory root (clumsy)
+- Fixed: new shared helper `modDebugLog.GetWritableTempDir` uses chain: `TEMP` -> `TMP` -> `Application.Options.DefaultFilePath(wdTempFilePath)` -> `LOCALAPPDATA\Temp` -> `USERPROFILE` (last resort)
+- Both form (`GetTempReportPath`) and launcher (`ExportReport`) now call the shared helper — eliminates duplicated inline logic
+
+**19. UserForm sizing used outer dimensions, clipping bottom controls**
+- `Me.Height = 1000` sets the *outer* height including title bar and window chrome (~25pt)
+- Controls were laid out assuming 1000pt of interior space, so the bottom status label was clipped
+- Fixed: now uses `Me.InsideHeight` (= client area) computed from actual layout endpoint (`yPos + LBL_H + PAD`)
+- `.frm` header `ClientHeight` reduced from 1000 to 600 to minimize pre-Initialize flash
+
+### Exact procedures/modules changed (pass 9)
+
+| Module | Procedure | Change |
+|--------|-----------|--------|
+| `modDebugLog.bas` | `EnsureDirectoryExists` | UNC path handling, empty component skip, trailing separator loop |
+| `modDebugLog.bas` | `GetWritableTempDir` (new) | Shared temp-dir helper with robust fallback chain, no FSO |
+| `frmPleadingsChecker.frm` | `UserForm_Initialize` | `Me.InsideWidth`/`Me.InsideHeight` instead of `Me.Width`/`Me.Height`; height computed from layout |
+| `frmPleadingsChecker.frm` | `GetTempReportPath` | Delegates to `modDebugLog.GetWritableTempDir` |
+| `frmPleadingsChecker.frm` | `.frm` header | `ClientHeight` 1000 -> 600 |
+| `PleadingsLauncher.bas` | `ExportReport` | Inline temp-path logic replaced with `modDebugLog.GetWritableTempDir` call |
+
+### Areas verified and left unchanged
+
+- **RunAllPleadingsRules state restoration**: captures/restores `wasScreenUpdating` + `wasStatusBar` — intact
+- **ApplyHighlights / ApplySuggestionsAsTrackedChanges**: all mutations go through `TrySetRangeText`/`TryAddComment` — no raw mutations remain. Return values not captured but wrappers self-log errors. No meaningful recovery possible in callers.
+- **Debug log path**: derived from report path (same directory, `.json` -> `_debug.log`) — always valid when report path parent exists
+- **Brand save/load path**: form and launcher both use `EnsureDirectoryExists` + `GetBrandRulesPath` delegate — aligned
+- **OERN audit**: no new clearly-safe tightening targets found in this pass
+
+### Remaining limitations (need live Word testing)
+
+- `InsideWidth`/`InsideHeight` may behave differently across Word versions; need to verify on Word 2010, 2016, 365
+- `Application.Options.DefaultFilePath(wdTempFilePath)` fallback untested on machines where TEMP/TMP are both unset
+- `CheckManualNumbering` performance hotspot unchanged (needs caching validated under live conditions)
+- Broad OERN in paragraph-iteration loops (7 modules)
 - No unit-test harness

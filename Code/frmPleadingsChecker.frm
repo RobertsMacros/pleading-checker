@@ -1,7 +1,7 @@
 VERSION 5.00
 Begin {C62A69F0-16DC-11CE-9E98-00AA00574A4F} frmPleadingsChecker
    Caption         =   "Pleadings Checker"
-   ClientHeight    =   1000
+   ClientHeight    =   600
    ClientLeft      =   120
    ClientTop       =   465
    ClientWidth     =   1000
@@ -472,14 +472,18 @@ Private Sub UserForm_Initialize()
     ' -- Load brand list ---------------------------------------
     RefreshBrandList
 
-    ' -- Hardcoded form size: 1000 x 1000 points ---------------
-    ' VBA UserForm Width/Height are in points.
-    ' Set explicitly here as a defensive override in case the
-    ' .frm persisted ClientWidth/ClientHeight values are ignored
-    ' or overridden by control layout.
-    Me.Width = 1000
-    Me.Height = 1000
-    Debug.Print "UserForm_Initialize: Width=" & Me.Width & " Height=" & Me.Height
+    ' -- Final form size based on layout ---
+    ' Use InsideWidth/InsideHeight (= client area) rather than
+    ' Width/Height (which include title bar and window chrome)
+    ' to guarantee the control layout fits without clipping.
+    Dim neededH As Single
+    neededH = yPos + LBL_H + PAD   ' bottom of status label + padding
+    If neededH < 400 Then neededH = 400  ' sensible minimum
+
+    Me.InsideWidth = FULL_W + 2 * PAD   ' = 1000
+    Me.InsideHeight = neededH
+    Debug.Print "UserForm_Initialize: InsideWidth=" & Me.InsideWidth & _
+                " InsideHeight=" & Me.InsideHeight
 End Sub
 
 ' ============================================================
@@ -759,20 +763,7 @@ End Sub
 
 ' -- Helper: build a temp path for report export (cross-platform) --
 Private Function GetTempReportPath(sep As String) As String
-    Dim tmpDir As String
-    #If Mac Then
-        tmpDir = Environ("TMPDIR")
-        If Len(tmpDir) = 0 Then tmpDir = "/tmp"
-        ' Strip trailing separator if present
-        If Right$(tmpDir, 1) = sep Then tmpDir = Left$(tmpDir, Len(tmpDir) - 1)
-    #Else
-        tmpDir = Environ("TEMP")
-        If Len(tmpDir) = 0 Then tmpDir = Environ("TMP")
-        If Len(tmpDir) = 0 Then tmpDir = Environ("USERPROFILE")
-        If Len(tmpDir) = 0 Then tmpDir = "C:\Temp"
-        If Right$(tmpDir, 1) = sep Then tmpDir = Left$(tmpDir, Len(tmpDir) - 1)
-    #End If
-    GetTempReportPath = tmpDir & sep & "pleadings_report.json"
+    GetTempReportPath = modDebugLog.GetWritableTempDir() & sep & "pleadings_report.json"
 End Function
 
 ' ============================================================

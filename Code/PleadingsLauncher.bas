@@ -247,19 +247,7 @@ Private Sub ExportReport(issues As Collection)
     On Error GoTo 0
 
     If Len(reportPath) = 0 Then
-        Dim tmpDir As String
-        #If Mac Then
-            tmpDir = Environ("TMPDIR")
-            If Len(tmpDir) = 0 Then tmpDir = "/tmp"
-            If Right$(tmpDir, 1) = sep Then tmpDir = Left$(tmpDir, Len(tmpDir) - 1)
-        #Else
-            tmpDir = Environ("TEMP")
-            If Len(tmpDir) = 0 Then tmpDir = Environ("TMP")
-            If Len(tmpDir) = 0 Then tmpDir = Environ("USERPROFILE")
-            If Len(tmpDir) = 0 Then tmpDir = "C:\Temp"
-            If Right$(tmpDir, 1) = sep Then tmpDir = Left$(tmpDir, Len(tmpDir) - 1)
-        #End If
-        reportPath = tmpDir & sep & "pleadings_report.json"
+        reportPath = modDebugLog.GetWritableTempDir() & sep & "pleadings_report.json"
     End If
 
     ' Ensure parent directory exists before writing

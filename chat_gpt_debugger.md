@@ -4,7 +4,7 @@
 VERSION 5.00
 Begin {C62A69F0-16DC-11CE-9E98-00AA00574A4F} frmPleadingsChecker
    Caption         =   "Pleadings Checker"
-   ClientHeight    =   1000
+   ClientHeight    =   600
    ClientLeft      =   120
    ClientTop       =   465
    ClientWidth     =   1000
@@ -475,14 +475,18 @@ Private Sub UserForm_Initialize()
     ' -- Load brand list ---------------------------------------
     RefreshBrandList
 
-    ' -- Hardcoded form size: 1000 x 1000 points ---------------
-    ' VBA UserForm Width/Height are in points.
-    ' Set explicitly here as a defensive override in case the
-    ' .frm persisted ClientWidth/ClientHeight values are ignored
-    ' or overridden by control layout.
-    Me.Width = 1000
-    Me.Height = 1000
-    Debug.Print "UserForm_Initialize: Width=" & Me.Width & " Height=" & Me.Height
+    ' -- Final form size based on layout ---
+    ' Use InsideWidth/InsideHeight (= client area) rather than
+    ' Width/Height (which include title bar and window chrome)
+    ' to guarantee the control layout fits without clipping.
+    Dim neededH As Single
+    neededH = yPos + LBL_H + PAD   ' bottom of status label + padding
+    If neededH < 400 Then neededH = 400  ' sensible minimum
+
+    Me.InsideWidth = FULL_W + 2 * PAD   ' = 1000
+    Me.InsideHeight = neededH
+    Debug.Print "UserForm_Initialize: InsideWidth=" & Me.InsideWidth & _
+                " InsideHeight=" & Me.InsideHeight
 End Sub
 
 ' ============================================================
@@ -762,20 +766,7 @@ End Sub
 
 ' -- Helper: build a temp path for report export (cross-platform) --
 Private Function GetTempReportPath(sep As String) As String
-    Dim tmpDir As String
-    #If Mac Then
-        tmpDir = Environ("TMPDIR")
-        If Len(tmpDir) = 0 Then tmpDir = "/tmp"
-        ' Strip trailing separator if present
-        If Right$(tmpDir, 1) = sep Then tmpDir = Left$(tmpDir, Len(tmpDir) - 1)
-    #Else
-        tmpDir = Environ("TEMP")
-        If Len(tmpDir) = 0 Then tmpDir = Environ("TMP")
-        If Len(tmpDir) = 0 Then tmpDir = Environ("USERPROFILE")
-        If Len(tmpDir) = 0 Then tmpDir = "C:\Temp"
-        If Right$(tmpDir, 1) = sep Then tmpDir = Left$(tmpDir, Len(tmpDir) - 1)
-    #End If
-    GetTempReportPath = tmpDir & sep & "pleadings_report.json"
+    GetTempReportPath = modDebugLog.GetWritableTempDir() & sep & "pleadings_report.json"
 End Function
 
 ' ============================================================
@@ -1680,16 +1671,18 @@ End Function
 
 ' --- Recursively ensure a folder path exists ---
 ' Returns True if the folder exists (or was created), False on failure.
+' Handles UNC paths (\\server\share\...), drive-letter paths, and
+' Unix absolute paths.  No FileSystemObject dependency.
 Public Function EnsureDirectoryExists(ByVal folderPath As String) As Boolean
     EnsureDirectoryExists = False
     If Len(folderPath) = 0 Then Exit Function
 
-    ' Strip trailing separator
+    ' Strip trailing separator(s)
     Dim sep As String
     sep = Application.PathSeparator
-    If Right$(folderPath, 1) = sep Then
+    Do While Len(folderPath) > 1 And Right$(folderPath, 1) = sep
         folderPath = Left$(folderPath, Len(folderPath) - 1)
-    End If
+    Loop
     If Len(folderPath) = 0 Then Exit Function
 
     ' Already exists?
@@ -1703,29 +1696,45 @@ Public Function EnsureDirectoryExists(ByVal folderPath As String) As Boolean
         Exit Function
     End If
 
-    ' Walk path components, creating as needed
+    ' Walk path components, creating as needed.
+    ' Determine the root prefix that must not be MkDir'd.
     Dim parts() As String
     parts = Split(folderPath, sep)
     If UBound(parts) < 0 Then Exit Function
 
     Dim built As String
-    Dim i As Long
+    Dim startIdx As Long
 
     #If Mac Then
-        ' Unix paths start with /  so parts(0) = ""
+        ' Unix absolute paths: /Users/... -> parts(0)=""
         If Left$(folderPath, 1) = sep Then
+            If UBound(parts) < 1 Then Exit Function
             built = sep & parts(1)
-            i = 2
+            startIdx = 2
         Else
             built = parts(0)
-            i = 1
+            startIdx = 1
         End If
     #Else
-        built = parts(0)   ' drive letter e.g. "C:"
-        i = 1
+        ' UNC: \\server\share -> parts = ["","","server","share",...]
+        '   root = \\server\share  (need at least 4 parts, start at index 4)
+        ' Drive: C:\dir -> parts = ["C:","dir",...]
+        '   root = C:  (start at index 1)
+        If Left$(folderPath, 2) = sep & sep Then
+            ' UNC path -- \\server\share is the root; cannot MkDir it
+            If UBound(parts) < 3 Then Exit Function  ' malformed UNC
+            built = sep & sep & parts(2) & sep & parts(3)
+            startIdx = 4
+        Else
+            built = parts(0)   ' drive letter e.g. "C:"
+            startIdx = 1
+        End If
     #End If
 
-    For i = i To UBound(parts)
+    Dim i As Long
+    For i = startIdx To UBound(parts)
+        ' Skip empty components (double separators in the input)
+        If Len(parts(i)) = 0 Then GoTo NextComponent
         built = built & sep & parts(i)
         On Error Resume Next
         testDir = ""
@@ -1745,9 +1754,51 @@ Public Function EnsureDirectoryExists(ByVal folderPath As String) As Boolean
         End If
         Err.Clear
         On Error GoTo 0
+NextComponent:
     Next i
 
     EnsureDirectoryExists = True
+End Function
+
+' --- Cross-platform writable temp directory ---
+' Returns a known-writable temporary directory path (no trailing separator).
+' Uses the most reliable built-in path available without external references.
+Public Function GetWritableTempDir() As String
+    Dim tmp As String
+    Dim sep As String
+    sep = Application.PathSeparator
+
+    #If Mac Then
+        tmp = Environ("TMPDIR")
+        If Len(tmp) = 0 Then tmp = "/tmp"
+    #Else
+        tmp = Environ("TEMP")
+        If Len(tmp) = 0 Then tmp = Environ("TMP")
+
+        ' Fallback: ask Word for its temp-file path
+        If Len(tmp) = 0 Then
+            On Error Resume Next
+            tmp = Application.Options.DefaultFilePath(wdTempFilePath)
+            If Err.Number <> 0 Then tmp = "": Err.Clear
+            On Error GoTo 0
+        End If
+
+        ' Fallback: LOCALAPPDATA\Temp (standard Windows location)
+        If Len(tmp) = 0 Then
+            tmp = Environ("LOCALAPPDATA")
+            If Len(tmp) > 0 Then tmp = tmp & sep & "Temp"
+        End If
+
+        ' Last resort: user profile (always exists)
+        If Len(tmp) = 0 Then tmp = Environ("USERPROFILE")
+    #End If
+
+    ' Strip trailing separator
+    If Len(tmp) > 1 And Right$(tmp, 1) = sep Then
+        tmp = Left$(tmp, Len(tmp) - 1)
+    End If
+
+    GetWritableTempDir = tmp
 End Function
 
 ' --- Extract parent directory from a file path ---
@@ -3949,19 +4000,7 @@ Private Sub ExportReport(issues As Collection)
     On Error GoTo 0
 
     If Len(reportPath) = 0 Then
-        Dim tmpDir As String
-        #If Mac Then
-            tmpDir = Environ("TMPDIR")
-            If Len(tmpDir) = 0 Then tmpDir = "/tmp"
-            If Right$(tmpDir, 1) = sep Then tmpDir = Left$(tmpDir, Len(tmpDir) - 1)
-        #Else
-            tmpDir = Environ("TEMP")
-            If Len(tmpDir) = 0 Then tmpDir = Environ("TMP")
-            If Len(tmpDir) = 0 Then tmpDir = Environ("USERPROFILE")
-            If Len(tmpDir) = 0 Then tmpDir = "C:\Temp"
-            If Right$(tmpDir, 1) = sep Then tmpDir = Left$(tmpDir, Len(tmpDir) - 1)
-        #End If
-        reportPath = tmpDir & sep & "pleadings_report.json"
+        reportPath = modDebugLog.GetWritableTempDir() & sep & "pleadings_report.json"
     End If
 
     ' Ensure parent directory exists before writing
