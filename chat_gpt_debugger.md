@@ -951,6 +951,7 @@ End Function
 Private Sub btnClose_Click()
     Unload Me
 End Sub
+
 ```
 
 # FILE: modDebugLog.bas
@@ -1671,6 +1672,7 @@ Public Function TryProtectDocument(ByVal doc As Document, _
     TryProtectDocument = True
     On Error GoTo 0
 End Function
+
 ```
 
 # FILE: PleadingsEngine.bas
@@ -3107,6 +3109,9 @@ Public Sub ApplySuggestionsAsTrackedChanges(doc As Document, _
                     End If
                 Else
                     If addComments Then
+                        TraceStep "ApplyTrackedChanges", "COMMENT-ONLY i=" & i & _
+                                  " range=" & rng.Start & "-" & rng.End & _
+                                  " rule=" & GetIssueProp(finding, "RuleName")
                         doc.Comments.Add Range:=rng, Text:=BuildCommentText(finding)
                         If Err.Number <> 0 Then
                             DebugLogError "ApplyTrackedChanges", "comment-only i=" & i, Err.Number, Err.Description
@@ -3114,6 +3119,11 @@ Public Sub ApplySuggestionsAsTrackedChanges(doc As Document, _
                         End If
                     End If
                 End If
+            Else
+                DebugLogError "ApplyTrackedChanges", "doc.Range i=" & i & _
+                    " start=" & GetIssueProp(finding, "RangeStart") & _
+                    " end=" & GetIssueProp(finding, "RangeEnd"), Err.Number, Err.Description
+                Err.Clear
             End If
 NextApplyIssue:
             On Error GoTo TrackedCleanup
@@ -3603,6 +3613,7 @@ Private Function IssueToJSON(finding As Object) As String
     s = s & "    }"
     IssueToJSON = s
 End Function
+
 ```
 
 # FILE: PleadingsLauncher.bas
@@ -3941,6 +3952,7 @@ Private Function GetBrandRulesPath() As String
     On Error GoTo 0
 End Function
 
+
 ```
 
 # FILE: Rules_Brands.bas
@@ -4271,6 +4283,7 @@ Private Function EngineGetLocationString(rng As Object, doc As Document) As Stri
     End If
     On Error GoTo 0
 End Function
+
 ```
 
 # FILE: Rules_FootnoteHarts.bas
@@ -4923,6 +4936,7 @@ Private Function EngineGetLocationString(rng As Object, doc As Document) As Stri
     End If
     On Error GoTo 0
 End Function
+
 ```
 
 # FILE: Rules_FootnoteIntegrity.bas
@@ -5430,6 +5444,7 @@ Private Function EngineGetLocationString(rng As Object, doc As Document) As Stri
     End If
     On Error GoTo 0
 End Function
+
 ```
 
 # FILE: Rules_Formatting.bas
@@ -6357,6 +6372,7 @@ Private Function EngineGetLocationString(rng As Object, doc As Document) As Stri
     End If
     On Error GoTo 0
 End Function
+
 ```
 
 # FILE: Rules_Headings.bas
@@ -7069,6 +7085,7 @@ Private Function EngineGetLocationString(rng As Object, doc As Document) As Stri
     End If
     On Error GoTo 0
 End Function
+
 ```
 
 # FILE: Rules_Italics.bas
@@ -7456,6 +7473,7 @@ Private Function MergeArrays(a1 As Variant, a2 As Variant, a3 As Variant) As Var
     For Each v In a3: out(idx) = v: idx = idx + 1: Next v
     MergeArrays = out
 End Function
+
 ```
 
 # FILE: Rules_LegalTerms.bas
@@ -7948,6 +7966,7 @@ Private Function MergeArrays2(a1 As Variant, a2 As Variant) As Variant
     For Each v In a2: out(idx) = v: idx = idx + 1: Next v
     MergeArrays2 = out
 End Function
+
 ```
 
 # FILE: Rules_Lists.bas
@@ -8927,6 +8946,7 @@ Private Function EngineGetLocationString(rng As Object, doc As Document) As Stri
     End If
     On Error GoTo 0
 End Function
+
 ```
 
 # FILE: Rules_NumberFormats.bas
@@ -8955,8 +8975,9 @@ Option Explicit
 
 ' -- Rule name constants ---------------------------------------
 Private Const RULE_NAME_DATE_TIME As String = "date_time_format"
-' RETIRED: page_range is not engine-wired; kept for backwards compat only
-Private Const RULE_NAME_PAGE_RANGE As String = "page_range"
+' RETIRED -- DEAD CODE: page_range is not engine-wired and this constant is unused.
+' Kept only so the module compiles if an external caller references it.
+Private Const RETIRED_RULE_NAME_PAGE_RANGE As String = "page_range"
 Private Const RULE_NAME_CURRENCY As String = "currency_number_format"
 
 ' -- Currency format category constants (Rule19) ---------------
@@ -9880,6 +9901,7 @@ Private Function EngineGetDateFormatPref() As String
     End If
     On Error GoTo 0
 End Function
+
 ```
 
 # FILE: Rules_Numbering.bas
@@ -10790,6 +10812,7 @@ Private Function EngineGetLocationString(rng As Object, doc As Document) As Stri
     End If
     On Error GoTo 0
 End Function
+
 ```
 
 # FILE: Rules_Punctuation.bas
@@ -11760,6 +11783,7 @@ Private Function EngineGetLocationString(rng As Object, doc As Document) As Stri
     End If
     On Error GoTo 0
 End Function
+
 ```
 
 # FILE: Rules_Quotes.bas
@@ -12584,6 +12608,7 @@ Private Function EngineGetSmartQuotePref() As String
     End If
     On Error GoTo 0
 End Function
+
 ```
 
 # FILE: Rules_Spacing.bas
@@ -13211,6 +13236,7 @@ Private Function EngineGetSpaceStylePref() As String
     End If
     On Error GoTo 0
 End Function
+
 ```
 
 # FILE: Rules_Spelling.bas
@@ -14942,6 +14968,7 @@ Private Function EngineGetSpellingMode() As String
     End If
     On Error GoTo 0
 End Function
+
 ```
 
 # FILE: Rules_Terms.bas
@@ -14963,8 +14990,8 @@ Option Explicit
 
 Private Const RULE05_NAME As String = "custom_term_whitelist"
 Private Const RULE07_NAME As String = "defined_terms"
-' RETIRED: phrase_consistency is not engine-wired; kept for backwards compat only
-Private Const RULE23_NAME As String = "phrase_consistency"
+' RETIRED -- NOT ENGINE-WIRED: phrase_consistency kept only for backwards compat
+Private Const RETIRED_RETIRED_RULE23_NAME As String = "phrase_consistency"
 
 ' ============================================================
 '  PRIVATE HELPERS (Rule07)
@@ -15234,7 +15261,7 @@ Private Sub FlagPhraseOccurrences(doc As Document, _
             If Err.Number <> 0 Then locStr = "unknown location": Err.Clear
             On Error GoTo 0
 
-            Set finding = CreateIssueDict(RULE23_NAME, locStr, "Inconsistent phrase: '" & rng.Text & "' used", "Use '" & dominantPhrase & "' for consistency (dominant style)", rng.Start, rng.End, "error")
+            Set finding = CreateIssueDict(RETIRED_RULE23_NAME, locStr, "Inconsistent phrase: '" & rng.Text & "' used", "Use '" & dominantPhrase & "' for consistency (dominant style)", rng.Start, rng.End, "error")
             issues.Add finding
         End If
 
@@ -15878,6 +15905,7 @@ Private Function EngineGetTermFormatPref() As String
     End If
     On Error GoTo 0
 End Function
+
 ```
 
 # FILE: Rules_TextScan.bas
@@ -16859,4 +16887,6 @@ Private Function EngineGetLocationString(rng As Object, doc As Document) As Stri
     End If
     On Error GoTo 0
 End Function
+
 ```
+
