@@ -1892,7 +1892,7 @@ Public Function CreateIssue(ByVal ruleName_ As String, _
     d("RangeEnd") = rangeEnd_
     d("Severity") = severity_
     d("AutoFixSafe") = autoFixSafe_
-    If autoFixSafe_ Then d("ReplacementText") = replacementText_
+    d("ReplacementText") = replacementText_
     Set CreateIssue = d
 End Function
 
@@ -1947,9 +1947,11 @@ Private Function IssueToJSON(finding As Object) As String
     s = s & "      ""severity"": """ & EscJSON(CStr(GetIssueProp(finding, "Severity"))) & """," & vbCrLf
     s = s & "      ""finding"": """ & EscJSON(CStr(GetIssueProp(finding, "Issue"))) & """," & vbCrLf
     s = s & "      ""suggestion"": """ & EscJSON(CStr(GetIssueProp(finding, "Suggestion"))) & """," & vbCrLf
-    Dim repText As String
-    repText = CStr(GetIssueProp(finding, "ReplacementText"))
-    If Len(repText) > 0 Then
+    ' Always emit replacement_text when the key exists (even if empty = deletion).
+    ' HasReplacementText distinguishes "key present" from "key missing".
+    If HasReplacementText(finding) Then
+        Dim repText As String
+        repText = CStr(GetIssueProp(finding, "ReplacementText"))
         s = s & "      ""replacement_text"": """ & EscJSON(repText) & """," & vbCrLf
     End If
     s = s & "      ""auto_fix_safe"": " & IIf(CBool(GetIssueProp(finding, "AutoFixSafe")), "true", "false") & vbCrLf
