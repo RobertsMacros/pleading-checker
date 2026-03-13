@@ -531,7 +531,11 @@ Public Function RunAllPleadingsRules(doc As Document, _
     ' -- Initialise profiling --
     ResetProfiling
 
-    ' -- Suppress screen redraws for performance ----
+    ' -- Capture and suppress screen redraws for performance ----
+    Dim wasScreenUpdating As Boolean
+    wasScreenUpdating = Application.ScreenUpdating
+    Dim wasStatusBar As Variant
+    wasStatusBar = Application.StatusBar
     Application.ScreenUpdating = False
 
     On Error GoTo RunnerCleanup
@@ -848,8 +852,8 @@ Public Function RunAllPleadingsRules(doc As Document, _
 RunnerCleanup:
     ' -- Restore application state (always runs) ----------------
     On Error Resume Next
-    Application.ScreenUpdating = True
-    Application.StatusBar = ""
+    Application.ScreenUpdating = wasScreenUpdating
+    Application.StatusBar = wasStatusBar
     On Error GoTo 0
 
     ' -- Filter out issues inside block quotes / quoted text -----
@@ -1251,6 +1255,7 @@ Public Sub ApplyHighlights(doc As Document, _
     Dim finding As Object
     Dim rng As Range
     Dim i As Long
+    Dim cmtRef As Comment
 
     ' Suppress screen updates during batch comment insertion
     Dim wasScreenUpdating As Boolean
@@ -1275,11 +1280,8 @@ Public Sub ApplyHighlights(doc As Document, _
                     Err.Clear
                 End If
                 If addComments Then
-                    doc.Comments.Add Range:=rng, Text:=BuildCommentText(finding)
-                    If Err.Number <> 0 Then
-                        DebugLogError "ApplyHighlights", "comment i=" & i, Err.Number, Err.Description
-                        Err.Clear
-                    End If
+                    TryAddComment doc, rng, BuildCommentText(finding), cmtRef, _
+                        "ApplyHighlights", "comment i=" & i
                 End If
             Else
                 DebugLogError "ApplyHighlights", "doc.Range i=" & i & _
@@ -1316,6 +1318,7 @@ Public Sub ApplySuggestionsAsTrackedChanges(doc As Document, _
     Dim finding As Object
     Dim rng As Range
     Dim i As Long
+    Dim cmtRef As Comment
     Dim wasTrackingChanges As Boolean
     wasTrackingChanges = doc.TrackRevisions
 
@@ -1349,10 +1352,22 @@ Public Sub ApplySuggestionsAsTrackedChanges(doc As Document, _
                     Dim sugText As String
                     origStart = rng.Start
                     origLen = rng.End - rng.Start
-                    ' Prefer ReplacementText (literal replacement) over Suggestion (human-readable)
+                    ' Use ReplacementText only.  Suggestion is human-readable
+                    ' prose and must NEVER be applied as literal replacement text.
+                    ' An empty ReplacementText means "delete the range" -- distinct
+                    ' from a MISSING key which means "no replacement available".
                     sugText = ""
+                    If Not HasReplacementText(finding) Then
+                        ' No machine-safe replacement -- skip amendment, add comment
+                        TraceStep "ApplyTrackedChanges", "NO ReplacementText for i=" & i & _
+                                  " rule=" & GetIssueProp(finding, "RuleName") & "; comment-only"
+                        If addComments Then
+                            TryAddComment doc, rng, BuildCommentText(finding), cmtRef, _
+                                "ApplyTrackedChanges", "no-replacement-comment i=" & i
+                        End If
+                        GoTo NextApplyIssue
+                    End If
                     sugText = CStr(GetIssueProp(finding, "ReplacementText"))
-                    If Len(sugText) = 0 Then sugText = GetIssueProp(finding, "Suggestion")
 
                     ' --- WHITESPACE VALIDATION GATE ---
                     Dim origText As String
@@ -1409,11 +1424,8 @@ Public Sub ApplySuggestionsAsTrackedChanges(doc As Document, _
                         TraceStep "ApplyTrackedChanges", "SKIPPED amendment i=" & i & _
                                   " orig=""" & Left$(origText, 30) & """ sug=""" & Left$(sugText, 30) & """"
                         If addComments Then
-                            doc.Comments.Add Range:=rng, Text:=BuildCommentText(finding)
-                            If Err.Number <> 0 Then
-                                DebugLogError "ApplyTrackedChanges", "skip-comment i=" & i, Err.Number, Err.Description
-                                Err.Clear
-                            End If
+                            TryAddComment doc, rng, BuildCommentText(finding), cmtRef, _
+                                "ApplyTrackedChanges", "skip-comment i=" & i
                         End If
                         GoTo NextApplyIssue
                     End If
@@ -1422,21 +1434,12 @@ Public Sub ApplySuggestionsAsTrackedChanges(doc As Document, _
                     TraceStep "ApplyTrackedChanges", "APPLYING i=" & i & _
                               " range=" & origStart & "-" & (origStart + origLen) & _
                               " orig=""" & Left$(origText, 30) & """ -> """ & Left$(sugText, 30) & """"
-                    rng.Text = sugText
-                    If Err.Number <> 0 Then
-                        DebugLogError "ApplyTrackedChanges", "rng.Text= i=" & i, Err.Number, Err.Description
-                        Err.Clear
-                    End If
+                    TrySetRangeText rng, sugText, _
+                        "ApplyTrackedChanges", "apply i=" & i
                 Else
                     If addComments Then
-                        TraceStep "ApplyTrackedChanges", "COMMENT-ONLY i=" & i & _
-                                  " range=" & rng.Start & "-" & rng.End & _
-                                  " rule=" & GetIssueProp(finding, "RuleName")
-                        doc.Comments.Add Range:=rng, Text:=BuildCommentText(finding)
-                        If Err.Number <> 0 Then
-                            DebugLogError "ApplyTrackedChanges", "comment-only i=" & i, Err.Number, Err.Description
-                            Err.Clear
-                        End If
+                        TryAddComment doc, rng, BuildCommentText(finding), cmtRef, _
+                            "ApplyTrackedChanges", "comment-only i=" & i
                     End If
                 End If
             Else
@@ -1914,6 +1917,26 @@ Private Function GetIssueProp(finding As Object, ByVal propName As String) As Va
 End Function
 
 ' ================================================================
+'  PRIVATE: Check whether a finding has a ReplacementText key
+'  Distinguishes "key exists with empty value" (= delete) from
+'  "key does not exist" (= no replacement available).
+' ================================================================
+Private Function HasReplacementText(finding As Object) As Boolean
+    On Error Resume Next
+    HasReplacementText = False
+    If TypeName(finding) = "Dictionary" Then
+        HasReplacementText = finding.Exists("ReplacementText")
+    Else
+        ' For non-dictionary objects, try to read the property
+        Dim tmp As Variant
+        tmp = CallByName(finding, "ReplacementText", VbGet)
+        HasReplacementText = (Err.Number = 0)
+    End If
+    If Err.Number <> 0 Then Err.Clear
+    On Error GoTo 0
+End Function
+
+' ================================================================
 '  PRIVATE: Format an finding as JSON (supports both types)
 ' ================================================================
 Private Function IssueToJSON(finding As Object) As String
@@ -1924,9 +1947,11 @@ Private Function IssueToJSON(finding As Object) As String
     s = s & "      ""severity"": """ & EscJSON(CStr(GetIssueProp(finding, "Severity"))) & """," & vbCrLf
     s = s & "      ""finding"": """ & EscJSON(CStr(GetIssueProp(finding, "Issue"))) & """," & vbCrLf
     s = s & "      ""suggestion"": """ & EscJSON(CStr(GetIssueProp(finding, "Suggestion"))) & """," & vbCrLf
-    Dim repText As String
-    repText = CStr(GetIssueProp(finding, "ReplacementText"))
-    If Len(repText) > 0 Then
+    ' Always emit replacement_text when the key exists (even if empty = deletion).
+    ' HasReplacementText distinguishes "key present" from "key missing".
+    If HasReplacementText(finding) Then
+        Dim repText As String
+        repText = CStr(GetIssueProp(finding, "ReplacementText"))
         s = s & "      ""replacement_text"": """ & EscJSON(repText) & """," & vbCrLf
     End If
     s = s & "      ""auto_fix_safe"": " & IIf(CBool(GetIssueProp(finding, "AutoFixSafe")), "true", "false") & vbCrLf

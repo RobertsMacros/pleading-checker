@@ -60,7 +60,7 @@ Use the files in the `Code/` directory for the recommended modular installation.
 ### Prerequisites
 
 - Microsoft Word 2010 or later
-- Microsoft Scripting Runtime reference (Tools > References)
+- No early-bound references are required (the project uses late binding exclusively)
 
 ### Core Files (Required)
 
@@ -97,10 +97,9 @@ Import **any combination** of these — the engine gracefully skips modules that
 ### Installation Steps
 
 1. Open the VBA Editor: **Alt+F11**
-2. Enable the Scripting Runtime: **Tools > References** > check **Microsoft Scripting Runtime**
-3. Import the 3 core files via **File > Import File**
-4. Import whichever optional rule modules you need
-5. Close the VBA Editor
+2. Import the 3 core files via **File > Import File**
+3. Import whichever optional rule modules you need
+4. Close the VBA Editor
 
 ### Generating the Form UI
 

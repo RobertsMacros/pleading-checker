@@ -864,18 +864,19 @@ Public Function Check_ListPunctuation(doc As Document) As Collection
 
         paraIsList(paraIdx) = (listType <> 0) ' 0 = wdListNoNumbering
 
-        ' Get a list identifier for grouping
+        ' Get a list identifier for grouping (start pos of first para
+        ' in the Word List object -- unique per list in the document)
         Dim listID As Long
         listID = 0
         If paraIsList(paraIdx) Then
-            listID = paraRange.ListFormat.List.ListParagraphs.Count
+            listID = paraRange.ListFormat.List.ListParagraphs(1).Range.Start
             If Err.Number <> 0 Then
                 Err.Clear
                 ' Fallback: use list level + approximate position
                 listID = paraRange.ListFormat.ListLevelNumber + 1
                 If Err.Number <> 0 Then
                     Err.Clear
-                    listID = 1
+                    listID = 0  ' unknown -- do not use for group-breaking
                 End If
             End If
         End If
@@ -898,6 +899,12 @@ NextParaCollect:
             If Not inGroup Then
                 groupStart = p
                 inGroup = True
+            ElseIf paraListID(p) <> 0 And paraListID(groupStart) <> 0 _
+                   And paraListID(p) <> paraListID(groupStart) Then
+                ' Different list -- close current group, start new one
+                ProcessListGroup doc, issues, paraStarts, paraEnds, paraTexts, _
+                                 groupStart, groupEnd
+                groupStart = p
             End If
             groupEnd = p
         Else
@@ -930,7 +937,8 @@ Private Function CreateIssueDict(ByVal ruleName_ As String, _
                                  ByVal rangeStart_ As Long, _
                                  ByVal rangeEnd_ As Long, _
                                  Optional ByVal severity_ As String = "error", _
-                                 Optional ByVal autoFixSafe_ As Boolean = False) As Object
+                                 Optional ByVal autoFixSafe_ As Boolean = False, _
+                                 Optional ByVal replacementText_ As String = "") As Object
     Dim d As Object
     Set d = CreateObject("Scripting.Dictionary")
     d("RuleName") = ruleName_
@@ -941,6 +949,7 @@ Private Function CreateIssueDict(ByVal ruleName_ As String, _
     d("RangeEnd") = rangeEnd_
     d("Severity") = severity_
     d("AutoFixSafe") = autoFixSafe_
+    d("ReplacementText") = replacementText_
     Set CreateIssueDict = d
 End Function
 

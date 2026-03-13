@@ -475,14 +475,27 @@ Private Sub UserForm_Initialize()
     ' -- Load brand list ---------------------------------------
     RefreshBrandList
 
-    ' -- Hardcoded form size: 1000 x 1000 points ---------------
-    ' VBA UserForm Width/Height are in points.
-    ' Set explicitly here as a defensive override in case the
-    ' .frm persisted ClientWidth/ClientHeight values are ignored
-    ' or overridden by control layout.
-    Me.Width = 1000
-    Me.Height = 1000
-    Debug.Print "UserForm_Initialize: Width=" & Me.Width & " Height=" & Me.Height
+    ' -- Final form size based on layout ---
+    ' Use InsideWidth/InsideHeight (= client area) so title-bar
+    ' chrome does not steal space from the control layout.
+    ' The .frm header sets ClientWidth/ClientHeight = 1000 as a
+    ' safe default if Initialize errors before reaching this point.
+    Dim neededH As Single
+    neededH = yPos + LBL_H + PAD   ' bottom of status label + padding
+    If neededH < 400 Then neededH = 400  ' sensible minimum
+
+    On Error Resume Next          ' InsideWidth/InsideHeight may not exist on very old hosts
+    Me.InsideWidth = FULL_W + 2 * PAD   ' = 1000
+    Me.InsideHeight = neededH
+    If Err.Number <> 0 Then
+        Err.Clear
+        Me.Width = FULL_W + 2 * PAD
+        Me.Height = neededH
+    End If
+    On Error GoTo 0
+
+    Debug.Print "UserForm_Initialize: Width=" & Me.Width & " Height=" & Me.Height & _
+                " InsideWidth=" & Me.InsideWidth & " InsideHeight=" & Me.InsideHeight
 End Sub
 
 ' ============================================================
@@ -500,8 +513,19 @@ Private Sub BuildRuleCheckboxList(nRules As Long)
     Const ROW_H As Single = 18
     Const COL_PAD As Single = 6
 
+    ' Guard against InsideWidth returning zero or implausibly small values
+    ' on some Word hosts during early initialisation
+    Const MIN_USABLE_W As Single = 120   ' absolute floor (30 pts per column)
+    Dim usableW As Single
+    On Error Resume Next
+    usableW = fraRules.InsideWidth
+    If Err.Number <> 0 Then usableW = 0: Err.Clear
+    On Error GoTo 0
+    If usableW <= 0 Then usableW = fraRules.Width - COL_PAD * 2
+    If usableW < MIN_USABLE_W Then usableW = MIN_USABLE_W
+
     Dim colW As Single
-    colW = (fraRules.InsideWidth - COL_PAD * 2) / COLS
+    colW = (usableW - COL_PAD * 2) / COLS
 
     Dim col As Long
     Dim row As Long
@@ -710,6 +734,13 @@ Private Sub btnExport_Click()
         reportPath = GetTempReportPath(sep)
     End If
 
+    ' Ensure parent directory exists before writing
+    Dim reportDir As String
+    reportDir = modDebugLog.GetParentDirectory(reportPath)
+    If Len(reportDir) > 0 Then
+        modDebugLog.EnsureDirectoryExists reportDir
+    End If
+
     lblStatus.Caption = "Exporting report..."
     Me.Repaint
     DoEvents
@@ -755,19 +786,7 @@ End Sub
 
 ' -- Helper: build a temp path for report export (cross-platform) --
 Private Function GetTempReportPath(sep As String) As String
-    Dim tmpDir As String
-    #If Mac Then
-        tmpDir = Environ("TMPDIR")
-        If Len(tmpDir) = 0 Then tmpDir = "/tmp"
-        ' Strip trailing separator if present
-        If Right$(tmpDir, 1) = sep Then tmpDir = Left$(tmpDir, Len(tmpDir) - 1)
-    #Else
-        tmpDir = Environ("TEMP")
-        If Len(tmpDir) = 0 Then tmpDir = Environ("TMP")
-        If Len(tmpDir) = 0 Then tmpDir = "C:\Temp"
-        If Right$(tmpDir, 1) = sep Then tmpDir = Left$(tmpDir, Len(tmpDir) - 1)
-    #End If
-    GetTempReportPath = tmpDir & sep & "pleadings_report.json"
+    GetTempReportPath = modDebugLog.GetWritableTempDir() & sep & "pleadings_report.json"
 End Function
 
 ' ============================================================
@@ -856,18 +875,11 @@ Private Sub btnSaveBrands_Click()
     Dim brandFile As String
     brandFile = GetBrandRulesPath()
 
-    ' Ensure directory exists
+    ' Ensure directory exists (recursive, handles nested paths)
     Dim brandDir As String
-    Dim sep As String
-    sep = Application.PathSeparator
-    Dim lastSep As Long
-    lastSep = InStrRev(brandFile, sep)
-    If lastSep > 0 Then
-        brandDir = Left$(brandFile, lastSep - 1)
-        On Error Resume Next
-        MkDir brandDir
-        Err.Clear
-        On Error GoTo 0
+    brandDir = modDebugLog.GetParentDirectory(brandFile)
+    If Len(brandDir) > 0 Then
+        modDebugLog.EnsureDirectoryExists brandDir
     End If
 
     Dim saveResult As Boolean
@@ -1199,17 +1211,14 @@ Public Sub DebugLogDoc(ByVal labelText As String, ByVal doc As Document)
     protType = -1
     protType = doc.ProtectionType: If Err.Number <> 0 Then protType = -1: Err.Clear
     info = info & " protection=" & protType
-    If protType = -1 Then
-        info = info & "(None)"
-    ElseIf protType = 0 Then
-        info = info & "(AllowOnlyRevisions)"
-    ElseIf protType = 1 Then
-        info = info & "(AllowOnlyComments)"
-    ElseIf protType = 2 Then
-        info = info & "(AllowOnlyFormFields)"
-    ElseIf protType = 3 Then
-        info = info & "(NoProtection)"
-    End If
+    Select Case protType
+        Case -1: info = info & "(NoProtection)"         ' wdNoProtection
+        Case 0:  info = info & "(AllowOnlyRevisions)"   ' wdAllowOnlyRevisions
+        Case 1:  info = info & "(AllowOnlyComments)"    ' wdAllowOnlyComments
+        Case 2:  info = info & "(AllowOnlyFormFields)"  ' wdAllowOnlyFormFields
+        Case 3:  info = info & "(AllowOnlyReading)"     ' wdAllowOnlyReading
+        Case Else: info = info & "(Unknown=" & protType & ")"
+    End Select
 
     ' Track revisions
     Dim trackRev As Boolean
@@ -1671,6 +1680,155 @@ Public Function TryProtectDocument(ByVal doc As Document, _
 
     TryProtectDocument = True
     On Error GoTo 0
+End Function
+
+' ============================================================
+'  G. FILE-SYSTEM HELPERS (no FSO dependency)
+' ============================================================
+
+' --- Recursively ensure a folder path exists ---
+' Returns True if the folder exists (or was created), False on failure.
+' Handles UNC paths (\\server\share\...), drive-letter paths, and
+' Unix absolute paths.  No FileSystemObject dependency.
+Public Function EnsureDirectoryExists(ByVal folderPath As String) As Boolean
+    EnsureDirectoryExists = False
+    If Len(folderPath) = 0 Then Exit Function
+
+    ' Strip trailing separator(s)
+    Dim sep As String
+    sep = Application.PathSeparator
+    Do While Len(folderPath) > 1 And Right$(folderPath, 1) = sep
+        folderPath = Left$(folderPath, Len(folderPath) - 1)
+    Loop
+    If Len(folderPath) = 0 Then Exit Function
+
+    ' Already exists?
+    On Error Resume Next
+    Dim testDir As String
+    testDir = Dir(folderPath, vbDirectory)
+    If Err.Number <> 0 Then testDir = "": Err.Clear
+    On Error GoTo 0
+    If Len(testDir) > 0 Then
+        EnsureDirectoryExists = True
+        Exit Function
+    End If
+
+    ' Walk path components, creating as needed.
+    ' Determine the root prefix that must not be MkDir'd.
+    Dim parts() As String
+    parts = Split(folderPath, sep)
+    If UBound(parts) < 0 Then Exit Function
+
+    Dim built As String
+    Dim startIdx As Long
+
+    #If Mac Then
+        ' Unix absolute paths: /Users/... -> parts(0)=""
+        If Left$(folderPath, 1) = sep Then
+            If UBound(parts) < 1 Then Exit Function
+            built = sep & parts(1)
+            startIdx = 2
+        Else
+            built = parts(0)
+            startIdx = 1
+        End If
+    #Else
+        ' UNC: \\server\share -> parts = ["","","server","share",...]
+        '   root = \\server\share  (need at least 4 parts, start at index 4)
+        ' Drive: C:\dir -> parts = ["C:","dir",...]
+        '   root = C:  (start at index 1)
+        If Left$(folderPath, 2) = sep & sep Then
+            ' UNC path -- \\server\share is the root; cannot MkDir it
+            If UBound(parts) < 3 Then Exit Function  ' malformed UNC
+            built = sep & sep & parts(2) & sep & parts(3)
+            startIdx = 4
+        Else
+            built = parts(0)   ' drive letter e.g. "C:"
+            startIdx = 1
+        End If
+    #End If
+
+    Dim i As Long
+    For i = startIdx To UBound(parts)
+        ' Skip empty components (double separators in the input)
+        If Len(parts(i)) = 0 Then GoTo NextComponent
+        built = built & sep & parts(i)
+        On Error Resume Next
+        testDir = ""
+        testDir = Dir(built, vbDirectory)
+        If Err.Number <> 0 Then testDir = "": Err.Clear
+        If Len(testDir) = 0 Then
+            MkDir built
+            If Err.Number <> 0 Then
+                If DEBUG_MODE Then
+                    Debug.Print "EnsureDirectoryExists: MkDir failed for """ & built & _
+                                """ (Err " & Err.Number & ": " & Err.Description & ")"
+                End If
+                Err.Clear
+                On Error GoTo 0
+                Exit Function
+            End If
+        End If
+        Err.Clear
+        On Error GoTo 0
+NextComponent:
+    Next i
+
+    EnsureDirectoryExists = True
+End Function
+
+' --- Cross-platform writable temp directory ---
+' Returns a known-writable temporary directory path (no trailing separator).
+' Uses the most reliable built-in path available without external references.
+Public Function GetWritableTempDir() As String
+    Dim tmp As String
+    Dim sep As String
+    sep = Application.PathSeparator
+
+    #If Mac Then
+        tmp = Environ("TMPDIR")
+        If Len(tmp) = 0 Then tmp = "/tmp"
+    #Else
+        tmp = Environ("TEMP")
+        If Len(tmp) = 0 Then tmp = Environ("TMP")
+
+        ' Fallback: ask Word for its temp-file path
+        If Len(tmp) = 0 Then
+            On Error Resume Next
+            tmp = Application.Options.DefaultFilePath(wdTempFilePath)
+            If Err.Number <> 0 Then tmp = "": Err.Clear
+            On Error GoTo 0
+        End If
+
+        ' Fallback: LOCALAPPDATA\Temp (standard Windows location)
+        If Len(tmp) = 0 Then
+            tmp = Environ("LOCALAPPDATA")
+            If Len(tmp) > 0 Then tmp = tmp & sep & "Temp"
+        End If
+
+        ' Last resort: user profile (always exists)
+        If Len(tmp) = 0 Then tmp = Environ("USERPROFILE")
+    #End If
+
+    ' Strip trailing separator
+    If Len(tmp) > 1 And Right$(tmp, 1) = sep Then
+        tmp = Left$(tmp, Len(tmp) - 1)
+    End If
+
+    GetWritableTempDir = tmp
+End Function
+
+' --- Extract parent directory from a file path ---
+Public Function GetParentDirectory(ByVal filePath As String) As String
+    Dim sep As String
+    sep = Application.PathSeparator
+    Dim lastSep As Long
+    lastSep = InStrRev(filePath, sep)
+    If lastSep > 0 Then
+        GetParentDirectory = Left$(filePath, lastSep - 1)
+    Else
+        GetParentDirectory = ""
+    End If
 End Function
 
 ```
@@ -2211,7 +2369,11 @@ Public Function RunAllPleadingsRules(doc As Document, _
     ' -- Initialise profiling --
     ResetProfiling
 
-    ' -- Suppress screen redraws for performance ----
+    ' -- Capture and suppress screen redraws for performance ----
+    Dim wasScreenUpdating As Boolean
+    wasScreenUpdating = Application.ScreenUpdating
+    Dim wasStatusBar As Variant
+    wasStatusBar = Application.StatusBar
     Application.ScreenUpdating = False
 
     On Error GoTo RunnerCleanup
@@ -2528,8 +2690,8 @@ Public Function RunAllPleadingsRules(doc As Document, _
 RunnerCleanup:
     ' -- Restore application state (always runs) ----------------
     On Error Resume Next
-    Application.ScreenUpdating = True
-    Application.StatusBar = ""
+    Application.ScreenUpdating = wasScreenUpdating
+    Application.StatusBar = wasStatusBar
     On Error GoTo 0
 
     ' -- Filter out issues inside block quotes / quoted text -----
@@ -2931,6 +3093,7 @@ Public Sub ApplyHighlights(doc As Document, _
     Dim finding As Object
     Dim rng As Range
     Dim i As Long
+    Dim cmtRef As Comment
 
     ' Suppress screen updates during batch comment insertion
     Dim wasScreenUpdating As Boolean
@@ -2955,11 +3118,8 @@ Public Sub ApplyHighlights(doc As Document, _
                     Err.Clear
                 End If
                 If addComments Then
-                    doc.Comments.Add Range:=rng, Text:=BuildCommentText(finding)
-                    If Err.Number <> 0 Then
-                        DebugLogError "ApplyHighlights", "comment i=" & i, Err.Number, Err.Description
-                        Err.Clear
-                    End If
+                    TryAddComment doc, rng, BuildCommentText(finding), cmtRef, _
+                        "ApplyHighlights", "comment i=" & i
                 End If
             Else
                 DebugLogError "ApplyHighlights", "doc.Range i=" & i & _
@@ -2996,6 +3156,7 @@ Public Sub ApplySuggestionsAsTrackedChanges(doc As Document, _
     Dim finding As Object
     Dim rng As Range
     Dim i As Long
+    Dim cmtRef As Comment
     Dim wasTrackingChanges As Boolean
     wasTrackingChanges = doc.TrackRevisions
 
@@ -3029,10 +3190,22 @@ Public Sub ApplySuggestionsAsTrackedChanges(doc As Document, _
                     Dim sugText As String
                     origStart = rng.Start
                     origLen = rng.End - rng.Start
-                    ' Prefer ReplacementText (literal replacement) over Suggestion (human-readable)
+                    ' Use ReplacementText only.  Suggestion is human-readable
+                    ' prose and must NEVER be applied as literal replacement text.
+                    ' An empty ReplacementText means "delete the range" -- distinct
+                    ' from a MISSING key which means "no replacement available".
                     sugText = ""
+                    If Not HasReplacementText(finding) Then
+                        ' No machine-safe replacement -- skip amendment, add comment
+                        TraceStep "ApplyTrackedChanges", "NO ReplacementText for i=" & i & _
+                                  " rule=" & GetIssueProp(finding, "RuleName") & "; comment-only"
+                        If addComments Then
+                            TryAddComment doc, rng, BuildCommentText(finding), cmtRef, _
+                                "ApplyTrackedChanges", "no-replacement-comment i=" & i
+                        End If
+                        GoTo NextApplyIssue
+                    End If
                     sugText = CStr(GetIssueProp(finding, "ReplacementText"))
-                    If Len(sugText) = 0 Then sugText = GetIssueProp(finding, "Suggestion")
 
                     ' --- WHITESPACE VALIDATION GATE ---
                     Dim origText As String
@@ -3089,11 +3262,8 @@ Public Sub ApplySuggestionsAsTrackedChanges(doc As Document, _
                         TraceStep "ApplyTrackedChanges", "SKIPPED amendment i=" & i & _
                                   " orig=""" & Left$(origText, 30) & """ sug=""" & Left$(sugText, 30) & """"
                         If addComments Then
-                            doc.Comments.Add Range:=rng, Text:=BuildCommentText(finding)
-                            If Err.Number <> 0 Then
-                                DebugLogError "ApplyTrackedChanges", "skip-comment i=" & i, Err.Number, Err.Description
-                                Err.Clear
-                            End If
+                            TryAddComment doc, rng, BuildCommentText(finding), cmtRef, _
+                                "ApplyTrackedChanges", "skip-comment i=" & i
                         End If
                         GoTo NextApplyIssue
                     End If
@@ -3102,21 +3272,12 @@ Public Sub ApplySuggestionsAsTrackedChanges(doc As Document, _
                     TraceStep "ApplyTrackedChanges", "APPLYING i=" & i & _
                               " range=" & origStart & "-" & (origStart + origLen) & _
                               " orig=""" & Left$(origText, 30) & """ -> """ & Left$(sugText, 30) & """"
-                    rng.Text = sugText
-                    If Err.Number <> 0 Then
-                        DebugLogError "ApplyTrackedChanges", "rng.Text= i=" & i, Err.Number, Err.Description
-                        Err.Clear
-                    End If
+                    TrySetRangeText rng, sugText, _
+                        "ApplyTrackedChanges", "apply i=" & i
                 Else
                     If addComments Then
-                        TraceStep "ApplyTrackedChanges", "COMMENT-ONLY i=" & i & _
-                                  " range=" & rng.Start & "-" & rng.End & _
-                                  " rule=" & GetIssueProp(finding, "RuleName")
-                        doc.Comments.Add Range:=rng, Text:=BuildCommentText(finding)
-                        If Err.Number <> 0 Then
-                            DebugLogError "ApplyTrackedChanges", "comment-only i=" & i, Err.Number, Err.Description
-                            Err.Clear
-                        End If
+                        TryAddComment doc, rng, BuildCommentText(finding), cmtRef, _
+                            "ApplyTrackedChanges", "comment-only i=" & i
                     End If
                 End If
             Else
@@ -3569,7 +3730,7 @@ Public Function CreateIssue(ByVal ruleName_ As String, _
     d("RangeEnd") = rangeEnd_
     d("Severity") = severity_
     d("AutoFixSafe") = autoFixSafe_
-    d("ReplacementText") = replacementText_
+    If autoFixSafe_ Then d("ReplacementText") = replacementText_
     Set CreateIssue = d
 End Function
 
@@ -3590,6 +3751,26 @@ Private Function GetIssueProp(finding As Object, ByVal propName As String) As Va
         GetIssueProp = ""
         Err.Clear
     End If
+    On Error GoTo 0
+End Function
+
+' ================================================================
+'  PRIVATE: Check whether a finding has a ReplacementText key
+'  Distinguishes "key exists with empty value" (= delete) from
+'  "key does not exist" (= no replacement available).
+' ================================================================
+Private Function HasReplacementText(finding As Object) As Boolean
+    On Error Resume Next
+    HasReplacementText = False
+    If TypeName(finding) = "Dictionary" Then
+        HasReplacementText = finding.Exists("ReplacementText")
+    Else
+        ' For non-dictionary objects, try to read the property
+        Dim tmp As Variant
+        tmp = CallByName(finding, "ReplacementText", VbGet)
+        HasReplacementText = (Err.Number = 0)
+    End If
+    If Err.Number <> 0 Then Err.Clear
     On Error GoTo 0
 End Function
 
@@ -3817,18 +3998,11 @@ Private Sub ManageBrands()
         Case "SAVE"
             Dim savePath As String
             savePath = GetBrandRulesPath()
-            ' Ensure directory exists
+            ' Ensure directory exists (recursive, handles nested paths)
             Dim brandDir As String
-            Dim sep2 As String
-            sep2 = Application.PathSeparator
-            Dim lastSep As Long
-            lastSep = InStrRev(savePath, sep2)
-            If lastSep > 0 Then
-                brandDir = Left$(savePath, lastSep - 1)
-                On Error Resume Next
-                MkDir brandDir
-                Err.Clear
-                On Error GoTo 0
+            brandDir = modDebugLog.GetParentDirectory(savePath)
+            If Len(brandDir) > 0 Then
+                modDebugLog.EnsureDirectoryExists brandDir
             End If
             On Error Resume Next
             Dim saveOK As Boolean
@@ -3875,18 +4049,14 @@ Private Sub ExportReport(issues As Collection)
     On Error GoTo 0
 
     If Len(reportPath) = 0 Then
-        Dim tmpDir As String
-        #If Mac Then
-            tmpDir = Environ("TMPDIR")
-            If Len(tmpDir) = 0 Then tmpDir = "/tmp"
-            If Right$(tmpDir, 1) = sep Then tmpDir = Left$(tmpDir, Len(tmpDir) - 1)
-        #Else
-            tmpDir = Environ("TEMP")
-            If Len(tmpDir) = 0 Then tmpDir = Environ("TMP")
-            If Len(tmpDir) = 0 Then tmpDir = "C:\Temp"
-            If Right$(tmpDir, 1) = sep Then tmpDir = Left$(tmpDir, Len(tmpDir) - 1)
-        #End If
-        reportPath = tmpDir & sep & "pleadings_report.json"
+        reportPath = modDebugLog.GetWritableTempDir() & sep & "pleadings_report.json"
+    End If
+
+    ' Ensure parent directory exists before writing
+    Dim reportDir As String
+    reportDir = modDebugLog.GetParentDirectory(reportPath)
+    If Len(reportDir) > 0 Then
+        modDebugLog.EnsureDirectoryExists reportDir
     End If
 
     Dim summary As String
@@ -4225,7 +4395,8 @@ Private Function CreateIssueDict(ByVal ruleName_ As String, _
                                  ByVal rangeStart_ As Long, _
                                  ByVal rangeEnd_ As Long, _
                                  Optional ByVal severity_ As String = "error", _
-                                 Optional ByVal autoFixSafe_ As Boolean = False) As Object
+                                 Optional ByVal autoFixSafe_ As Boolean = False, _
+                                 Optional ByVal replacementText_ As String = "") As Object
     Dim d As Object
     Set d = CreateObject("Scripting.Dictionary")
     d("RuleName") = ruleName_
@@ -4236,6 +4407,7 @@ Private Function CreateIssueDict(ByVal ruleName_ As String, _
     d("RangeEnd") = rangeEnd_
     d("Severity") = severity_
     d("AutoFixSafe") = autoFixSafe_
+    If autoFixSafe_ Then d("ReplacementText") = replacementText_
     Set CreateIssueDict = d
 End Function
 
@@ -4894,7 +5066,8 @@ Private Function CreateIssueDict(ByVal ruleName_ As String, _
                                  ByVal rangeStart_ As Long, _
                                  ByVal rangeEnd_ As Long, _
                                  Optional ByVal severity_ As String = "error", _
-                                 Optional ByVal autoFixSafe_ As Boolean = False) As Object
+                                 Optional ByVal autoFixSafe_ As Boolean = False, _
+                                 Optional ByVal replacementText_ As String = "") As Object
     Dim d As Object
     Set d = CreateObject("Scripting.Dictionary")
     d("RuleName") = ruleName_
@@ -4905,6 +5078,7 @@ Private Function CreateIssueDict(ByVal ruleName_ As String, _
     d("RangeEnd") = rangeEnd_
     d("Severity") = severity_
     d("AutoFixSafe") = autoFixSafe_
+    If autoFixSafe_ Then d("ReplacementText") = replacementText_
     Set CreateIssueDict = d
 End Function
 
@@ -5402,7 +5576,8 @@ Private Function CreateIssueDict(ByVal ruleName_ As String, _
                                  ByVal rangeStart_ As Long, _
                                  ByVal rangeEnd_ As Long, _
                                  Optional ByVal severity_ As String = "error", _
-                                 Optional ByVal autoFixSafe_ As Boolean = False) As Object
+                                 Optional ByVal autoFixSafe_ As Boolean = False, _
+                                 Optional ByVal replacementText_ As String = "") As Object
     Dim d As Object
     Set d = CreateObject("Scripting.Dictionary")
     d("RuleName") = ruleName_
@@ -5413,6 +5588,7 @@ Private Function CreateIssueDict(ByVal ruleName_ As String, _
     d("RangeEnd") = rangeEnd_
     d("Severity") = severity_
     d("AutoFixSafe") = autoFixSafe_
+    If autoFixSafe_ Then d("ReplacementText") = replacementText_
     Set CreateIssueDict = d
 End Function
 
@@ -6330,7 +6506,8 @@ Private Function CreateIssueDict(ByVal ruleName_ As String, _
                                  ByVal rangeStart_ As Long, _
                                  ByVal rangeEnd_ As Long, _
                                  Optional ByVal severity_ As String = "error", _
-                                 Optional ByVal autoFixSafe_ As Boolean = False) As Object
+                                 Optional ByVal autoFixSafe_ As Boolean = False, _
+                                 Optional ByVal replacementText_ As String = "") As Object
     Dim d As Object
     Set d = CreateObject("Scripting.Dictionary")
     d("RuleName") = ruleName_
@@ -6341,6 +6518,7 @@ Private Function CreateIssueDict(ByVal ruleName_ As String, _
     d("RangeEnd") = rangeEnd_
     d("Severity") = severity_
     d("AutoFixSafe") = autoFixSafe_
+    If autoFixSafe_ Then d("ReplacementText") = replacementText_
     Set CreateIssueDict = d
 End Function
 
@@ -7043,7 +7221,8 @@ Private Function CreateIssueDict(ByVal ruleName_ As String, _
                                  ByVal rangeStart_ As Long, _
                                  ByVal rangeEnd_ As Long, _
                                  Optional ByVal severity_ As String = "error", _
-                                 Optional ByVal autoFixSafe_ As Boolean = False) As Object
+                                 Optional ByVal autoFixSafe_ As Boolean = False, _
+                                 Optional ByVal replacementText_ As String = "") As Object
     Dim d As Object
     Set d = CreateObject("Scripting.Dictionary")
     d("RuleName") = ruleName_
@@ -7054,6 +7233,7 @@ Private Function CreateIssueDict(ByVal ruleName_ As String, _
     d("RangeEnd") = rangeEnd_
     d("Severity") = severity_
     d("AutoFixSafe") = autoFixSafe_
+    If autoFixSafe_ Then d("ReplacementText") = replacementText_
     Set CreateIssueDict = d
 End Function
 
@@ -7412,7 +7592,8 @@ Private Function CreateIssueDict(ByVal ruleName_ As String, _
                                  ByVal rangeStart_ As Long, _
                                  ByVal rangeEnd_ As Long, _
                                  Optional ByVal severity_ As String = "error", _
-                                 Optional ByVal autoFixSafe_ As Boolean = False) As Object
+                                 Optional ByVal autoFixSafe_ As Boolean = False, _
+                                 Optional ByVal replacementText_ As String = "") As Object
     Dim d As Object
     Set d = CreateObject("Scripting.Dictionary")
     d("RuleName") = ruleName_
@@ -7423,6 +7604,7 @@ Private Function CreateIssueDict(ByVal ruleName_ As String, _
     d("RangeEnd") = rangeEnd_
     d("Severity") = severity_
     d("AutoFixSafe") = autoFixSafe_
+    If autoFixSafe_ Then d("ReplacementText") = replacementText_
     Set CreateIssueDict = d
 End Function
 
@@ -7907,7 +8089,8 @@ Private Function CreateIssueDict(ByVal ruleName_ As String, _
                                  ByVal rangeStart_ As Long, _
                                  ByVal rangeEnd_ As Long, _
                                  Optional ByVal severity_ As String = "error", _
-                                 Optional ByVal autoFixSafe_ As Boolean = False) As Object
+                                 Optional ByVal autoFixSafe_ As Boolean = False, _
+                                 Optional ByVal replacementText_ As String = "") As Object
     Dim d As Object
     Set d = CreateObject("Scripting.Dictionary")
     d("RuleName") = ruleName_
@@ -7918,6 +8101,7 @@ Private Function CreateIssueDict(ByVal ruleName_ As String, _
     d("RangeEnd") = rangeEnd_
     d("Severity") = severity_
     d("AutoFixSafe") = autoFixSafe_
+    If autoFixSafe_ Then d("ReplacementText") = replacementText_
     Set CreateIssueDict = d
 End Function
 
@@ -8838,18 +9022,19 @@ Public Function Check_ListPunctuation(doc As Document) As Collection
 
         paraIsList(paraIdx) = (listType <> 0) ' 0 = wdListNoNumbering
 
-        ' Get a list identifier for grouping
+        ' Get a list identifier for grouping (start pos of first para
+        ' in the Word List object -- unique per list in the document)
         Dim listID As Long
         listID = 0
         If paraIsList(paraIdx) Then
-            listID = paraRange.ListFormat.List.ListParagraphs.Count
+            listID = paraRange.ListFormat.List.ListParagraphs(1).Range.Start
             If Err.Number <> 0 Then
                 Err.Clear
                 ' Fallback: use list level + approximate position
                 listID = paraRange.ListFormat.ListLevelNumber + 1
                 If Err.Number <> 0 Then
                     Err.Clear
-                    listID = 1
+                    listID = 0  ' unknown -- do not use for group-breaking
                 End If
             End If
         End If
@@ -8872,6 +9057,12 @@ NextParaCollect:
             If Not inGroup Then
                 groupStart = p
                 inGroup = True
+            ElseIf paraListID(p) <> 0 And paraListID(groupStart) <> 0 _
+                   And paraListID(p) <> paraListID(groupStart) Then
+                ' Different list -- close current group, start new one
+                ProcessListGroup doc, issues, paraStarts, paraEnds, paraTexts, _
+                                 groupStart, groupEnd
+                groupStart = p
             End If
             groupEnd = p
         Else
@@ -8904,7 +9095,8 @@ Private Function CreateIssueDict(ByVal ruleName_ As String, _
                                  ByVal rangeStart_ As Long, _
                                  ByVal rangeEnd_ As Long, _
                                  Optional ByVal severity_ As String = "error", _
-                                 Optional ByVal autoFixSafe_ As Boolean = False) As Object
+                                 Optional ByVal autoFixSafe_ As Boolean = False, _
+                                 Optional ByVal replacementText_ As String = "") As Object
     Dim d As Object
     Set d = CreateObject("Scripting.Dictionary")
     d("RuleName") = ruleName_
@@ -8915,6 +9107,7 @@ Private Function CreateIssueDict(ByVal ruleName_ As String, _
     d("RangeEnd") = rangeEnd_
     d("Severity") = severity_
     d("AutoFixSafe") = autoFixSafe_
+    If autoFixSafe_ Then d("ReplacementText") = replacementText_
     Set CreateIssueDict = d
 End Function
 
@@ -9832,7 +10025,8 @@ Private Function CreateIssueDict(ByVal ruleName_ As String, _
                                  ByVal rangeStart_ As Long, _
                                  ByVal rangeEnd_ As Long, _
                                  Optional ByVal severity_ As String = "error", _
-                                 Optional ByVal autoFixSafe_ As Boolean = False) As Object
+                                 Optional ByVal autoFixSafe_ As Boolean = False, _
+                                 Optional ByVal replacementText_ As String = "") As Object
     Dim d As Object
     Set d = CreateObject("Scripting.Dictionary")
     d("RuleName") = ruleName_
@@ -9843,6 +10037,7 @@ Private Function CreateIssueDict(ByVal ruleName_ As String, _
     d("RangeEnd") = rangeEnd_
     d("Severity") = severity_
     d("AutoFixSafe") = autoFixSafe_
+    If autoFixSafe_ Then d("ReplacementText") = replacementText_
     Set CreateIssueDict = d
 End Function
 
@@ -10770,7 +10965,8 @@ Private Function CreateIssueDict(ByVal ruleName_ As String, _
                                  ByVal rangeStart_ As Long, _
                                  ByVal rangeEnd_ As Long, _
                                  Optional ByVal severity_ As String = "error", _
-                                 Optional ByVal autoFixSafe_ As Boolean = False) As Object
+                                 Optional ByVal autoFixSafe_ As Boolean = False, _
+                                 Optional ByVal replacementText_ As String = "") As Object
     Dim d As Object
     Set d = CreateObject("Scripting.Dictionary")
     d("RuleName") = ruleName_
@@ -10781,6 +10977,7 @@ Private Function CreateIssueDict(ByVal ruleName_ As String, _
     d("RangeEnd") = rangeEnd_
     d("Severity") = severity_
     d("AutoFixSafe") = autoFixSafe_
+    If autoFixSafe_ Then d("ReplacementText") = replacementText_
     Set CreateIssueDict = d
 End Function
 
@@ -11421,6 +11618,42 @@ Public Function Check_BracketIntegrity(doc As Document) As Collection
                 curlyClose & " closed"
         End If
 
+        ' -- Stack-based nesting check (only when counts balance) --
+        If parenOpen = parenClose And sqOpen = sqClose _
+           And curlyOpen = curlyClose _
+           And (parenOpen + sqOpen + curlyOpen) > 0 Then
+            Dim stk() As Long, stkTop As Long
+            stkTop = 0
+            ReDim stk(1 To parenOpen + sqOpen + curlyOpen)
+            Dim nestBad As Boolean, nestPos As Long
+            nestBad = False
+            For i = 0 To bMax Step 2
+                code = b(i) Or (CLng(b(i + 1)) * 256&)
+                Select Case code
+                    Case 40, 91, 123  ' open bracket
+                        stkTop = stkTop + 1
+                        If stkTop > UBound(stk) Then ReDim Preserve stk(1 To stkTop + 4)
+                        stk(stkTop) = code
+                    Case 41, 93, 125  ' close bracket
+                        If stkTop = 0 Then
+                            nestBad = True
+                            nestPos = paraStart + (i \ 2) - bktListPrefixLen
+                            Exit For
+                        End If
+                        If Not CodesMatch(stk(stkTop), code) Then
+                            nestBad = True
+                            nestPos = paraStart + (i \ 2) - bktListPrefixLen
+                            Exit For
+                        End If
+                        stkTop = stkTop - 1
+                End Select
+            Next i
+            If nestBad Then
+                CreateBracketIssue doc, issues, nestPos, "()", _
+                    "Improperly nested brackets (e.g. overlapping pairs)"
+            End If
+        End If
+
 NxtPara:
     Next para
 
@@ -11475,15 +11708,16 @@ Private Sub CreateBracketIssue(doc As Document, _
 
     ' Determine suggestion based on bracket type
     Dim suggestion As String
-    If bracketChar = "(" Or bracketChar = ")" Then
-        suggestion = "Add or correct matching parenthesis"
-    ElseIf bracketChar = "[" Or bracketChar = "]" Then
-        suggestion = "Add or correct matching square bracket"
-    ElseIf bracketChar = "{" Or bracketChar = "}" Then
-        suggestion = "Add or correct matching curly brace"
-    Else
-        suggestion = "Review bracket pairing"
-    End If
+    Select Case bracketChar
+        Case "()", "(", ")"
+            suggestion = "Add or correct matching parenthesis"
+        Case "[]", "[", "]"
+            suggestion = "Add or correct matching square bracket"
+        Case "{}", "{", "}"
+            suggestion = "Add or correct matching curly brace"
+        Case Else
+            suggestion = "Review bracket pairing"
+    End Select
 
     Set finding = CreateIssueDict(RULE_NAME_BRACKET, locStr, issueText, suggestion, pos, pos + 1, "error")
     issues.Add finding
@@ -11533,7 +11767,8 @@ Private Function CreateIssueDict(ByVal ruleName_ As String, _
                                  ByVal rangeStart_ As Long, _
                                  ByVal rangeEnd_ As Long, _
                                  Optional ByVal severity_ As String = "error", _
-                                 Optional ByVal autoFixSafe_ As Boolean = False) As Object
+                                 Optional ByVal autoFixSafe_ As Boolean = False, _
+                                 Optional ByVal replacementText_ As String = "") As Object
     Dim d As Object
     Set d = CreateObject("Scripting.Dictionary")
     d("RuleName") = ruleName_
@@ -11544,6 +11779,7 @@ Private Function CreateIssueDict(ByVal ruleName_ As String, _
     d("RangeEnd") = rangeEnd_
     d("Severity") = severity_
     d("AutoFixSafe") = autoFixSafe_
+    If autoFixSafe_ Then d("ReplacementText") = replacementText_
     Set CreateIssueDict = d
 End Function
 
@@ -11631,7 +11867,7 @@ Public Function Check_DashUsage(doc As Document) As Collection
 
             Set finding = CreateIssueDict(RULE_NAME_DASH, locStr, _
                 "Hyphen used in number range. Use an en-dash (" & enDash & ") for ranges.", _
-                enDash, hyphenPos, hrEnd, "error", True)
+                "Replace hyphen with en-dash", hyphenPos, hrEnd, "error", True, enDash)
             issues.Add finding
         Next hm
 
@@ -11657,7 +11893,7 @@ Public Function Check_DashUsage(doc As Document) As Collection
 
             Set finding = CreateIssueDict(RULE_NAME_DASH, locStr, _
                 "Double-hyphen found. Use an em-dash (" & emDash & ") instead.", _
-                emDash, dhStart, dhEnd, "error", True)
+                "Replace with em-dash", dhStart, dhEnd, "error", True, emDash)
             issues.Add finding
         Next dhm
 
@@ -11697,7 +11933,7 @@ Public Function Check_DashUsage(doc As Document) As Collection
 
                     Set finding = CreateIssueDict(RULE_NAME_DASH, locStr, _
                         "En-dash (" & enDash & ") used between words. Use a hyphen (-) for compound words.", _
-                        "-", enStart, enEnd, "error", True)
+                        "Replace en-dash with hyphen", enStart, enEnd, "error", True, "-")
                     issues.Add finding
                 End If
 
@@ -12508,7 +12744,8 @@ Private Function CreateIssueDict(ByVal ruleName_ As String, _
         ByVal rangeStart_ As Long, _
         ByVal rangeEnd_ As Long, _
         Optional ByVal severity_ As String = "error", _
-        Optional ByVal autoFixSafe_ As Boolean = False) As Object
+        Optional ByVal autoFixSafe_ As Boolean = False, _
+        Optional ByVal replacementText_ As String = "") As Object
     Dim d As Object
     Set d = CreateObject("Scripting.Dictionary")
     d("RuleName") = ruleName_
@@ -12519,6 +12756,7 @@ Private Function CreateIssueDict(ByVal ruleName_ As String, _
     d("RangeEnd") = rangeEnd_
     d("Severity") = severity_
     d("AutoFixSafe") = autoFixSafe_
+    If autoFixSafe_ Then d("ReplacementText") = replacementText_
     Set CreateIssueDict = d
 End Function
 
@@ -12743,7 +12981,7 @@ Public Function Check_DoubleSpaces(doc As Document) As Collection
 
             ' Range covers only the EXTRA space(s) — keep the first one
             Set finding = CreateIssueDict(RULE_DOUBLE_SPACES, locStr, _
-                dsMsg, "", dsStart + 1, dsEnd, "error", True)
+                dsMsg, "Remove extra space(s)", dsStart + 1, dsEnd, "error", True, "")
             issues.Add finding
 
 NextDoubleMatch:
@@ -12780,8 +13018,8 @@ NextDoubleMatch:
                     ' Suggestion replaces ". " with ".  " (insert extra space)
                     Set finding = CreateIssueDict(RULE_DOUBLE_SPACES, locStr, _
                         "Missing second space after sentence-ending full stop.", _
-                        ".  ", msStart, msEnd, _
-                        "warning", True)
+                        "Add a second space after the full stop", msStart, msEnd, _
+                        "warning", True, ".  ")
                     issues.Add finding
                 End If
             Next ms
@@ -12839,8 +13077,8 @@ Public Function Check_DoubleCommas(doc As Document) As Collection
             End If
 
             Set finding = CreateIssueDict(RULE_DOUBLE_COMMAS, locStr, _
-                "Double comma found.", ",", _
-                dcStart, dcEnd, "error", True)
+                "Double comma found.", "Replace with a single comma", _
+                dcStart, dcEnd, "error", True, ",")
             issues.Add finding
 
             pos = InStr(pos + 2, paraText, ",,")
@@ -12895,7 +13133,7 @@ Public Function Check_SpaceBeforePunct(doc As Document) As Collection
         ' Range covers only the space (not the punctuation character)
         Set finding = CreateIssueDict(RULE_SPACE_BEFORE_PUNCT, locStr, _
             "Unexpected space before '" & punctChar & "'.", _
-            "", rng.Start, rng.Start + 1, "error", True)
+            "Remove the space before punctuation", rng.Start, rng.Start + 1, "error", True, "")
         issues.Add finding
 
         rng.Collapse wdCollapseEnd
@@ -13041,8 +13279,8 @@ Public Function Check_TrailingSpaces(doc As Document) As Collection
                 End If
 
                 Set finding = CreateIssueDict(RULE_TRAILING_SPACES, locStr, _
-                    tsMsg, "", _
-                    tsStart, tsEnd, "warning", True)
+                    tsMsg, "Remove trailing space(s)", _
+                    tsStart, tsEnd, "warning", True, "")
                 issues.Add finding
             End If
         End If
@@ -13181,7 +13419,8 @@ Private Function CreateIssueDict(ByVal ruleName_ As String, _
                                  ByVal rangeStart_ As Long, _
                                  ByVal rangeEnd_ As Long, _
                                  Optional ByVal severity_ As String = "error", _
-                                 Optional ByVal autoFixSafe_ As Boolean = False) As Object
+                                 Optional ByVal autoFixSafe_ As Boolean = False, _
+                                 Optional ByVal replacementText_ As String = "") As Object
     Dim d As Object
     Set d = CreateObject("Scripting.Dictionary")
     d("RuleName") = ruleName_
@@ -13192,6 +13431,7 @@ Private Function CreateIssueDict(ByVal ruleName_ As String, _
     d("RangeEnd") = rangeEnd_
     d("Severity") = severity_
     d("AutoFixSafe") = autoFixSafe_
+    If autoFixSafe_ Then d("ReplacementText") = replacementText_
     Set CreateIssueDict = d
 End Function
 
@@ -14683,7 +14923,8 @@ Private Sub SearchFinancialBatch(searchRange As Range, _
             Set finding = CreateIssueDict(RULE_NAME_CHECK, locStr, _
                 "UK spelling: '" & rng.Text & "' should be '" & _
                 CStr(suggestions(ti)) & "' in UK English.", _
-                CStr(suggestions(ti)), rng.Start, rng.End, "possible_error", True)
+                "Use '" & CStr(suggestions(ti)) & "'", rng.Start, rng.End, _
+                "possible_error", True, CStr(suggestions(ti)))
             issues.Add finding
 
 NextFinMatch:
@@ -14898,7 +15139,8 @@ Private Function CreateIssueDict(ByVal ruleName_ As String, _
                                  ByVal rangeStart_ As Long, _
                                  ByVal rangeEnd_ As Long, _
                                  Optional ByVal severity_ As String = "error", _
-                                 Optional ByVal autoFixSafe_ As Boolean = False) As Object
+                                 Optional ByVal autoFixSafe_ As Boolean = False, _
+                                 Optional ByVal replacementText_ As String = "") As Object
     Dim d As Object
     Set d = CreateObject("Scripting.Dictionary")
     d("RuleName") = ruleName_
@@ -14909,6 +15151,7 @@ Private Function CreateIssueDict(ByVal ruleName_ As String, _
     d("RangeEnd") = rangeEnd_
     d("Severity") = severity_
     d("AutoFixSafe") = autoFixSafe_
+    If autoFixSafe_ Then d("ReplacementText") = replacementText_
     Set CreateIssueDict = d
 End Function
 
@@ -15801,7 +16044,8 @@ Private Function CreateIssueDict(ByVal ruleName_ As String, _
                                  ByVal rangeStart_ As Long, _
                                  ByVal rangeEnd_ As Long, _
                                  Optional ByVal severity_ As String = "error", _
-                                 Optional ByVal autoFixSafe_ As Boolean = False) As Object
+                                 Optional ByVal autoFixSafe_ As Boolean = False, _
+                                 Optional ByVal replacementText_ As String = "") As Object
     Dim d As Object
     Set d = CreateObject("Scripting.Dictionary")
     d("RuleName") = ruleName_
@@ -15812,6 +16056,7 @@ Private Function CreateIssueDict(ByVal ruleName_ As String, _
     d("RangeEnd") = rangeEnd_
     d("Severity") = severity_
     d("AutoFixSafe") = autoFixSafe_
+    If autoFixSafe_ Then d("ReplacementText") = replacementText_
     Set CreateIssueDict = d
 End Function
 
@@ -16845,7 +17090,8 @@ Private Function CreateIssueDict(ByVal ruleName_ As String, _
                                  ByVal rangeStart_ As Long, _
                                  ByVal rangeEnd_ As Long, _
                                  Optional ByVal severity_ As String = "error", _
-                                 Optional ByVal autoFixSafe_ As Boolean = False) As Object
+                                 Optional ByVal autoFixSafe_ As Boolean = False, _
+                                 Optional ByVal replacementText_ As String = "") As Object
     Dim d As Object
     Set d = CreateObject("Scripting.Dictionary")
     d("RuleName") = ruleName_
@@ -16856,6 +17102,7 @@ Private Function CreateIssueDict(ByVal ruleName_ As String, _
     d("RangeEnd") = rangeEnd_
     d("Severity") = severity_
     d("AutoFixSafe") = autoFixSafe_
+    If autoFixSafe_ Then d("ReplacementText") = replacementText_
     Set CreateIssueDict = d
 End Function
 

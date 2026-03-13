@@ -472,14 +472,27 @@ Private Sub UserForm_Initialize()
     ' -- Load brand list ---------------------------------------
     RefreshBrandList
 
-    ' -- Hardcoded form size: 1000 x 1000 points ---------------
-    ' VBA UserForm Width/Height are in points.
-    ' Set explicitly here as a defensive override in case the
-    ' .frm persisted ClientWidth/ClientHeight values are ignored
-    ' or overridden by control layout.
-    Me.Width = 1000
-    Me.Height = 1000
-    Debug.Print "UserForm_Initialize: Width=" & Me.Width & " Height=" & Me.Height
+    ' -- Final form size based on layout ---
+    ' Use InsideWidth/InsideHeight (= client area) so title-bar
+    ' chrome does not steal space from the control layout.
+    ' The .frm header sets ClientWidth/ClientHeight = 1000 as a
+    ' safe default if Initialize errors before reaching this point.
+    Dim neededH As Single
+    neededH = yPos + LBL_H + PAD   ' bottom of status label + padding
+    If neededH < 400 Then neededH = 400  ' sensible minimum
+
+    On Error Resume Next          ' InsideWidth/InsideHeight may not exist on very old hosts
+    Me.InsideWidth = FULL_W + 2 * PAD   ' = 1000
+    Me.InsideHeight = neededH
+    If Err.Number <> 0 Then
+        Err.Clear
+        Me.Width = FULL_W + 2 * PAD
+        Me.Height = neededH
+    End If
+    On Error GoTo 0
+
+    Debug.Print "UserForm_Initialize: Width=" & Me.Width & " Height=" & Me.Height & _
+                " InsideWidth=" & Me.InsideWidth & " InsideHeight=" & Me.InsideHeight
 End Sub
 
 ' ============================================================
@@ -497,8 +510,19 @@ Private Sub BuildRuleCheckboxList(nRules As Long)
     Const ROW_H As Single = 18
     Const COL_PAD As Single = 6
 
+    ' Guard against InsideWidth returning zero or implausibly small values
+    ' on some Word hosts during early initialisation
+    Const MIN_USABLE_W As Single = 120   ' absolute floor (30 pts per column)
+    Dim usableW As Single
+    On Error Resume Next
+    usableW = fraRules.InsideWidth
+    If Err.Number <> 0 Then usableW = 0: Err.Clear
+    On Error GoTo 0
+    If usableW <= 0 Then usableW = fraRules.Width - COL_PAD * 2
+    If usableW < MIN_USABLE_W Then usableW = MIN_USABLE_W
+
     Dim colW As Single
-    colW = (fraRules.InsideWidth - COL_PAD * 2) / COLS
+    colW = (usableW - COL_PAD * 2) / COLS
 
     Dim col As Long
     Dim row As Long
@@ -707,6 +731,13 @@ Private Sub btnExport_Click()
         reportPath = GetTempReportPath(sep)
     End If
 
+    ' Ensure parent directory exists before writing
+    Dim reportDir As String
+    reportDir = modDebugLog.GetParentDirectory(reportPath)
+    If Len(reportDir) > 0 Then
+        modDebugLog.EnsureDirectoryExists reportDir
+    End If
+
     lblStatus.Caption = "Exporting report..."
     Me.Repaint
     DoEvents
@@ -752,19 +783,7 @@ End Sub
 
 ' -- Helper: build a temp path for report export (cross-platform) --
 Private Function GetTempReportPath(sep As String) As String
-    Dim tmpDir As String
-    #If Mac Then
-        tmpDir = Environ("TMPDIR")
-        If Len(tmpDir) = 0 Then tmpDir = "/tmp"
-        ' Strip trailing separator if present
-        If Right$(tmpDir, 1) = sep Then tmpDir = Left$(tmpDir, Len(tmpDir) - 1)
-    #Else
-        tmpDir = Environ("TEMP")
-        If Len(tmpDir) = 0 Then tmpDir = Environ("TMP")
-        If Len(tmpDir) = 0 Then tmpDir = "C:\Temp"
-        If Right$(tmpDir, 1) = sep Then tmpDir = Left$(tmpDir, Len(tmpDir) - 1)
-    #End If
-    GetTempReportPath = tmpDir & sep & "pleadings_report.json"
+    GetTempReportPath = modDebugLog.GetWritableTempDir() & sep & "pleadings_report.json"
 End Function
 
 ' ============================================================
@@ -853,18 +872,11 @@ Private Sub btnSaveBrands_Click()
     Dim brandFile As String
     brandFile = GetBrandRulesPath()
 
-    ' Ensure directory exists
+    ' Ensure directory exists (recursive, handles nested paths)
     Dim brandDir As String
-    Dim sep As String
-    sep = Application.PathSeparator
-    Dim lastSep As Long
-    lastSep = InStrRev(brandFile, sep)
-    If lastSep > 0 Then
-        brandDir = Left$(brandFile, lastSep - 1)
-        On Error Resume Next
-        MkDir brandDir
-        Err.Clear
-        On Error GoTo 0
+    brandDir = modDebugLog.GetParentDirectory(brandFile)
+    If Len(brandDir) > 0 Then
+        modDebugLog.EnsureDirectoryExists brandDir
     End If
 
     Dim saveResult As Boolean

@@ -240,17 +240,14 @@ Public Sub DebugLogDoc(ByVal labelText As String, ByVal doc As Document)
     protType = -1
     protType = doc.ProtectionType: If Err.Number <> 0 Then protType = -1: Err.Clear
     info = info & " protection=" & protType
-    If protType = -1 Then
-        info = info & "(None)"
-    ElseIf protType = 0 Then
-        info = info & "(AllowOnlyRevisions)"
-    ElseIf protType = 1 Then
-        info = info & "(AllowOnlyComments)"
-    ElseIf protType = 2 Then
-        info = info & "(AllowOnlyFormFields)"
-    ElseIf protType = 3 Then
-        info = info & "(NoProtection)"
-    End If
+    Select Case protType
+        Case -1: info = info & "(NoProtection)"         ' wdNoProtection
+        Case 0:  info = info & "(AllowOnlyRevisions)"   ' wdAllowOnlyRevisions
+        Case 1:  info = info & "(AllowOnlyComments)"    ' wdAllowOnlyComments
+        Case 2:  info = info & "(AllowOnlyFormFields)"  ' wdAllowOnlyFormFields
+        Case 3:  info = info & "(AllowOnlyReading)"     ' wdAllowOnlyReading
+        Case Else: info = info & "(Unknown=" & protType & ")"
+    End Select
 
     ' Track revisions
     Dim trackRev As Boolean
@@ -712,4 +709,153 @@ Public Function TryProtectDocument(ByVal doc As Document, _
 
     TryProtectDocument = True
     On Error GoTo 0
+End Function
+
+' ============================================================
+'  G. FILE-SYSTEM HELPERS (no FSO dependency)
+' ============================================================
+
+' --- Recursively ensure a folder path exists ---
+' Returns True if the folder exists (or was created), False on failure.
+' Handles UNC paths (\\server\share\...), drive-letter paths, and
+' Unix absolute paths.  No FileSystemObject dependency.
+Public Function EnsureDirectoryExists(ByVal folderPath As String) As Boolean
+    EnsureDirectoryExists = False
+    If Len(folderPath) = 0 Then Exit Function
+
+    ' Strip trailing separator(s)
+    Dim sep As String
+    sep = Application.PathSeparator
+    Do While Len(folderPath) > 1 And Right$(folderPath, 1) = sep
+        folderPath = Left$(folderPath, Len(folderPath) - 1)
+    Loop
+    If Len(folderPath) = 0 Then Exit Function
+
+    ' Already exists?
+    On Error Resume Next
+    Dim testDir As String
+    testDir = Dir(folderPath, vbDirectory)
+    If Err.Number <> 0 Then testDir = "": Err.Clear
+    On Error GoTo 0
+    If Len(testDir) > 0 Then
+        EnsureDirectoryExists = True
+        Exit Function
+    End If
+
+    ' Walk path components, creating as needed.
+    ' Determine the root prefix that must not be MkDir'd.
+    Dim parts() As String
+    parts = Split(folderPath, sep)
+    If UBound(parts) < 0 Then Exit Function
+
+    Dim built As String
+    Dim startIdx As Long
+
+    #If Mac Then
+        ' Unix absolute paths: /Users/... -> parts(0)=""
+        If Left$(folderPath, 1) = sep Then
+            If UBound(parts) < 1 Then Exit Function
+            built = sep & parts(1)
+            startIdx = 2
+        Else
+            built = parts(0)
+            startIdx = 1
+        End If
+    #Else
+        ' UNC: \\server\share -> parts = ["","","server","share",...]
+        '   root = \\server\share  (need at least 4 parts, start at index 4)
+        ' Drive: C:\dir -> parts = ["C:","dir",...]
+        '   root = C:  (start at index 1)
+        If Left$(folderPath, 2) = sep & sep Then
+            ' UNC path -- \\server\share is the root; cannot MkDir it
+            If UBound(parts) < 3 Then Exit Function  ' malformed UNC
+            built = sep & sep & parts(2) & sep & parts(3)
+            startIdx = 4
+        Else
+            built = parts(0)   ' drive letter e.g. "C:"
+            startIdx = 1
+        End If
+    #End If
+
+    Dim i As Long
+    For i = startIdx To UBound(parts)
+        ' Skip empty components (double separators in the input)
+        If Len(parts(i)) = 0 Then GoTo NextComponent
+        built = built & sep & parts(i)
+        On Error Resume Next
+        testDir = ""
+        testDir = Dir(built, vbDirectory)
+        If Err.Number <> 0 Then testDir = "": Err.Clear
+        If Len(testDir) = 0 Then
+            MkDir built
+            If Err.Number <> 0 Then
+                If DEBUG_MODE Then
+                    Debug.Print "EnsureDirectoryExists: MkDir failed for """ & built & _
+                                """ (Err " & Err.Number & ": " & Err.Description & ")"
+                End If
+                Err.Clear
+                On Error GoTo 0
+                Exit Function
+            End If
+        End If
+        Err.Clear
+        On Error GoTo 0
+NextComponent:
+    Next i
+
+    EnsureDirectoryExists = True
+End Function
+
+' --- Cross-platform writable temp directory ---
+' Returns a known-writable temporary directory path (no trailing separator).
+' Uses the most reliable built-in path available without external references.
+Public Function GetWritableTempDir() As String
+    Dim tmp As String
+    Dim sep As String
+    sep = Application.PathSeparator
+
+    #If Mac Then
+        tmp = Environ("TMPDIR")
+        If Len(tmp) = 0 Then tmp = "/tmp"
+    #Else
+        tmp = Environ("TEMP")
+        If Len(tmp) = 0 Then tmp = Environ("TMP")
+
+        ' Fallback: ask Word for its temp-file path
+        If Len(tmp) = 0 Then
+            On Error Resume Next
+            tmp = Application.Options.DefaultFilePath(wdTempFilePath)
+            If Err.Number <> 0 Then tmp = "": Err.Clear
+            On Error GoTo 0
+        End If
+
+        ' Fallback: LOCALAPPDATA\Temp (standard Windows location)
+        If Len(tmp) = 0 Then
+            tmp = Environ("LOCALAPPDATA")
+            If Len(tmp) > 0 Then tmp = tmp & sep & "Temp"
+        End If
+
+        ' Last resort: user profile (always exists)
+        If Len(tmp) = 0 Then tmp = Environ("USERPROFILE")
+    #End If
+
+    ' Strip trailing separator
+    If Len(tmp) > 1 And Right$(tmp, 1) = sep Then
+        tmp = Left$(tmp, Len(tmp) - 1)
+    End If
+
+    GetWritableTempDir = tmp
+End Function
+
+' --- Extract parent directory from a file path ---
+Public Function GetParentDirectory(ByVal filePath As String) As String
+    Dim sep As String
+    sep = Application.PathSeparator
+    Dim lastSep As Long
+    lastSep = InStrRev(filePath, sep)
+    If lastSep > 0 Then
+        GetParentDirectory = Left$(filePath, lastSep - 1)
+    Else
+        GetParentDirectory = ""
+    End If
 End Function
