@@ -11,22 +11,17 @@ Attribute VB_Name = "PleadingsEngine"
 ' Dependencies:
 '
 ' Optional rule modules (import any subset):
-'   - Rules_Spelling.bas        (Rules 1, 12, 13)
-'   - Rules_TextScan.bas        (Rules 2, 34)
-'   - Rules_Numbering.bas       (Rules 3, 8)
-'   - Rules_Headings.bas        (Rules 4, 21)
-'   - Rules_Terms.bas           (Rules 5, 7; 23 RETIRED)
-'   - Rules_Formatting.bas      (Rules 6, 11)
-'   - Rules_NumberFormats.bas    (Rules 9, 19; 18 RETIRED)
-'   - Rules_Lists.bas           (Rules 10, 15)
-'   - Rules_Punctuation.bas     (Rules 14, 16)
-'   - Rules_Quotes.bas          (Rules 17, 32, 33)
-'   - Rules_FootnoteIntegrity.bas (Rule 20)
-'   - Rules_Brands.bas          (Rule 22)
-'   - Rules_FootnoteHarts.bas   (Rules 24, 25, 26, 27)
-'   - Rules_LegalTerms.bas      (Rules 28, 29)
-'   - Rules_Italics.bas         (Rules 30, 31)
-'   - Rules_Spacing.bas        (Rules 35-38: double spaces, commas, spacing)
+'   - Rules_Spelling.bas        (spelling, licence/license, check/cheque)
+'   - Rules_TextScan.bas        (repeated words, spell out under ten)
+'   - Rules_Terms.bas           (custom term whitelist)
+'   - Rules_NumberFormats.bas    (date/time, currency/number format)
+'   - Rules_Punctuation.bas     (slash style, bracket integrity, dash usage)
+'   - Rules_FootnoteIntegrity.bas (footnote integrity)
+'   - Rules_Brands.bas          (brand name enforcement)
+'   - Rules_FootnoteHarts.bas   (footnote Hart's rules)
+'   - Rules_LegalTerms.bas      (mandated legal terms, always capitalise)
+'   - Rules_Italics.bas         (anglicised terms, foreign names)
+'   - Rules_Spacing.bas         (double spaces, commas, spacing)
 '
 ' Installation:
 '   1. Open the VBA Editor (Alt+F11)
@@ -213,30 +208,20 @@ Public Function InitRuleConfig() As Object
 
     cfg.Add "spelling", True
     cfg.Add "repeated_words", True
-    cfg.Add "sequential_numbering", True
-    cfg.Add "heading_capitalisation", True
     cfg.Add "custom_term_whitelist", True
-    cfg.Add "defined_terms", True
-    cfg.Add "clause_number_format", True
     cfg.Add "date_time_format", True
-    cfg.Add "list_rules", True
-    cfg.Add "formatting_consistency", True
     cfg.Add "licence_license", True
     cfg.Add "check_cheque", True
     cfg.Add "slash_style", True
     cfg.Add "dash_usage", True
     cfg.Add "bracket_integrity", True
-    cfg.Add "quotation_mark_consistency", True
     cfg.Add "currency_number_format", True
     cfg.Add "footnote_rules", True
-    cfg.Add "title_formatting", True
     cfg.Add "brand_name_enforcement", True
     cfg.Add "mandated_legal_term_forms", True
     cfg.Add "always_capitalise_terms", True
     cfg.Add "known_anglicised_terms_not_italic", True
     cfg.Add "foreign_names_not_italic", True
-    cfg.Add "single_quotes_default", True
-    cfg.Add "smart_quote_consistency", True
     cfg.Add "spell_out_under_ten", True
     cfg.Add "double_spaces", True
     cfg.Add "double_commas", True
@@ -604,59 +589,8 @@ Public Function RunAllPleadingsRules(doc As Document, _
     End If
 
 
-    DoEvents
-    ' -- Numbering rules --
-    If IsRuleEnabled(config, "sequential_numbering") Then
-        PerfTimerStart "sequential_numbering"
-        AddIssuesToCollection allIssues, _
-            TryRunRule("Rules_Numbering.Check_SequentialNumbering", doc)
-        PerfTimerEnd "sequential_numbering"
-    End If
 
-    If IsRuleEnabled(config, "clause_number_format") Then
-        PerfTimerStart "clause_number_format"
-        AddIssuesToCollection allIssues, _
-            TryRunRule("Rules_Numbering.Check_ClauseNumberFormat", doc)
-        PerfTimerEnd "clause_number_format"
-    End If
 
-    DoEvents
-    ' -- Heading rules --
-    If IsRuleEnabled(config, "heading_capitalisation") Then
-        PerfTimerStart "heading_capitalisation"
-        AddIssuesToCollection allIssues, _
-            TryRunRule("Rules_Headings.Check_HeadingCapitalisation", doc)
-        PerfTimerEnd "heading_capitalisation"
-    End If
-
-    If IsRuleEnabled(config, "title_formatting") Then
-        PerfTimerStart "title_formatting"
-        AddIssuesToCollection allIssues, _
-            TryRunRule("Rules_Headings.Check_TitleFormatting", doc)
-        PerfTimerEnd "title_formatting"
-    End If
-
-    DoEvents
-    ' -- Term rules --
-    If IsRuleEnabled(config, "defined_terms") Then
-        PerfTimerStart "defined_terms"
-        AddIssuesToCollection allIssues, _
-            TryRunRule("Rules_Terms.Check_DefinedTerms", doc)
-        PerfTimerEnd "defined_terms"
-    End If
-
-    DoEvents
-    ' -- Formatting consistency (combined: paragraph breaks, font, colour) --
-    If IsRuleEnabled(config, "formatting_consistency") Then
-        PerfTimerStart "formatting_consistency"
-        AddIssuesToCollection allIssues, _
-            TryRunRule("Rules_Formatting.Check_ParagraphBreakConsistency", doc)
-        AddIssuesToCollection allIssues, _
-            TryRunRule("Rules_Formatting.Check_FontConsistency", doc)
-        AddIssuesToCollection allIssues, _
-            TryRunRule("Rules_Spelling.Check_ColourFormatting", doc)
-        PerfTimerEnd "formatting_consistency"
-    End If
 
     DoEvents
     ' -- Number format rules --
@@ -674,16 +608,8 @@ Public Function RunAllPleadingsRules(doc As Document, _
         PerfTimerEnd "currency_number_format"
     End If
 
-    DoEvents
-    ' -- List rules (combined: inline format, punctuation) --
-    If IsRuleEnabled(config, "list_rules") Then
-        PerfTimerStart "list_rules"
-        AddIssuesToCollection allIssues, _
-            TryRunRule("Rules_Lists.Check_InlineListFormat", doc)
-        AddIssuesToCollection allIssues, _
-            TryRunRule("Rules_Lists.Check_ListPunctuation", doc)
-        PerfTimerEnd "list_rules"
-    End If
+
+
 
     DoEvents
     ' -- UK/US variant rules (in Rules_Spelling) --
@@ -722,64 +648,6 @@ Public Function RunAllPleadingsRules(doc As Document, _
         AddIssuesToCollection allIssues, _
             TryRunRule("Rules_Punctuation.Check_DashUsage", doc)
         PerfTimerEnd "dash_usage"
-    End If
-
-    DoEvents
-    ' -- Quote rules --
-    If IsRuleEnabled(config, "quotation_mark_consistency") Then
-        PerfTimerStart "quotation_mark_consistency"
-        AddIssuesToCollection allIssues, _
-            TryRunRule("Rules_Quotes.Check_QuotationMarkConsistency", doc)
-        PerfTimerEnd "quotation_mark_consistency"
-    End If
-
-    If IsRuleEnabled(config, "single_quotes_default") Then
-        PerfTimerStart "single_quotes_default"
-        AddIssuesToCollection allIssues, _
-            TryRunRule("Rules_Quotes.Check_SingleQuotesDefault", doc)
-        PerfTimerEnd "single_quotes_default"
-    End If
-
-    If IsRuleEnabled(config, "smart_quote_consistency") Then
-        PerfTimerStart "smart_quote_consistency"
-        AddIssuesToCollection allIssues, _
-            TryRunRule("Rules_Quotes.Check_SmartQuoteConsistency", doc)
-        PerfTimerEnd "smart_quote_consistency"
-    End If
-
-    ' -- Dedupe overlapping quote-rule findings --
-    ' The three quote rules can flag the same character position independently.
-    ' Keep the first finding per RangeStart+RangeEnd and discard later duplicates.
-    If allIssues.Count > 0 Then
-        Dim quoteRules As Object
-        Set quoteRules = CreateObject("Scripting.Dictionary")
-        quoteRules.Add "quotation_mark_consistency", True
-        quoteRules.Add "single_quotes_default", True
-        quoteRules.Add "smart_quote_consistency", True
-
-        Dim seenQuoteKeys As Object
-        Set seenQuoteKeys = CreateObject("Scripting.Dictionary")
-        Dim dedupedIssues As New Collection
-        Dim iss As Variant
-        Dim posKey As String
-
-        For Each iss In allIssues
-            If quoteRules.Exists(GetIssueProp(iss, "RuleName")) Then
-                posKey = GetIssueProp(iss, "RangeStart") & "|" & _
-                         GetIssueProp(iss, "RangeEnd")
-                If Not seenQuoteKeys.Exists(posKey) Then
-                    seenQuoteKeys.Add posKey, GetIssueProp(iss, "RuleName")
-                    dedupedIssues.Add iss
-                End If
-                ' If posKey already seen (from a different quote rule), skip
-            Else
-                dedupedIssues.Add iss
-            End If
-        Next iss
-
-        Set allIssues = dedupedIssues
-        Set seenQuoteKeys = Nothing
-        Set quoteRules = Nothing
     End If
 
     DoEvents
@@ -1744,30 +1612,20 @@ Public Function GetRuleDisplayNames() As Object
 
     d.Add "spelling", "Spelling Enforcement (UK/US)"
     d.Add "repeated_words", "Repeated Word Detection"
-    d.Add "sequential_numbering", "Sequential Numbering"
-    d.Add "heading_capitalisation", "Heading Capitalisation"
     d.Add "custom_term_whitelist", "Custom Term Whitelist"
-    d.Add "defined_terms", "Defined Term Checker"
-    d.Add "clause_number_format", "Clause Number Format"
     d.Add "date_time_format", "Date/Time Format Consistency"
-    d.Add "list_rules", "List Format & Punctuation"
-    d.Add "formatting_consistency", "Formatting Consistency"
     d.Add "licence_license", "Licence/License Rule"
     d.Add "check_cheque", "Check/Cheque Rule"
     d.Add "slash_style", "Slash Style Checker"
     d.Add "dash_usage", "En-dash/Em-dash/Hyphen"
     d.Add "bracket_integrity", "Bracket Integrity"
-    d.Add "quotation_mark_consistency", "Quotation Mark Consistency"
     d.Add "currency_number_format", "Currency/Number Formatting"
     d.Add "footnote_rules", "Footnote Rules"
-    d.Add "title_formatting", "Title Formatting Consistency"
     d.Add "brand_name_enforcement", "Brand Name Enforcement"
     d.Add "mandated_legal_term_forms", "Mandated Legal Term Forms"
     d.Add "always_capitalise_terms", "Always Capitalise Terms"
     d.Add "known_anglicised_terms_not_italic", "Anglicised Terms Not Italic"
     d.Add "foreign_names_not_italic", "Foreign Names Not Italic"
-    d.Add "single_quotes_default", "Single Quotes Default"
-    d.Add "smart_quote_consistency", "Smart Quote Consistency"
     d.Add "spell_out_under_ten", "Spell Out Numbers Under 10"
     d.Add "double_spaces", "Double Spaces"
     d.Add "double_commas", "Double Commas"
@@ -1986,29 +1844,78 @@ Private Function IsRetiredIssue(ByVal item As Object) As Boolean
     If item.Exists("RuleName") Then rn = LCase$(item("RuleName"))
     If Len(rn) = 0 Then Exit Function
 
-    ' Trailing spaces family
+    ' ---- Retired rule families (MVP pruning pass) ----
+
+    ' Trailing spaces
     If rn = "trailing_spaces" Or rn = "trailing_space" Or _
        rn = "trailing whitespace" Then
-        IsRetiredIssue = True
-        Exit Function
+        IsRetiredIssue = True: Exit Function
     End If
 
-    ' After-heading spacing family
+    ' Heading spacing (after/before heading)
     If rn = "after_heading_spacing" Or rn = "heading_spacing" Or _
-       rn = "heading spacing" Or rn = "heading_spacing_consistency" Then
-        IsRetiredIssue = True
-        Exit Function
+       rn = "heading spacing" Or rn = "heading_spacing_consistency" Or _
+       rn = "paragraph_break_consistency" Then
+        IsRetiredIssue = True: Exit Function
     End If
 
-    ' Check issue text for after-heading pattern (catches paragraph_break_consistency issues)
+    ' Font / formatting consistency
+    If rn = "font_consistency" Or rn = "colour_formatting" Or _
+       rn = "formatting_consistency" Then
+        IsRetiredIssue = True: Exit Function
+    End If
+
+    ' Heading capitalisation / title formatting
+    If rn = "heading_capitalisation" Or rn = "title_formatting" Then
+        IsRetiredIssue = True: Exit Function
+    End If
+
+    ' Sequential numbering / clause number format
+    If rn = "sequential_numbering" Or rn = "clause_number_format" Then
+        IsRetiredIssue = True: Exit Function
+    End If
+
+    ' Defined terms
+    If rn = "defined_terms" Or rn = "phrase_consistency" Then
+        IsRetiredIssue = True: Exit Function
+    End If
+
+    ' Quote rules
+    If rn = "quotation_mark_consistency" Or rn = "single_quotes_default" Or _
+       rn = "smart_quote_consistency" Then
+        IsRetiredIssue = True: Exit Function
+    End If
+
+    ' List rules
+    If rn = "inline_list_format" Or rn = "list_punctuation" Or _
+       rn = "list_rules" Then
+        IsRetiredIssue = True: Exit Function
+    End If
+
+    ' ---- Message-based catch-all for edge cases ----
     Dim issText As String
     issText = ""
     If item.Exists("Issue") Then issText = LCase$(item("Issue"))
+
     If InStr(issText, "after-heading spacing") > 0 Or _
        InStr(issText, "after heading spacing") > 0 Or _
-       InStr(issText, "spacing after heading") > 0 Then
-        IsRetiredIssue = True
-        Exit Function
+       InStr(issText, "spacing after heading") > 0 Or _
+       InStr(issText, "font inconsistency") > 0 Or _
+       InStr(issText, "dominant heading font") > 0 Or _
+       InStr(issText, "dominant body font") > 0 Or _
+       InStr(issText, "heading capitalisation") > 0 Or _
+       InStr(issText, "title_case") > 0 Or _
+       InStr(issText, "sentence_case") > 0 Or _
+       InStr(issText, "numbering went backwards") > 0 Or _
+       InStr(issText, "duplicate number") > 0 Or _
+       InStr(issText, "defined term quote") > 0 Or _
+       InStr(issText, "quotation mark consistency") > 0 Or _
+       InStr(issText, "smart quote") > 0 Or _
+       InStr(issText, "single quotes default") > 0 Or _
+       InStr(issText, "double quotes default") > 0 Or _
+       InStr(issText, "quote style consistency") > 0 Or _
+       InStr(issText, "non-standard font colour") > 0 Then
+        IsRetiredIssue = True: Exit Function
     End If
     On Error GoTo 0
 End Function
