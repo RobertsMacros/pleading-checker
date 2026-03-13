@@ -1,6 +1,6 @@
 # Pleadings Checker VBA -- Targeted Audit Report
 
-**Date:** 2026-03-13 (pass 12)
+**Date:** 2026-03-13 (pass 13)
 **Scope:** All 20 modules in `Code/` (18,824 lines total, fully inspected)
 **Approach:** Targeted fixes only; no broad rewrites
 
@@ -561,3 +561,97 @@ Key existence semantics:
 | `Rules_Punctuation.bas` | 3 call sites | Moved en-dash/em-dash/hyphen from `Suggestion` to `ReplacementText` |
 | `Rules_Spelling.bas` | `CreateIssueDict` | Added `replacementText_` parameter + conditional key |
 | `Rules_Spelling.bas` | 1 call site | Moved corrected spelling from `Suggestion` to `ReplacementText` |
+
+---
+
+## Pass 13 — Standardise Finding Contract + Harden Form Layout
+
+### Confirmed defects fixed
+
+**24. 13 remaining rule modules lacked ReplacementText support in CreateIssueDict**
+
+While pass 12 fixed the 3 modules that had active `AutoFixSafe=True` call sites, 13 other rule modules still used the old 8-key `CreateIssueDict` without a `ReplacementText` parameter. Any future autofix rule added to those modules would silently degrade to comment-only.
+
+**Fix:** Added `Optional ByVal replacementText_ As String = ""` parameter and conditional `If autoFixSafe_ Then d("ReplacementText") = replacementText_` to all 13 remaining `CreateIssueDict` helpers:
+- Rules_Brands.bas
+- Rules_FootnoteHarts.bas
+- Rules_FootnoteIntegrity.bas
+- Rules_Formatting.bas
+- Rules_Headings.bas
+- Rules_Italics.bas
+- Rules_LegalTerms.bas
+- Rules_Lists.bas
+- Rules_NumberFormats.bas
+- Rules_Numbering.bas
+- Rules_Quotes.bas
+- Rules_Terms.bas
+- Rules_TextScan.bas
+
+**25. PleadingsEngine.CreateIssue unconditionally wrote ReplacementText key**
+
+The engine's own `CreateIssue` function always wrote `d("ReplacementText") = replacementText_`, even when `autoFixSafe_ = False`. This meant `HasReplacementText` would return `True` for non-autofix findings, which is semantically incorrect and a latent risk if control flow changes.
+
+**Fix:** Changed to `If autoFixSafe_ Then d("ReplacementText") = replacementText_`, matching all rule module helpers.
+
+**26. frmPleadingsChecker.BuildRuleCheckboxList: InsideWidth not guarded**
+
+`fraRules.InsideWidth` was read directly without error handling. If `InsideWidth` returns 0, is stale, or errors on certain Word hosts during early initialisation, `colW` would collapse to 0 or negative, rendering the rules panel with zero-width checkboxes.
+
+**Fix:** Added guard with three layers:
+1. Error-trapped read of `fraRules.InsideWidth`
+2. Fallback to `fraRules.Width - COL_PAD * 2` if `InsideWidth <= 0`
+3. Absolute minimum floor of 120 points (`MIN_USABLE_W`, ~30pts per column)
+
+### Areas verified and left unchanged
+
+- **BuildCommentText** (PleadingsEngine.bas:1473): Uses `Suggestion` only for human-readable comment text. Correct.
+- **IssueToJSON** (PleadingsEngine.bas:1942): Conditionally includes `ReplacementText` in JSON when non-empty. Correct.
+- **ApplyHighlights** (PleadingsEngine.bas:1248): Highlight + comment only, never reads `ReplacementText`. Correct.
+- **ApplySuggestionsAsTrackedChanges**: `AutoFixSafe` gate at line 1348 precedes `HasReplacementText` check at line 1360. Non-autofix findings go comment-only via Else branch. Correct and safe.
+- **HasReplacementText**: Dictionary key-existence check is correct.
+- **Whitespace validation gate**: All existing safeguards preserved.
+- No rule module uses `AutoFixSafe = True` without a matching `ReplacementText`.
+- Form sizing, export paths, debug layer all intact.
+
+### ReplacementText contract after patch
+
+All 16 rule modules + PleadingsEngine.CreateIssue now follow a uniform contract:
+
+| Field | Type | Meaning | Who reads it |
+|-------|------|---------|--------------|
+| `Suggestion` | Human prose | Descriptive guidance for comments/reports/UI | `BuildCommentText`, `IssueToJSON`, `GenerateReport` |
+| `ReplacementText` | Literal text | Machine-safe amendment (key present = amendment allowed; empty = delete) | `ApplySuggestionsAsTrackedChanges` |
+| `AutoFixSafe` | Boolean | Rule author asserts engine may auto-amend | `ApplySuggestionsAsTrackedChanges` gate |
+
+Key existence semantics (enforced by all `CreateIssueDict` helpers + engine `CreateIssue`):
+- `AutoFixSafe = True` → `ReplacementText` key added to dictionary
+- `AutoFixSafe = False` → `ReplacementText` key **not present** in dictionary
+- `HasReplacementText(finding)` → `True` only when key exists (distinguishes delete from missing)
+
+### Exact modules/procedures changed (pass 13)
+
+| Module | Procedure | Change |
+|--------|-----------|--------|
+| `PleadingsEngine.bas` | `CreateIssue` | `ReplacementText` key now conditional on `autoFixSafe_` |
+| `Rules_Brands.bas` | `CreateIssueDict` | Added `replacementText_` param + conditional key |
+| `Rules_FootnoteHarts.bas` | `CreateIssueDict` | Added `replacementText_` param + conditional key |
+| `Rules_FootnoteIntegrity.bas` | `CreateIssueDict` | Added `replacementText_` param + conditional key |
+| `Rules_Formatting.bas` | `CreateIssueDict` | Added `replacementText_` param + conditional key |
+| `Rules_Headings.bas` | `CreateIssueDict` | Added `replacementText_` param + conditional key |
+| `Rules_Italics.bas` | `CreateIssueDict` | Added `replacementText_` param + conditional key |
+| `Rules_LegalTerms.bas` | `CreateIssueDict` | Added `replacementText_` param + conditional key |
+| `Rules_Lists.bas` | `CreateIssueDict` | Added `replacementText_` param + conditional key |
+| `Rules_NumberFormats.bas` | `CreateIssueDict` | Added `replacementText_` param + conditional key |
+| `Rules_Numbering.bas` | `CreateIssueDict` | Added `replacementText_` param + conditional key |
+| `Rules_Quotes.bas` | `CreateIssueDict` | Added `replacementText_` param + conditional key |
+| `Rules_Terms.bas` | `CreateIssueDict` | Added `replacementText_` param + conditional key |
+| `Rules_TextScan.bas` | `CreateIssueDict` | Added `replacementText_` param + conditional key |
+| `frmPleadingsChecker.frm` | `BuildRuleCheckboxList` | Guarded `InsideWidth` with fallback + floor clamp |
+
+### Remaining live-testing limitations
+
+- Deletion auto-fixes (empty `ReplacementText`) need live verification against the whitespace validation gate
+- `InsideWidth` fallback path untestable without a Word host that returns 0
+- `InsideWidth`/`InsideHeight` untested on Word 2007/2010
+- `CheckManualNumbering` performance hotspot unchanged
+- No unit-test harness

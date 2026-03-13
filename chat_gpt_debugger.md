@@ -513,8 +513,19 @@ Private Sub BuildRuleCheckboxList(nRules As Long)
     Const ROW_H As Single = 18
     Const COL_PAD As Single = 6
 
+    ' Guard against InsideWidth returning zero or implausibly small values
+    ' on some Word hosts during early initialisation
+    Const MIN_USABLE_W As Single = 120   ' absolute floor (30 pts per column)
+    Dim usableW As Single
+    On Error Resume Next
+    usableW = fraRules.InsideWidth
+    If Err.Number <> 0 Then usableW = 0: Err.Clear
+    On Error GoTo 0
+    If usableW <= 0 Then usableW = fraRules.Width - COL_PAD * 2
+    If usableW < MIN_USABLE_W Then usableW = MIN_USABLE_W
+
     Dim colW As Single
-    colW = (fraRules.InsideWidth - COL_PAD * 2) / COLS
+    colW = (usableW - COL_PAD * 2) / COLS
 
     Dim col As Long
     Dim row As Long
@@ -3719,7 +3730,7 @@ Public Function CreateIssue(ByVal ruleName_ As String, _
     d("RangeEnd") = rangeEnd_
     d("Severity") = severity_
     d("AutoFixSafe") = autoFixSafe_
-    d("ReplacementText") = replacementText_
+    If autoFixSafe_ Then d("ReplacementText") = replacementText_
     Set CreateIssue = d
 End Function
 
@@ -4384,7 +4395,8 @@ Private Function CreateIssueDict(ByVal ruleName_ As String, _
                                  ByVal rangeStart_ As Long, _
                                  ByVal rangeEnd_ As Long, _
                                  Optional ByVal severity_ As String = "error", _
-                                 Optional ByVal autoFixSafe_ As Boolean = False) As Object
+                                 Optional ByVal autoFixSafe_ As Boolean = False, _
+                                 Optional ByVal replacementText_ As String = "") As Object
     Dim d As Object
     Set d = CreateObject("Scripting.Dictionary")
     d("RuleName") = ruleName_
@@ -4395,6 +4407,7 @@ Private Function CreateIssueDict(ByVal ruleName_ As String, _
     d("RangeEnd") = rangeEnd_
     d("Severity") = severity_
     d("AutoFixSafe") = autoFixSafe_
+    If autoFixSafe_ Then d("ReplacementText") = replacementText_
     Set CreateIssueDict = d
 End Function
 
@@ -5053,7 +5066,8 @@ Private Function CreateIssueDict(ByVal ruleName_ As String, _
                                  ByVal rangeStart_ As Long, _
                                  ByVal rangeEnd_ As Long, _
                                  Optional ByVal severity_ As String = "error", _
-                                 Optional ByVal autoFixSafe_ As Boolean = False) As Object
+                                 Optional ByVal autoFixSafe_ As Boolean = False, _
+                                 Optional ByVal replacementText_ As String = "") As Object
     Dim d As Object
     Set d = CreateObject("Scripting.Dictionary")
     d("RuleName") = ruleName_
@@ -5064,6 +5078,7 @@ Private Function CreateIssueDict(ByVal ruleName_ As String, _
     d("RangeEnd") = rangeEnd_
     d("Severity") = severity_
     d("AutoFixSafe") = autoFixSafe_
+    If autoFixSafe_ Then d("ReplacementText") = replacementText_
     Set CreateIssueDict = d
 End Function
 
@@ -5561,7 +5576,8 @@ Private Function CreateIssueDict(ByVal ruleName_ As String, _
                                  ByVal rangeStart_ As Long, _
                                  ByVal rangeEnd_ As Long, _
                                  Optional ByVal severity_ As String = "error", _
-                                 Optional ByVal autoFixSafe_ As Boolean = False) As Object
+                                 Optional ByVal autoFixSafe_ As Boolean = False, _
+                                 Optional ByVal replacementText_ As String = "") As Object
     Dim d As Object
     Set d = CreateObject("Scripting.Dictionary")
     d("RuleName") = ruleName_
@@ -5572,6 +5588,7 @@ Private Function CreateIssueDict(ByVal ruleName_ As String, _
     d("RangeEnd") = rangeEnd_
     d("Severity") = severity_
     d("AutoFixSafe") = autoFixSafe_
+    If autoFixSafe_ Then d("ReplacementText") = replacementText_
     Set CreateIssueDict = d
 End Function
 
@@ -6489,7 +6506,8 @@ Private Function CreateIssueDict(ByVal ruleName_ As String, _
                                  ByVal rangeStart_ As Long, _
                                  ByVal rangeEnd_ As Long, _
                                  Optional ByVal severity_ As String = "error", _
-                                 Optional ByVal autoFixSafe_ As Boolean = False) As Object
+                                 Optional ByVal autoFixSafe_ As Boolean = False, _
+                                 Optional ByVal replacementText_ As String = "") As Object
     Dim d As Object
     Set d = CreateObject("Scripting.Dictionary")
     d("RuleName") = ruleName_
@@ -6500,6 +6518,7 @@ Private Function CreateIssueDict(ByVal ruleName_ As String, _
     d("RangeEnd") = rangeEnd_
     d("Severity") = severity_
     d("AutoFixSafe") = autoFixSafe_
+    If autoFixSafe_ Then d("ReplacementText") = replacementText_
     Set CreateIssueDict = d
 End Function
 
@@ -7202,7 +7221,8 @@ Private Function CreateIssueDict(ByVal ruleName_ As String, _
                                  ByVal rangeStart_ As Long, _
                                  ByVal rangeEnd_ As Long, _
                                  Optional ByVal severity_ As String = "error", _
-                                 Optional ByVal autoFixSafe_ As Boolean = False) As Object
+                                 Optional ByVal autoFixSafe_ As Boolean = False, _
+                                 Optional ByVal replacementText_ As String = "") As Object
     Dim d As Object
     Set d = CreateObject("Scripting.Dictionary")
     d("RuleName") = ruleName_
@@ -7213,6 +7233,7 @@ Private Function CreateIssueDict(ByVal ruleName_ As String, _
     d("RangeEnd") = rangeEnd_
     d("Severity") = severity_
     d("AutoFixSafe") = autoFixSafe_
+    If autoFixSafe_ Then d("ReplacementText") = replacementText_
     Set CreateIssueDict = d
 End Function
 
@@ -7571,7 +7592,8 @@ Private Function CreateIssueDict(ByVal ruleName_ As String, _
                                  ByVal rangeStart_ As Long, _
                                  ByVal rangeEnd_ As Long, _
                                  Optional ByVal severity_ As String = "error", _
-                                 Optional ByVal autoFixSafe_ As Boolean = False) As Object
+                                 Optional ByVal autoFixSafe_ As Boolean = False, _
+                                 Optional ByVal replacementText_ As String = "") As Object
     Dim d As Object
     Set d = CreateObject("Scripting.Dictionary")
     d("RuleName") = ruleName_
@@ -7582,6 +7604,7 @@ Private Function CreateIssueDict(ByVal ruleName_ As String, _
     d("RangeEnd") = rangeEnd_
     d("Severity") = severity_
     d("AutoFixSafe") = autoFixSafe_
+    If autoFixSafe_ Then d("ReplacementText") = replacementText_
     Set CreateIssueDict = d
 End Function
 
@@ -8066,7 +8089,8 @@ Private Function CreateIssueDict(ByVal ruleName_ As String, _
                                  ByVal rangeStart_ As Long, _
                                  ByVal rangeEnd_ As Long, _
                                  Optional ByVal severity_ As String = "error", _
-                                 Optional ByVal autoFixSafe_ As Boolean = False) As Object
+                                 Optional ByVal autoFixSafe_ As Boolean = False, _
+                                 Optional ByVal replacementText_ As String = "") As Object
     Dim d As Object
     Set d = CreateObject("Scripting.Dictionary")
     d("RuleName") = ruleName_
@@ -8077,6 +8101,7 @@ Private Function CreateIssueDict(ByVal ruleName_ As String, _
     d("RangeEnd") = rangeEnd_
     d("Severity") = severity_
     d("AutoFixSafe") = autoFixSafe_
+    If autoFixSafe_ Then d("ReplacementText") = replacementText_
     Set CreateIssueDict = d
 End Function
 
@@ -9070,7 +9095,8 @@ Private Function CreateIssueDict(ByVal ruleName_ As String, _
                                  ByVal rangeStart_ As Long, _
                                  ByVal rangeEnd_ As Long, _
                                  Optional ByVal severity_ As String = "error", _
-                                 Optional ByVal autoFixSafe_ As Boolean = False) As Object
+                                 Optional ByVal autoFixSafe_ As Boolean = False, _
+                                 Optional ByVal replacementText_ As String = "") As Object
     Dim d As Object
     Set d = CreateObject("Scripting.Dictionary")
     d("RuleName") = ruleName_
@@ -9081,6 +9107,7 @@ Private Function CreateIssueDict(ByVal ruleName_ As String, _
     d("RangeEnd") = rangeEnd_
     d("Severity") = severity_
     d("AutoFixSafe") = autoFixSafe_
+    If autoFixSafe_ Then d("ReplacementText") = replacementText_
     Set CreateIssueDict = d
 End Function
 
@@ -9998,7 +10025,8 @@ Private Function CreateIssueDict(ByVal ruleName_ As String, _
                                  ByVal rangeStart_ As Long, _
                                  ByVal rangeEnd_ As Long, _
                                  Optional ByVal severity_ As String = "error", _
-                                 Optional ByVal autoFixSafe_ As Boolean = False) As Object
+                                 Optional ByVal autoFixSafe_ As Boolean = False, _
+                                 Optional ByVal replacementText_ As String = "") As Object
     Dim d As Object
     Set d = CreateObject("Scripting.Dictionary")
     d("RuleName") = ruleName_
@@ -10009,6 +10037,7 @@ Private Function CreateIssueDict(ByVal ruleName_ As String, _
     d("RangeEnd") = rangeEnd_
     d("Severity") = severity_
     d("AutoFixSafe") = autoFixSafe_
+    If autoFixSafe_ Then d("ReplacementText") = replacementText_
     Set CreateIssueDict = d
 End Function
 
@@ -10936,7 +10965,8 @@ Private Function CreateIssueDict(ByVal ruleName_ As String, _
                                  ByVal rangeStart_ As Long, _
                                  ByVal rangeEnd_ As Long, _
                                  Optional ByVal severity_ As String = "error", _
-                                 Optional ByVal autoFixSafe_ As Boolean = False) As Object
+                                 Optional ByVal autoFixSafe_ As Boolean = False, _
+                                 Optional ByVal replacementText_ As String = "") As Object
     Dim d As Object
     Set d = CreateObject("Scripting.Dictionary")
     d("RuleName") = ruleName_
@@ -10947,6 +10977,7 @@ Private Function CreateIssueDict(ByVal ruleName_ As String, _
     d("RangeEnd") = rangeEnd_
     d("Severity") = severity_
     d("AutoFixSafe") = autoFixSafe_
+    If autoFixSafe_ Then d("ReplacementText") = replacementText_
     Set CreateIssueDict = d
 End Function
 
@@ -12713,7 +12744,8 @@ Private Function CreateIssueDict(ByVal ruleName_ As String, _
         ByVal rangeStart_ As Long, _
         ByVal rangeEnd_ As Long, _
         Optional ByVal severity_ As String = "error", _
-        Optional ByVal autoFixSafe_ As Boolean = False) As Object
+        Optional ByVal autoFixSafe_ As Boolean = False, _
+        Optional ByVal replacementText_ As String = "") As Object
     Dim d As Object
     Set d = CreateObject("Scripting.Dictionary")
     d("RuleName") = ruleName_
@@ -12724,6 +12756,7 @@ Private Function CreateIssueDict(ByVal ruleName_ As String, _
     d("RangeEnd") = rangeEnd_
     d("Severity") = severity_
     d("AutoFixSafe") = autoFixSafe_
+    If autoFixSafe_ Then d("ReplacementText") = replacementText_
     Set CreateIssueDict = d
 End Function
 
@@ -16011,7 +16044,8 @@ Private Function CreateIssueDict(ByVal ruleName_ As String, _
                                  ByVal rangeStart_ As Long, _
                                  ByVal rangeEnd_ As Long, _
                                  Optional ByVal severity_ As String = "error", _
-                                 Optional ByVal autoFixSafe_ As Boolean = False) As Object
+                                 Optional ByVal autoFixSafe_ As Boolean = False, _
+                                 Optional ByVal replacementText_ As String = "") As Object
     Dim d As Object
     Set d = CreateObject("Scripting.Dictionary")
     d("RuleName") = ruleName_
@@ -16022,6 +16056,7 @@ Private Function CreateIssueDict(ByVal ruleName_ As String, _
     d("RangeEnd") = rangeEnd_
     d("Severity") = severity_
     d("AutoFixSafe") = autoFixSafe_
+    If autoFixSafe_ Then d("ReplacementText") = replacementText_
     Set CreateIssueDict = d
 End Function
 
@@ -17055,7 +17090,8 @@ Private Function CreateIssueDict(ByVal ruleName_ As String, _
                                  ByVal rangeStart_ As Long, _
                                  ByVal rangeEnd_ As Long, _
                                  Optional ByVal severity_ As String = "error", _
-                                 Optional ByVal autoFixSafe_ As Boolean = False) As Object
+                                 Optional ByVal autoFixSafe_ As Boolean = False, _
+                                 Optional ByVal replacementText_ As String = "") As Object
     Dim d As Object
     Set d = CreateObject("Scripting.Dictionary")
     d("RuleName") = ruleName_
@@ -17066,6 +17102,7 @@ Private Function CreateIssueDict(ByVal ruleName_ As String, _
     d("RangeEnd") = rangeEnd_
     d("Severity") = severity_
     d("AutoFixSafe") = autoFixSafe_
+    If autoFixSafe_ Then d("ReplacementText") = replacementText_
     Set CreateIssueDict = d
 End Function
 

@@ -510,8 +510,19 @@ Private Sub BuildRuleCheckboxList(nRules As Long)
     Const ROW_H As Single = 18
     Const COL_PAD As Single = 6
 
+    ' Guard against InsideWidth returning zero or implausibly small values
+    ' on some Word hosts during early initialisation
+    Const MIN_USABLE_W As Single = 120   ' absolute floor (30 pts per column)
+    Dim usableW As Single
+    On Error Resume Next
+    usableW = fraRules.InsideWidth
+    If Err.Number <> 0 Then usableW = 0: Err.Clear
+    On Error GoTo 0
+    If usableW <= 0 Then usableW = fraRules.Width - COL_PAD * 2
+    If usableW < MIN_USABLE_W Then usableW = MIN_USABLE_W
+
     Dim colW As Single
-    colW = (fraRules.InsideWidth - COL_PAD * 2) / COLS
+    colW = (usableW - COL_PAD * 2) / COLS
 
     Dim col As Long
     Dim row As Long
