@@ -1,6 +1,6 @@
 # Pleadings Checker VBA -- Targeted Audit Report
 
-**Date:** 2026-03-13 (pass 3)
+**Date:** 2026-03-13 (pass 4)
 **Scope:** All 20 modules in `Combined/`
 **Approach:** Targeted fixes only; no broad rewrites
 
@@ -48,6 +48,14 @@
   - `GetSOListPrefixLen`: Same pattern
 **Fix (pass 1):** Removed or repositioned `On Error GoTo 0` immediately after each fragile Word OM call.
 
+### 7. OERN tightened in `IsBlockQuotePara` helper
+**Module:** `Rules_Formatting.bas`
+**Defect (pass 4):** `IsBlockQuotePara` had a single `On Error Resume Next` spanning ~128 lines. Two significant blocks of pure string/value logic (24 lines of `Like`/string operations for list-pattern detection, and 19 lines of quotation-mark `Left$`/`Right$`/`ChrW` comparisons) ran under unnecessary OERN.
+**Fix (pass 4):** Inserted 2 `On Error GoTo 0` and 2 `On Error Resume Next` to create two protected string-only zones:
+  - Zone A (lines ~124-148): list-pattern `Like` checks -- no longer under OERN
+  - Zone B (lines ~182-215): indent-check + quote-mark string comparisons -- no longer under OERN
+  Word OM calls (`ListFormat.ListString`, `Style.NameLocal`, `Format.LeftIndent`, `Font.Italic`) remain individually guarded by `On Error Resume Next` with `Err.Number` checks.
+
 ---
 
 ## Areas Verified as Acceptable and Left Alone
@@ -74,7 +82,15 @@ ENGINE WIRING NOTE (lines 11-15) accurately documents single aggregate toggle `"
 42/42 `Engine*` wrappers log `Err.Number` + `Err.Description` on fallback.
 
 ### OERN in paragraph-iteration and Find.Execute loops
-Broad OERN over paragraph loops and Find loops intentionally preserved. No safe narrowing opportunities remain in small helper functions.
+Broad OERN over paragraph loops and Find loops intentionally preserved.
+
+### Pass 4 OERN audit: 5 newly-audited modules
+Modules `Rules_Formatting.bas`, `Rules_Headings.bas`, `Rules_Italics.bas`, `Rules_FootnoteIntegrity.bas`, `Rules_LegalTerms.bas` were audited for OERN tightening opportunities:
+- **Rules_Headings.bas**: OERN already tightly scoped per-call in `CountWordInDoc` and `FlagOccurrences`; paragraph scan (pass 1) ends with `On Error GoTo 0` before pure-VBA passes 2-3. No targets.
+- **Rules_Italics.bas**: `IsRangeItalic` already does `On Error GoTo 0` immediately after each fragile call. Main functions (`Check_AnglicisedTermsNotItalic`, `Check_ForeignNamesNotItalic`) scope OERN per-call. Pure-string helpers (`IsLetter`, `MergeArrays`) have no OERN. No targets.
+- **Rules_FootnoteIntegrity.bas**: All 8 private subs scope OERN around individual fragile Word OM calls with immediate `On Error GoTo 0`. `IsPunctuation` is pure value logic with no OERN. No targets.
+- **Rules_LegalTerms.bas**: No broad OERN anywhere. `SearchAndFlag` and `CheckTermInParagraph` scope OERN per-call. Pure-string helpers (`IsWordChar`, `IsInsideQuote`, `MergeArrays2`) have no OERN. No targets.
+- **Rules_Formatting.bas**: `IsBlockQuotePara` tightened (see defect #7). `Check_ParagraphBreakConsistency` and `Check_FontConsistency` have broad OERN over paragraph loops -- intentionally preserved (needs live Word testing).
 
 ---
 
@@ -87,6 +103,7 @@ Several modules wrap entire paragraph loops (50-200+ lines) in `On Error Resume 
 - `Rules_TextScan.bas` ~250 lines (repeated words + spell-out)
 - `Rules_NumberFormats.bas` ~115 lines (currency formatting)
 - `Rules_Terms.bas` ~64 lines (defined terms scan)
+- `Rules_Formatting.bas` ~150 lines (`Check_ParagraphBreakConsistency`) and ~440 lines (`Check_FontConsistency`)
 
 **Recommended approach:** Extract `.Range.Text` under OERN, `On Error GoTo 0`, then process extracted string without suppression. Must be done incrementally with live Word regression testing.
 
@@ -106,4 +123,27 @@ VBA has no native test framework. All fixes verified by code inspection. Manual 
 | `PleadingsEngine.bas` | `ApplySuggestionsAsTrackedChanges` | Added `DebugLogError` for comment-only insertion (non-autofix path) and skip-amendment comment insertion |
 | `PleadingsEngine.bas` | `GenerateReport` | Added `TraceEnter`/`TraceExit`, `DebugLogError` for file-open and write-error paths |
 
-**Unchanged modules this pass:** All 16 rule modules, frmPleadingsChecker.frm, PleadingsLauncher.bas, modDebugLog.bas
+**Unchanged modules pass 3:** All 16 rule modules, frmPleadingsChecker.frm, PleadingsLauncher.bas, modDebugLog.bas
+
+## Exact Procedures Changed (Pass 4)
+
+| Module | Procedure | Change |
+|--------|-----------|--------|
+| `Rules_Formatting.bas` | `IsBlockQuotePara` | Tightened OERN: added `On Error GoTo 0` after `para.Range.Text` read (before 24-line string block) and after `para.Format.LeftIndent` read (before 19-line string block); added `On Error Resume Next` before `ListFormat.ListString` and `Font.Italic` Word OM calls |
+
+**Unchanged modules pass 4:** PleadingsEngine.bas, all other 15 rule modules, frmPleadingsChecker.frm, PleadingsLauncher.bas, modDebugLog.bas
+
+## Pass 4 Regression Verification
+
+All prior fixes confirmed intact:
+- StatusBar capture/restore in `ApplyHighlights` and `ApplySuggestionsAsTrackedChanges` ✓
+- Scripting Runtime installation note removed; late-binding note present ✓
+- Instrumentation: 20+ `DebugLogError`/`TraceEnter`/`TraceExit`/`TraceStep` calls in PleadingsEngine.bas ✓
+- Retired rules: `Debug.Print "WARNING: ..."` in Rules_NumberFormats (Rule 18) and Rules_Terms (Rule 23) ✓
+- Engine header: "23 RETIRED" and "18 RETIRED" annotations ✓
+- 42/42 Engine wrapper fallbacks log `Err.Number` + `Err.Description` (automated count) ✓
+- OERN tightening from pass 1 (`IsException`, `GetQListPrefixLen`, `GetSOListPrefixLen`) ✓
+- Quote-family deduplication at line 755 intact ✓
+- CreateIssueDict 8-key consistency across all 16 rule modules ✓
+- Rules_Lists ENGINE WIRING NOTE accurate ✓
+- Brand persistence API (`SaveBrandRules`/`LoadBrandRules`) returns Boolean ✓
