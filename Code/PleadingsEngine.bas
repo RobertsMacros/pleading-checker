@@ -860,6 +860,9 @@ RunnerCleanup:
     PerfTimerEnd "FilterBlockQuoteIssues"
     On Error GoTo 0
 
+    ' -- Hard safety guard: strip retired rule families -----------
+    Set allIssues = FilterRetiredRules(allIssues)
+
     ' -- Print performance summary --------------------------------
     If ENABLE_PROFILING Then
         Dim perfSummary As String
@@ -1962,16 +1965,69 @@ Private Sub AddIssuesToCollection(master As Collection, _
     Dim i As Long
     If ruleIssues Is Nothing Then Exit Sub
     For i = 1 To ruleIssues.Count
-        ' Defensive filter: drop any legacy trailing_spaces issues
-        If TypeName(ruleIssues(i)) = "Dictionary" Then
-            If ruleIssues(i).Exists("RuleName") Then
-                If ruleIssues(i)("RuleName") = "trailing_spaces" Then GoTo NextAddIssue
-            End If
-        End If
+        ' Defensive filter: drop retired rule families
+        If IsRetiredIssue(ruleIssues(i)) Then GoTo NextAddIssue
         master.Add ruleIssues(i)
 NextAddIssue:
     Next i
 End Sub
+
+' ================================================================
+'  PRIVATE: Returns True if an issue belongs to a retired rule
+'  family (trailing spaces or after-heading spacing).  Used as a
+'  belt-and-braces guard so legacy code can never emit these.
+' ================================================================
+Private Function IsRetiredIssue(ByVal item As Object) As Boolean
+    IsRetiredIssue = False
+    On Error Resume Next
+    If TypeName(item) <> "Dictionary" Then Exit Function
+    Dim rn As String
+    rn = ""
+    If item.Exists("RuleName") Then rn = LCase$(item("RuleName"))
+    If Len(rn) = 0 Then Exit Function
+
+    ' Trailing spaces family
+    If rn = "trailing_spaces" Or rn = "trailing_space" Or _
+       rn = "trailing whitespace" Then
+        IsRetiredIssue = True
+        Exit Function
+    End If
+
+    ' After-heading spacing family
+    If rn = "after_heading_spacing" Or rn = "heading_spacing" Or _
+       rn = "heading spacing" Or rn = "heading_spacing_consistency" Then
+        IsRetiredIssue = True
+        Exit Function
+    End If
+
+    ' Check issue text for after-heading pattern (catches paragraph_break_consistency issues)
+    Dim issText As String
+    issText = ""
+    If item.Exists("Issue") Then issText = LCase$(item("Issue"))
+    If InStr(issText, "after-heading spacing") > 0 Or _
+       InStr(issText, "after heading spacing") > 0 Or _
+       InStr(issText, "spacing after heading") > 0 Then
+        IsRetiredIssue = True
+        Exit Function
+    End If
+    On Error GoTo 0
+End Function
+
+' ================================================================
+'  PRIVATE: Last-pass filter that strips any issues belonging to
+'  retired rule families.  Called at the end of RunAllPleadingsRules
+'  as a belt-and-braces guard for all downstream consumers.
+' ================================================================
+Private Function FilterRetiredRules(issues As Collection) As Collection
+    Dim cleaned As New Collection
+    Dim i As Long
+    For i = 1 To issues.Count
+        If Not IsRetiredIssue(issues(i)) Then
+            cleaned.Add issues(i)
+        End If
+    Next i
+    Set FilterRetiredRules = cleaned
+End Function
 
 Private Function EscJSON(ByVal txt As String) As String
     txt = Replace(txt, "\", "\\")

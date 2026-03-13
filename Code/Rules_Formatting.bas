@@ -20,35 +20,6 @@ Private Const RULE_NAME_FONT As String = "font_consistency"
 ' ============================================================
 '  RULE 06 HELPERS
 ' ============================================================
-
-' -- Classify spacing pattern after a heading ----------------
-' Returns: "no_spacing", "spacing_Npt", or "manual_double_break"
-Private Function ClassifyAfterSpacing(para As Paragraph, doc As Document, paraIdx As Long) As String
-    Dim spAfter As Single
-    spAfter = para.Format.SpaceAfter
-
-    ' Check if the next paragraph is empty (manual double break)
-    Dim totalParas As Long
-    totalParas = doc.Paragraphs.Count
-    If paraIdx < totalParas Then
-        Dim nextPara As Paragraph
-        Set nextPara = doc.Paragraphs(paraIdx + 1)
-        Dim nextText As String
-        nextText = nextPara.Range.Text
-        ' An empty paragraph contains only vbCr
-        If nextText = vbCr Then
-            ClassifyAfterSpacing = "manual_double_break"
-            Exit Function
-        End If
-    End If
-
-    If spAfter = 0 Then
-        ClassifyAfterSpacing = "no_spacing"
-    Else
-        ClassifyAfterSpacing = "spacing_" & CStr(CLng(spAfter)) & "pt"
-    End If
-End Function
-
 ' -- Classify SpaceBefore pattern ----------------------------
 Private Function ClassifyBeforeSpacing(para As Paragraph) As String
     Dim spBefore As Single
@@ -257,11 +228,8 @@ Public Function Check_ParagraphBreakConsistency(doc As Document) As Collection
     On Error Resume Next
 
     ' -- Dictionaries keyed by outline level -----------------
-    ' afterPatterns:  level -> Dictionary(pattern -> count)
     ' beforePatterns: level -> Dictionary(pattern -> count)
-    ' headingInfos:   level -> Collection of Array(paraIdx, afterPattern, beforePattern, rangeStart, rangeEnd, text)
-    Dim afterPatterns As Object
-    Set afterPatterns = CreateObject("Scripting.Dictionary")
+    ' headingInfos:   level -> Collection of Array(paraIdx, beforePattern, rangeStart, rangeEnd, text)
     Dim beforePatterns As Object
     Set beforePatterns = CreateObject("Scripting.Dictionary")
     Dim headingInfos As Object
@@ -278,25 +246,9 @@ Public Function Check_ParagraphBreakConsistency(doc As Document) As Collection
         ' Page range filter
         If Not EngineIsInPageRange(para.Range) Then GoTo NextPara
 
-        ' Classify after-spacing
-        Dim aftPat As String
-        aftPat = ClassifyAfterSpacing(para, doc, paraIdx)
-
         ' Classify before-spacing
         Dim befPat As String
         befPat = ClassifyBeforeSpacing(para)
-
-        ' -- Track after-spacing counts ---------------------
-        If Not afterPatterns.Exists(lvl) Then
-            afterPatterns.Add lvl, CreateObject("Scripting.Dictionary")
-        End If
-        Dim aftDict As Object
-        Set aftDict = afterPatterns(lvl)
-        If aftDict.Exists(aftPat) Then
-            aftDict(aftPat) = aftDict(aftPat) + 1
-        Else
-            aftDict.Add aftPat, 1
-        End If
 
         ' -- Track before-spacing counts --------------------
         If Not beforePatterns.Exists(lvl) Then
@@ -314,13 +266,12 @@ Public Function Check_ParagraphBreakConsistency(doc As Document) As Collection
         If Not headingInfos.Exists(lvl) Then
             headingInfos.Add lvl, New Collection
         End If
-        ReDim info(0 To 5)
+        ReDim info(0 To 4)
         info(0) = paraIdx
-        info(1) = aftPat
-        info(2) = befPat
-        info(3) = para.Range.Start
-        info(4) = para.Range.End
-        info(5) = Trim$(Replace(para.Range.Text, vbCr, ""))
+        info(1) = befPat
+        info(2) = para.Range.Start
+        info(3) = para.Range.End
+        info(4) = Trim$(Replace(para.Range.Text, vbCr, ""))
         headingInfos(lvl).Add info
 NextPara:
     Next para
@@ -332,28 +283,14 @@ NextPara:
         Set hdgs = headingInfos(lvlKey)
         If hdgs.Count <= 1 Then GoTo NextLevel
 
-        ' Find dominant after-pattern
-        Dim domAfter As String
-        domAfter = ""
-        Dim maxCnt As Long
-        maxCnt = 0
-        If afterPatterns.Exists(lvlKey) Then
-            Set aftDict = afterPatterns(lvlKey)
-            Dim pk As Variant
-            For Each pk In aftDict.keys
-                If aftDict(pk) > maxCnt Then
-                    maxCnt = aftDict(pk)
-                    domAfter = CStr(pk)
-                End If
-            Next pk
-        End If
-
         ' Find dominant before-pattern
         Dim domBefore As String
         domBefore = ""
+        Dim maxCnt As Long
         maxCnt = 0
         If beforePatterns.Exists(lvlKey) Then
             Set befDict = beforePatterns(lvlKey)
+            Dim pk As Variant
             For Each pk In befDict.keys
                 If befDict(pk) > maxCnt Then
                     maxCnt = befDict(pk)
@@ -368,36 +305,16 @@ NextPara:
             Dim hInfo As Variant
             hInfo = hdgs(h)
 
-            Dim hAft As String
-            hAft = CStr(hInfo(1))
             Dim hBef As String
-            hBef = CStr(hInfo(2))
+            hBef = CStr(hInfo(1))
             Dim hText As String
-            hText = CStr(hInfo(5))
-
-            ' Check after-spacing deviation
-            If hAft <> domAfter And Len(domAfter) > 0 Then
-                Dim findingA As Object
-                Dim rngA As Range
-                Set rngA = doc.Range(CLng(hInfo(3)), CLng(hInfo(4)))
-                Dim locA As String
-                locA = EngineGetLocationString(rngA, doc)
-
-                Set findingA = CreateIssueDict(RULE_NAME_PARAGRAPH_BREAK, locA, _
-                    "After-heading spacing inconsistency at '" & hText & _
-                    "': uses " & hAft & " but dominant pattern for level " & CLng(lvlKey) & _
-                    " headings is " & domAfter, _
-                    "Change spacing after this heading to match: " & domAfter, _
-                    CLng(hInfo(3)), CLng(hInfo(4)), "possible_error", False, "", _
-                    hText, "heading_text", "medium")
-                issues.Add findingA
-            End If
+            hText = CStr(hInfo(4))
 
             ' Check before-spacing deviation
             If hBef <> domBefore And Len(domBefore) > 0 Then
                 Dim findingB As Object
                 Dim rngB As Range
-                Set rngB = doc.Range(CLng(hInfo(3)), CLng(hInfo(4)))
+                Set rngB = doc.Range(CLng(hInfo(2)), CLng(hInfo(3)))
                 Dim locB As String
                 locB = EngineGetLocationString(rngB, doc)
 
@@ -406,7 +323,7 @@ NextPara:
                     "': uses " & hBef & " but dominant pattern for level " & CLng(lvlKey) & _
                     " headings is " & domBefore, _
                     "Change spacing before this heading to match: " & domBefore, _
-                    CLng(hInfo(3)), CLng(hInfo(4)), "possible_error", False, "", _
+                    CLng(hInfo(2)), CLng(hInfo(3)), "possible_error", False, "", _
                     hText, "heading_text", "medium")
                 issues.Add findingB
             End If
