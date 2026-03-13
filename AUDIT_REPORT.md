@@ -1,7 +1,7 @@
 # Pleadings Checker VBA -- Targeted Audit Report
 
 **Date:** 2026-03-13 (pass 5)
-**Scope:** All 20 modules in `Combined/`
+**Scope:** All 20 modules in `Code/`
 **Approach:** Targeted fixes only; no broad rewrites
 
 ---

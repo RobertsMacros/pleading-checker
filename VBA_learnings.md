@@ -2,7 +2,7 @@
 
 ## Project overview
 
-This is a Word VBA macro project (`.bas` / `.frm` modules). All source lives in `Combined/`. The macro is loaded into a Word document or template and executed from the VBA editor or a ribbon button.
+This is a Word VBA macro project (`.bas` / `.frm` modules). All source lives in `Code/`. The macro is loaded into a Word document or template and executed from the VBA editor or a ribbon button.
 
 There is no build step, test suite, or CI pipeline. Validation is manual: import the `.bas` files into Word's VBA editor, compile (Debug > Compile), and run against test documents.
 
