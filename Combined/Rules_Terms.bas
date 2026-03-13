@@ -14,8 +14,8 @@ Option Explicit
 
 Private Const RULE05_NAME As String = "custom_term_whitelist"
 Private Const RULE07_NAME As String = "defined_terms"
-' RETIRED: phrase_consistency is not engine-wired; kept for backwards compat only
-Private Const RULE23_NAME As String = "phrase_consistency"
+' RETIRED -- NOT ENGINE-WIRED: phrase_consistency kept only for backwards compat
+Private Const RETIRED_RETIRED_RULE23_NAME As String = "phrase_consistency"
 
 ' ============================================================
 '  PRIVATE HELPERS (Rule07)
@@ -285,7 +285,7 @@ Private Sub FlagPhraseOccurrences(doc As Document, _
             If Err.Number <> 0 Then locStr = "unknown location": Err.Clear
             On Error GoTo 0
 
-            Set finding = CreateIssueDict(RULE23_NAME, locStr, "Inconsistent phrase: '" & rng.Text & "' used", "Use '" & dominantPhrase & "' for consistency (dominant style)", rng.Start, rng.End, "error")
+            Set finding = CreateIssueDict(RETIRED_RULE23_NAME, locStr, "Inconsistent phrase: '" & rng.Text & "' used", "Use '" & dominantPhrase & "' for consistency (dominant style)", rng.Start, rng.End, "error")
             issues.Add finding
         End If
 
@@ -716,9 +716,14 @@ End Function
 
 ' ============================================================
 '  RETIRED RULE 23: PHRASE CONSISTENCY
-'  Not dispatched by the engine. Kept for backwards compatibility.
+'  NOT dispatched by RunAllPleadingsRules. Retired due to high
+'  false-positive rate on common legal phrases.
+'  Kept ONLY for backwards compatibility if called externally.
+'  Will emit a debug warning when invoked.
 ' ============================================================
 Public Function Check_PhraseConsistency(doc As Document) As Collection
+    Debug.Print "WARNING: Rules_Terms.Check_PhraseConsistency is RETIRED (Rule23). " & _
+                "Not dispatched by RunAllPleadingsRules."
     Dim issues As New Collection
 
     ' -- Define phrase groups ---------------------------------
@@ -846,7 +851,7 @@ Private Function EngineIsInPageRange(rng As Object) As Boolean
     On Error Resume Next
     EngineIsInPageRange = Application.Run("PleadingsEngine.IsInPageRange", rng)
     If Err.Number <> 0 Then
-        Debug.Print "EngineIsInPageRange: fallback (Err " & Err.Number & ")"
+        Debug.Print "EngineIsInPageRange: fallback (Err " & Err.Number & ": " & Err.Description & ")"
         EngineIsInPageRange = True
         Err.Clear
     End If
@@ -860,7 +865,7 @@ Private Function EngineGetLocationString(rng As Object, doc As Document) As Stri
     On Error Resume Next
     EngineGetLocationString = Application.Run("PleadingsEngine.GetLocationString", rng, doc)
     If Err.Number <> 0 Then
-        Debug.Print "EngineGetLocationString: fallback (Err " & Err.Number & ")"
+        Debug.Print "EngineGetLocationString: fallback (Err " & Err.Number & ": " & Err.Description & ")"
         EngineGetLocationString = "unknown location"
         Err.Clear
     End If
@@ -873,7 +878,10 @@ End Function
 Private Sub EngineSetWhitelist(dict As Object)
     On Error Resume Next
     Application.Run "PleadingsEngine.SetWhitelist", dict
-    If Err.Number <> 0 Then Err.Clear
+    If Err.Number <> 0 Then
+        Debug.Print "EngineSetWhitelist: fallback (Err " & Err.Number & ": " & Err.Description & ")"
+        Err.Clear
+    End If
     On Error GoTo 0
 End Sub
 
@@ -901,6 +909,7 @@ Private Function EngineGetTermQuotePref() As String
     On Error Resume Next
     EngineGetTermQuotePref = Application.Run("PleadingsEngine.GetTermQuotePref")
     If Err.Number <> 0 Then
+        Debug.Print "EngineGetTermQuotePref: fallback (Err " & Err.Number & ": " & Err.Description & ")"
         EngineGetTermQuotePref = "DOUBLE"
         Err.Clear
     End If
@@ -914,6 +923,7 @@ Private Function EngineGetTermFormatPref() As String
     On Error Resume Next
     EngineGetTermFormatPref = Application.Run("PleadingsEngine.GetTermFormatPref")
     If Err.Number <> 0 Then
+        Debug.Print "EngineGetTermFormatPref: fallback (Err " & Err.Number & ": " & Err.Description & ")"
         EngineGetTermFormatPref = "BOLD"
         Err.Clear
     End If

@@ -21,8 +21,9 @@ Option Explicit
 
 ' -- Rule name constants ---------------------------------------
 Private Const RULE_NAME_DATE_TIME As String = "date_time_format"
-' RETIRED: page_range is not engine-wired; kept for backwards compat only
-Private Const RULE_NAME_PAGE_RANGE As String = "page_range"
+' RETIRED -- DEAD CODE: page_range is not engine-wired and this constant is unused.
+' Kept only so the module compiles if an external caller references it.
+Private Const RETIRED_RULE_NAME_PAGE_RANGE As String = "page_range"
 Private Const RULE_NAME_CURRENCY As String = "currency_number_format"
 
 ' -- Currency format category constants (Rule19) ---------------
@@ -798,22 +799,28 @@ End Function
 
 ' ================================================================
 '  RETIRED Rule18: SetRange
-'  Not dispatched by the engine. The engine manages page ranges
+'  NOT dispatched by the engine. The engine manages page ranges
 '  directly via SetPageRangeFromString / SetPageRange.
-'  Kept for backwards compatibility only.
+'  Kept ONLY for backwards compatibility if called externally.
+'  Will emit a debug warning when invoked.
 ' ================================================================
 Public Sub SetRange(s As Long, e As Long)
+    Debug.Print "WARNING: Rules_NumberFormats.SetRange is RETIRED (Rule18). " & _
+                "Use PleadingsEngine.SetPageRange instead."
     mStartPage = s
     mEndPage = e
 End Sub
 
 ' ================================================================
 '  RETIRED Rule18: Check_PageRange
-'  Not dispatched by the engine. The engine manages page ranges
+'  NOT dispatched by the engine. The engine manages page ranges
 '  directly via SetPageRangeFromString / SetPageRange.
-'  Kept for backwards compatibility only.
+'  Kept ONLY for backwards compatibility if called externally.
+'  Returns an empty collection; will emit a debug warning.
 ' ================================================================
 Public Function Check_PageRange(doc As Document) As Collection
+    Debug.Print "WARNING: Rules_NumberFormats.Check_PageRange is RETIRED (Rule18). " & _
+                "Not dispatched by RunAllPleadingsRules."
     Dim issues As New Collection
 
     On Error Resume Next
@@ -893,7 +900,7 @@ Private Function EngineIsInPageRange(rng As Object) As Boolean
     On Error Resume Next
     EngineIsInPageRange = Application.Run("PleadingsEngine.IsInPageRange", rng)
     If Err.Number <> 0 Then
-        Debug.Print "EngineIsInPageRange: fallback (Err " & Err.Number & ")"
+        Debug.Print "EngineIsInPageRange: fallback (Err " & Err.Number & ": " & Err.Description & ")"
         EngineIsInPageRange = True
         Err.Clear
     End If
@@ -907,7 +914,7 @@ Private Function EngineGetLocationString(rng As Object, doc As Document) As Stri
     On Error Resume Next
     EngineGetLocationString = Application.Run("PleadingsEngine.GetLocationString", rng, doc)
     If Err.Number <> 0 Then
-        Debug.Print "EngineGetLocationString: fallback (Err " & Err.Number & ")"
+        Debug.Print "EngineGetLocationString: fallback (Err " & Err.Number & ": " & Err.Description & ")"
         EngineGetLocationString = "unknown location"
         Err.Clear
     End If
@@ -920,7 +927,10 @@ End Function
 Private Sub EngineSetPageRange(ByVal startPg As Long, ByVal endPg As Long)
     On Error Resume Next
     Application.Run "PleadingsEngine.SetPageRange", startPg, endPg
-    If Err.Number <> 0 Then Err.Clear
+    If Err.Number <> 0 Then
+        Debug.Print "EngineSetPageRange: fallback (Err " & Err.Number & ": " & Err.Description & ")"
+        Err.Clear
+    End If
     On Error GoTo 0
 End Sub
 
@@ -931,6 +941,7 @@ Private Function EngineGetDateFormatPref() As String
     On Error Resume Next
     EngineGetDateFormatPref = Application.Run("PleadingsEngine.GetDateFormatPref")
     If Err.Number <> 0 Then
+        Debug.Print "EngineGetDateFormatPref: fallback (Err " & Err.Number & ": " & Err.Description & ")"
         EngineGetDateFormatPref = "UK"
         Err.Clear
     End If

@@ -739,7 +739,7 @@ Private Function EngineIsInPageRange(rng As Object) As Boolean
     EngineIsInPageRange = Application.Run( _
         "PleadingsEngine.IsInPageRange", rng)
     If Err.Number <> 0 Then
-        Debug.Print "EngineIsInPageRange: fallback (Err " & Err.Number & ")"
+        Debug.Print "EngineIsInPageRange: fallback (Err " & Err.Number & ": " & Err.Description & ")"
         EngineIsInPageRange = True
         Err.Clear
     End If
@@ -755,7 +755,7 @@ Private Function EngineGetLocationString(rng As Object, _
     EngineGetLocationString = Application.Run( _
         "PleadingsEngine.GetLocationString", rng, doc)
     If Err.Number <> 0 Then
-        Debug.Print "EngineGetLocationString: fallback (Err " & Err.Number & ")"
+        Debug.Print "EngineGetLocationString: fallback (Err " & Err.Number & ": " & Err.Description & ")"
         EngineGetLocationString = "unknown location"
         Err.Clear
     End If
@@ -774,7 +774,8 @@ Private Function GetQListPrefixLen(para As Paragraph, ByVal paraText As String) 
     Dim lStr As String
     lStr = para.Range.ListFormat.ListString
     If Err.Number <> 0 Then Err.Clear: On Error GoTo 0: Exit Function
-    If Len(lStr) = 0 Then On Error GoTo 0: Exit Function
+    On Error GoTo 0
+    If Len(lStr) = 0 Then Exit Function
     ' Verify the text actually starts with the list string
     If Len(paraText) > Len(lStr) Then
         If Left$(paraText, Len(lStr)) = lStr Then
@@ -785,8 +786,6 @@ Private Function GetQListPrefixLen(para As Paragraph, ByVal paraText As String) 
             End If
         End If
     End If
-    Err.Clear
-    On Error GoTo 0
 End Function
 
 ' ------------------------------------------------------------
@@ -797,6 +796,7 @@ Private Function EngineGetQuoteNesting() As String
     EngineGetQuoteNesting = Application.Run( _
         "PleadingsEngine.GetQuoteNesting")
     If Err.Number <> 0 Then
+        Debug.Print "EngineGetQuoteNesting: fallback (Err " & Err.Number & ": " & Err.Description & ")"
         EngineGetQuoteNesting = "SINGLE"
         Err.Clear
     End If
@@ -811,6 +811,7 @@ Private Function EngineGetSmartQuotePref() As String
     EngineGetSmartQuotePref = Application.Run( _
         "PleadingsEngine.GetSmartQuotePref")
     If Err.Number <> 0 Then
+        Debug.Print "EngineGetSmartQuotePref: fallback (Err " & Err.Number & ": " & Err.Description & ")"
         EngineGetSmartQuotePref = "SMART"
         Err.Clear
     End If

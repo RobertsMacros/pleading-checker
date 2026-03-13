@@ -15,9 +15,9 @@ Attribute VB_Name = "PleadingsEngine"
 '   - Rules_TextScan.bas        (Rules 2, 34)
 '   - Rules_Numbering.bas       (Rules 3, 8)
 '   - Rules_Headings.bas        (Rules 4, 21)
-'   - Rules_Terms.bas           (Rules 5, 7, 23)
+'   - Rules_Terms.bas           (Rules 5, 7; 23 RETIRED)
 '   - Rules_Formatting.bas      (Rules 6, 11)
-'   - Rules_NumberFormats.bas    (Rules 9, 18, 19)
+'   - Rules_NumberFormats.bas    (Rules 9, 19; 18 RETIRED)
 '   - Rules_Lists.bas           (Rules 10, 15)
 '   - Rules_Punctuation.bas     (Rules 14, 16)
 '   - Rules_Quotes.bas          (Rules 17, 32, 33)
@@ -30,11 +30,13 @@ Attribute VB_Name = "PleadingsEngine"
 '
 ' Installation:
 '   1. Open the VBA Editor (Alt+F11)
-'   2. Tools > References > check "Microsoft Scripting Runtime"
-'   3. File > Import File > PleadingsEngine.bas
-'   4. File > Import File > PleadingsLauncher.bas
-'   5. Import whichever Rules_*.bas modules you need
-'   6. Run the macro "PleadingsChecker"
+'   2. File > Import File > PleadingsEngine.bas
+'   3. File > Import File > PleadingsLauncher.bas
+'   4. Import whichever Rules_*.bas modules you need
+'   5. Run the macro "PleadingsChecker"
+'
+'   Note: No early-bound references are required. All Scripting.Dictionary
+'   usage is late-bound via CreateObject("Scripting.Dictionary").
 ' ============================================================
 Option Explicit
 
@@ -1243,6 +1245,7 @@ Public Sub ApplyHighlights(doc As Document, _
                            issues As Collection, _
                            Optional addComments As Boolean = True)
     TraceEnter "ApplyHighlights"
+    DebugLogDoc "ApplyHighlights target", doc
     TraceStep "ApplyHighlights", issues.Count & " issues, addComments=" & addComments
 
     Dim finding As Object
@@ -1254,6 +1257,9 @@ Public Sub ApplyHighlights(doc As Document, _
     wasScreenUpdating = Application.ScreenUpdating
     Application.ScreenUpdating = False
 
+    Dim wasStatusBar As Variant
+    wasStatusBar = Application.StatusBar
+
     On Error GoTo HighlightCleanup
 
     For i = 1 To issues.Count
@@ -1264,19 +1270,35 @@ Public Sub ApplyHighlights(doc As Document, _
             If Err.Number = 0 Then
                 ' Apply yellow highlight to the flagged range
                 rng.HighlightColorIndex = wdYellow
-                If Err.Number <> 0 Then Err.Clear
+                If Err.Number <> 0 Then
+                    DebugLogError "ApplyHighlights", "highlight i=" & i, Err.Number, Err.Description
+                    Err.Clear
+                End If
                 If addComments Then
                     doc.Comments.Add Range:=rng, Text:=BuildCommentText(finding)
-                    If Err.Number <> 0 Then Err.Clear
+                    If Err.Number <> 0 Then
+                        DebugLogError "ApplyHighlights", "comment i=" & i, Err.Number, Err.Description
+                        Err.Clear
+                    End If
                 End If
+            Else
+                DebugLogError "ApplyHighlights", "doc.Range i=" & i & _
+                    " start=" & GetIssueProp(finding, "RangeStart") & _
+                    " end=" & GetIssueProp(finding, "RangeEnd"), Err.Number, Err.Description
+                Err.Clear
             End If
             On Error GoTo HighlightCleanup
+        Else
+            TraceStep "ApplyHighlights", "SKIPPED i=" & i & _
+                      " -- invalid range start=" & GetIssueProp(finding, "RangeStart") & _
+                      " end=" & GetIssueProp(finding, "RangeEnd")
         End If
     Next i
 
 HighlightCleanup:
     On Error Resume Next
     Application.ScreenUpdating = wasScreenUpdating
+    Application.StatusBar = wasStatusBar
     On Error GoTo 0
     TraceExit "ApplyHighlights"
 End Sub
@@ -1302,6 +1324,10 @@ Public Sub ApplySuggestionsAsTrackedChanges(doc As Document, _
     Dim wasScreenUpdating As Boolean
     wasScreenUpdating = Application.ScreenUpdating
     Application.ScreenUpdating = False
+
+    ' Capture status bar so we can restore it in cleanup
+    Dim wasStatusBar As Variant
+    wasStatusBar = Application.StatusBar
 
     ' Enable tracking for the entire batch; restored once in cleanup.
     doc.TrackRevisions = True
@@ -1384,7 +1410,10 @@ Public Sub ApplySuggestionsAsTrackedChanges(doc As Document, _
                                   " orig=""" & Left$(origText, 30) & """ sug=""" & Left$(sugText, 30) & """"
                         If addComments Then
                             doc.Comments.Add Range:=rng, Text:=BuildCommentText(finding)
-                            Err.Clear
+                            If Err.Number <> 0 Then
+                                DebugLogError "ApplyTrackedChanges", "skip-comment i=" & i, Err.Number, Err.Description
+                                Err.Clear
+                            End If
                         End If
                         GoTo NextApplyIssue
                     End If
@@ -1400,9 +1429,21 @@ Public Sub ApplySuggestionsAsTrackedChanges(doc As Document, _
                     End If
                 Else
                     If addComments Then
+                        TraceStep "ApplyTrackedChanges", "COMMENT-ONLY i=" & i & _
+                                  " range=" & rng.Start & "-" & rng.End & _
+                                  " rule=" & GetIssueProp(finding, "RuleName")
                         doc.Comments.Add Range:=rng, Text:=BuildCommentText(finding)
+                        If Err.Number <> 0 Then
+                            DebugLogError "ApplyTrackedChanges", "comment-only i=" & i, Err.Number, Err.Description
+                            Err.Clear
+                        End If
                     End If
                 End If
+            Else
+                DebugLogError "ApplyTrackedChanges", "doc.Range i=" & i & _
+                    " start=" & GetIssueProp(finding, "RangeStart") & _
+                    " end=" & GetIssueProp(finding, "RangeEnd"), Err.Number, Err.Description
+                Err.Clear
             End If
 NextApplyIssue:
             On Error GoTo TrackedCleanup
@@ -1418,6 +1459,7 @@ TrackedCleanup:
     On Error Resume Next
     doc.TrackRevisions = wasTrackingChanges
     Application.ScreenUpdating = wasScreenUpdating
+    Application.StatusBar = wasStatusBar
     On Error GoTo 0
     TraceExit "ApplyTrackedChanges"
 End Sub
@@ -1443,6 +1485,9 @@ End Function
 Public Function GenerateReport(issues As Collection, _
                                 filePath As String, _
                                 Optional doc As Document = Nothing) As String
+    TraceEnter "GenerateReport"
+    TraceStep "GenerateReport", issues.Count & " issues, path=" & filePath
+
     Dim fileNum As Integer
     Dim finding As Object
     Dim i As Long
@@ -1465,8 +1510,10 @@ Public Function GenerateReport(issues As Collection, _
     If Err.Number <> 0 Then
         GenerateReport = "Error: could not write to " & filePath & _
                          " (Err " & Err.Number & ": " & Err.Description & ")"
+        DebugLogError "GenerateReport", "open " & filePath, Err.Number, Err.Description
         Err.Clear
         On Error GoTo 0
+        TraceExit "GenerateReport", "FAILED open"
         Exit Function
     End If
     On Error GoTo 0
@@ -1522,6 +1569,7 @@ Public Function GenerateReport(issues As Collection, _
     summaryStr = "Report saved: " & filePath & vbCrLf
     summaryStr = summaryStr & "Total issues: " & issues.Count
     GenerateReport = summaryStr
+    TraceExit "GenerateReport", issues.Count & " issues written"
     Exit Function
 
 ReportWriteErr:
@@ -1529,6 +1577,8 @@ ReportWriteErr:
     Close #fileNum
     On Error GoTo 0
     GenerateReport = "Error writing report: Err " & Err.Number & ": " & Err.Description
+    DebugLogError "GenerateReport", "write", Err.Number, Err.Description
+    TraceExit "GenerateReport", "FAILED"
 End Function
 
 ' ============================================================

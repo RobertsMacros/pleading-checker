@@ -120,6 +120,7 @@ Public Function IsBlockQuotePara(para As Paragraph) As Boolean
     pTextRaw = ""
     pTextRaw = para.Range.Text
     If Err.Number <> 0 Then pTextRaw = "": Err.Clear
+    On Error GoTo 0
     Dim pTextTrimmed As String
     pTextTrimmed = Replace(Replace(Replace(pTextRaw, vbCr, ""), vbTab, ""), ChrW(160), " ")
     pTextTrimmed = Trim$(pTextTrimmed)
@@ -148,6 +149,7 @@ Public Function IsBlockQuotePara(para As Paragraph) As Boolean
     ' Also check ListFormat.ListString for auto-numbered lists
     Dim listStr As String
     listStr = ""
+    On Error Resume Next
     listStr = para.Range.ListFormat.ListString
     If Err.Number <> 0 Then listStr = "": Err.Clear
     If Len(listStr) > 0 Then
@@ -176,6 +178,7 @@ Public Function IsBlockQuotePara(para As Paragraph) As Boolean
     Dim leftInd As Single
     leftInd = para.Format.LeftIndent
     If Err.Number <> 0 Then leftInd = 0: Err.Clear
+    On Error GoTo 0
 
     ' No indentation = not a block quote (style check already done above)
     If leftInd <= 18 Then
@@ -212,6 +215,7 @@ Public Function IsBlockQuotePara(para As Paragraph) As Boolean
     '  wdTrue (-1) means ALL text in the range is italic.
     ' ==========================================================
     Dim italVal As Long
+    On Error Resume Next
     italVal = para.Range.Font.Italic
     If Err.Number <> 0 Then italVal = 0: Err.Clear
     If italVal = -1 Then  ' wdTrue = -1 means ALL italic
@@ -896,7 +900,7 @@ Private Function EngineIsInPageRange(rng As Object) As Boolean
     On Error Resume Next
     EngineIsInPageRange = Application.Run("PleadingsEngine.IsInPageRange", rng)
     If Err.Number <> 0 Then
-        Debug.Print "EngineIsInPageRange: fallback (Err " & Err.Number & ")"
+        Debug.Print "EngineIsInPageRange: fallback (Err " & Err.Number & ": " & Err.Description & ")"
         EngineIsInPageRange = True
         Err.Clear
     End If
@@ -910,7 +914,7 @@ Private Function EngineGetLocationString(rng As Object, doc As Document) As Stri
     On Error Resume Next
     EngineGetLocationString = Application.Run("PleadingsEngine.GetLocationString", rng, doc)
     If Err.Number <> 0 Then
-        Debug.Print "EngineGetLocationString: fallback (Err " & Err.Number & ")"
+        Debug.Print "EngineGetLocationString: fallback (Err " & Err.Number & ": " & Err.Description & ")"
         EngineGetLocationString = "unknown location"
         Err.Clear
     End If
