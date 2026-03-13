@@ -241,14 +241,12 @@ Private Function IsException(ByVal term As String, _
     Dim lTerm As String
     lTerm = LCase(Trim(term))
 
-    On Error Resume Next
     For i = LBound(exceptions) To UBound(exceptions)
         If LCase(Trim(exceptions(i))) = lTerm Then
             IsException = True
             Exit Function
         End If
     Next i
-    On Error GoTo 0
 
     IsException = False
 End Function
@@ -1678,7 +1676,7 @@ Private Function EngineIsInPageRange(rng As Object) As Boolean
     On Error Resume Next
     EngineIsInPageRange = Application.Run("PleadingsEngine.IsInPageRange", rng)
     If Err.Number <> 0 Then
-        Debug.Print "EngineIsInPageRange: fallback (Err " & Err.Number & ")"
+        Debug.Print "EngineIsInPageRange: fallback (Err " & Err.Number & ": " & Err.Description & ")"
         EngineIsInPageRange = True
         Err.Clear
     End If
@@ -1692,7 +1690,7 @@ Private Function EngineGetLocationString(rng As Object, doc As Document) As Stri
     On Error Resume Next
     EngineGetLocationString = Application.Run("PleadingsEngine.GetLocationString", rng, doc)
     If Err.Number <> 0 Then
-        Debug.Print "EngineGetLocationString: fallback (Err " & Err.Number & ")"
+        Debug.Print "EngineGetLocationString: fallback (Err " & Err.Number & ": " & Err.Description & ")"
         EngineGetLocationString = "unknown location"
         Err.Clear
     End If

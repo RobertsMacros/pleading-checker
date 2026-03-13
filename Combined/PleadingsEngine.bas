@@ -15,9 +15,9 @@ Attribute VB_Name = "PleadingsEngine"
 '   - Rules_TextScan.bas        (Rules 2, 34)
 '   - Rules_Numbering.bas       (Rules 3, 8)
 '   - Rules_Headings.bas        (Rules 4, 21)
-'   - Rules_Terms.bas           (Rules 5, 7, 23)
+'   - Rules_Terms.bas           (Rules 5, 7; 23 RETIRED)
 '   - Rules_Formatting.bas      (Rules 6, 11)
-'   - Rules_NumberFormats.bas    (Rules 9, 18, 19)
+'   - Rules_NumberFormats.bas    (Rules 9, 19; 18 RETIRED)
 '   - Rules_Lists.bas           (Rules 10, 15)
 '   - Rules_Punctuation.bas     (Rules 14, 16)
 '   - Rules_Quotes.bas          (Rules 17, 32, 33)
@@ -1303,6 +1303,10 @@ Public Sub ApplySuggestionsAsTrackedChanges(doc As Document, _
     wasScreenUpdating = Application.ScreenUpdating
     Application.ScreenUpdating = False
 
+    ' Capture status bar so we can restore it in cleanup
+    Dim wasStatusBar As Variant
+    wasStatusBar = Application.StatusBar
+
     ' Enable tracking for the entire batch; restored once in cleanup.
     doc.TrackRevisions = True
 
@@ -1418,6 +1422,7 @@ TrackedCleanup:
     On Error Resume Next
     doc.TrackRevisions = wasTrackingChanges
     Application.ScreenUpdating = wasScreenUpdating
+    Application.StatusBar = wasStatusBar
     On Error GoTo 0
     TraceExit "ApplyTrackedChanges"
 End Sub
