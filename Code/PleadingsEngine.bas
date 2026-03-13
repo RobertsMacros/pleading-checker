@@ -534,8 +534,6 @@ Public Function RunAllPleadingsRules(doc As Document, _
     ' -- Capture and suppress screen redraws for performance ----
     Dim wasScreenUpdating As Boolean
     wasScreenUpdating = Application.ScreenUpdating
-    Dim wasStatusBar As Variant
-    wasStatusBar = Application.StatusBar
     Application.ScreenUpdating = False
 
     On Error GoTo RunnerCleanup
@@ -853,7 +851,7 @@ RunnerCleanup:
     ' -- Restore application state (always runs) ----------------
     On Error Resume Next
     Application.ScreenUpdating = wasScreenUpdating
-    Application.StatusBar = wasStatusBar
+    Application.StatusBar = False   ' restore default status bar
     On Error GoTo 0
 
     ' -- Filter out issues inside block quotes / quoted text -----
@@ -1262,16 +1260,24 @@ Public Sub ApplyHighlights(doc As Document, _
     wasScreenUpdating = Application.ScreenUpdating
     Application.ScreenUpdating = False
 
-    Dim wasStatusBar As Variant
-    wasStatusBar = Application.StatusBar
-
     On Error GoTo HighlightCleanup
+
+    Dim hlRS As Long, hlRE As Long
 
     For i = 1 To issues.Count
         Set finding = issues(i)
-        If GetIssueProp(finding, "RangeStart") >= 0 And GetIssueProp(finding, "RangeEnd") > GetIssueProp(finding, "RangeStart") Then
+
+        ' Read range into typed locals to avoid Variant coercion issues
+        On Error Resume Next
+        hlRS = CLng(GetIssueProp(finding, "RangeStart"))
+        If Err.Number <> 0 Then hlRS = -1: Err.Clear
+        hlRE = CLng(GetIssueProp(finding, "RangeEnd"))
+        If Err.Number <> 0 Then hlRE = -1: Err.Clear
+        On Error GoTo HighlightCleanup
+
+        If hlRS >= 0 And hlRE > hlRS Then
             On Error Resume Next: Err.Clear
-            Set rng = doc.Range(GetIssueProp(finding, "RangeStart"), GetIssueProp(finding, "RangeEnd"))
+            Set rng = doc.Range(hlRS, hlRE)
             If Err.Number = 0 Then
                 ' Apply yellow highlight to the flagged range
                 rng.HighlightColorIndex = wdYellow
@@ -1285,22 +1291,20 @@ Public Sub ApplyHighlights(doc As Document, _
                 End If
             Else
                 DebugLogError "ApplyHighlights", "doc.Range i=" & i & _
-                    " start=" & GetIssueProp(finding, "RangeStart") & _
-                    " end=" & GetIssueProp(finding, "RangeEnd"), Err.Number, Err.Description
+                    " start=" & hlRS & " end=" & hlRE, Err.Number, Err.Description
                 Err.Clear
             End If
             On Error GoTo HighlightCleanup
         Else
             TraceStep "ApplyHighlights", "SKIPPED i=" & i & _
-                      " -- invalid range start=" & GetIssueProp(finding, "RangeStart") & _
-                      " end=" & GetIssueProp(finding, "RangeEnd")
+                      " -- invalid range start=" & hlRS & " end=" & hlRE
         End If
     Next i
 
 HighlightCleanup:
     On Error Resume Next
     Application.ScreenUpdating = wasScreenUpdating
-    Application.StatusBar = wasStatusBar
+    Application.StatusBar = False
     On Error GoTo 0
     TraceExit "ApplyHighlights"
 End Sub
@@ -1328,28 +1332,43 @@ Public Sub ApplySuggestionsAsTrackedChanges(doc As Document, _
     wasScreenUpdating = Application.ScreenUpdating
     Application.ScreenUpdating = False
 
-    ' Capture status bar so we can restore it in cleanup
-    Dim wasStatusBar As Variant
-    wasStatusBar = Application.StatusBar
-
     ' Enable tracking for the entire batch; restored once in cleanup.
     doc.TrackRevisions = True
 
     On Error GoTo TrackedCleanup
 
+    ' Typed locals for each finding -- avoid repeated Variant coercion
+    Dim rsVal As Long, reVal As Long
+    Dim autoFix As Boolean
+    Dim origStart As Long, origLen As Long
+    Dim sugText As String
+    Dim origText As String
+    Dim skipAmendment As Boolean
+    Dim chIdx As Long, ch As String
+    Dim isOnlyWhitespace As Boolean
+    Dim origHasPeriod As Boolean, sugHasPeriod As Boolean
+
     ' Process from end of document backwards so tracked-change
     ' insertions / deletions do not shift positions of later issues
     For i = issues.Count To 1 Step -1
         Set finding = issues(i)
-        If GetIssueProp(finding, "RangeStart") >= 0 And GetIssueProp(finding, "RangeEnd") > GetIssueProp(finding, "RangeStart") Then
+
+        ' Read range/autofix into typed locals
+        On Error Resume Next
+        rsVal = CLng(GetIssueProp(finding, "RangeStart"))
+        If Err.Number <> 0 Then rsVal = -1: Err.Clear
+        reVal = CLng(GetIssueProp(finding, "RangeEnd"))
+        If Err.Number <> 0 Then reVal = -1: Err.Clear
+        autoFix = False
+        autoFix = CBool(GetIssueProp(finding, "AutoFixSafe"))
+        If Err.Number <> 0 Then autoFix = False: Err.Clear
+        On Error GoTo TrackedCleanup
+
+        If rsVal >= 0 And reVal > rsVal Then
             On Error Resume Next: Err.Clear
-            Set rng = doc.Range(GetIssueProp(finding, "RangeStart"), GetIssueProp(finding, "RangeEnd"))
+            Set rng = doc.Range(rsVal, reVal)
             If Err.Number = 0 Then
-                If GetIssueProp(finding, "AutoFixSafe") Then
-                    ' Remember original position and length before modification
-                    Dim origStart As Long
-                    Dim origLen As Long
-                    Dim sugText As String
+                If autoFix Then
                     origStart = rng.Start
                     origLen = rng.End - rng.Start
                     ' Use ReplacementText only.  Suggestion is human-readable
@@ -1360,7 +1379,7 @@ Public Sub ApplySuggestionsAsTrackedChanges(doc As Document, _
                     If Not HasReplacementText(finding) Then
                         ' No machine-safe replacement -- skip amendment, add comment
                         TraceStep "ApplyTrackedChanges", "NO ReplacementText for i=" & i & _
-                                  " rule=" & GetIssueProp(finding, "RuleName") & "; comment-only"
+                                  " rule=" & CStr(GetIssueProp(finding, "RuleName")) & "; comment-only"
                         If addComments Then
                             TryAddComment doc, rng, BuildCommentText(finding), cmtRef, _
                                 "ApplyTrackedChanges", "no-replacement-comment i=" & i
@@ -1370,17 +1389,14 @@ Public Sub ApplySuggestionsAsTrackedChanges(doc As Document, _
                     sugText = CStr(GetIssueProp(finding, "ReplacementText"))
 
                     ' --- WHITESPACE VALIDATION GATE ---
-                    Dim origText As String
+                    origText = ""
                     origText = rng.Text
                     If Err.Number <> 0 Then origText = "": Err.Clear
 
-                    Dim skipAmendment As Boolean
                     skipAmendment = False
 
                     ' For deletions (empty suggestion = delete the range)
                     If Len(sugText) = 0 And Len(origText) > 0 Then
-                        Dim chIdx As Long
-                        Dim ch As String
                         For chIdx = 1 To Len(origText)
                             ch = Mid$(origText, chIdx, 1)
                             If (ch >= "A" And ch <= "Z") Or _
@@ -1396,7 +1412,6 @@ Public Sub ApplySuggestionsAsTrackedChanges(doc As Document, _
 
                     ' For replacements, verify we are only changing whitespace
                     If Len(sugText) > 0 And Len(origText) > 0 Then
-                        Dim isOnlyWhitespace As Boolean
                         isOnlyWhitespace = True
                         For chIdx = 1 To Len(origText)
                             ch = Mid$(origText, chIdx, 1)
@@ -1408,9 +1423,7 @@ Public Sub ApplySuggestionsAsTrackedChanges(doc As Document, _
 
                         If Not isOnlyWhitespace Then
                             If Len(sugText) < Len(origText) Then
-                                Dim origHasPeriod As Boolean
                                 origHasPeriod = (InStr(1, origText, ".") > 0)
-                                Dim sugHasPeriod As Boolean
                                 sugHasPeriod = (InStr(1, sugText, ".") > 0)
                                 If origHasPeriod And Not sugHasPeriod Then
                                     skipAmendment = True
@@ -1444,16 +1457,14 @@ Public Sub ApplySuggestionsAsTrackedChanges(doc As Document, _
                 End If
             Else
                 DebugLogError "ApplyTrackedChanges", "doc.Range i=" & i & _
-                    " start=" & GetIssueProp(finding, "RangeStart") & _
-                    " end=" & GetIssueProp(finding, "RangeEnd"), Err.Number, Err.Description
+                    " start=" & rsVal & " end=" & reVal, Err.Number, Err.Description
                 Err.Clear
             End If
 NextApplyIssue:
             On Error GoTo TrackedCleanup
         Else
             TraceStep "ApplyTrackedChanges", "SKIPPED i=" & i & _
-                      " -- invalid range start=" & GetIssueProp(finding, "RangeStart") & _
-                      " end=" & GetIssueProp(finding, "RangeEnd")
+                      " -- invalid range start=" & rsVal & " end=" & reVal
         End If
     Next i
 
@@ -1462,7 +1473,7 @@ TrackedCleanup:
     On Error Resume Next
     doc.TrackRevisions = wasTrackingChanges
     Application.ScreenUpdating = wasScreenUpdating
-    Application.StatusBar = wasStatusBar
+    Application.StatusBar = False
     On Error GoTo 0
     TraceExit "ApplyTrackedChanges"
 End Sub
@@ -1470,7 +1481,7 @@ End Sub
 ' ============================================================
 '  PRIVATE: Build comment text from an issue dictionary
 ' ============================================================
-Private Function BuildCommentText(finding As Object) As String
+Private Function BuildCommentText(ByVal finding As Object) As String
     Dim txt As String
     txt = GetIssueProp(finding, "Issue")
     Dim sug As String
@@ -1900,7 +1911,7 @@ End Function
 '  PRIVATE: Read a property from an finding (supports both
 '  issue dictionary class and Dictionary-based issues)
 ' ================================================================
-Private Function GetIssueProp(finding As Object, ByVal propName As String) As Variant
+Private Function GetIssueProp(ByVal finding As Object, ByVal propName As String) As Variant
     On Error Resume Next
     ' Try dictionary access first
     If TypeName(finding) = "Dictionary" Then
@@ -1921,7 +1932,7 @@ End Function
 '  Distinguishes "key exists with empty value" (= delete) from
 '  "key does not exist" (= no replacement available).
 ' ================================================================
-Private Function HasReplacementText(finding As Object) As Boolean
+Private Function HasReplacementText(ByVal finding As Object) As Boolean
     On Error Resume Next
     HasReplacementText = False
     If TypeName(finding) = "Dictionary" Then
@@ -1939,7 +1950,7 @@ End Function
 ' ================================================================
 '  PRIVATE: Format an finding as JSON (supports both types)
 ' ================================================================
-Private Function IssueToJSON(finding As Object) As String
+Private Function IssueToJSON(ByVal finding As Object) As String
     Dim s As String
     s = "    {" & vbCrLf
     s = s & "      ""rule"": """ & EscJSON(CStr(GetIssueProp(finding, "RuleName"))) & """," & vbCrLf

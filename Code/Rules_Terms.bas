@@ -15,7 +15,7 @@ Option Explicit
 Private Const RULE05_NAME As String = "custom_term_whitelist"
 Private Const RULE07_NAME As String = "defined_terms"
 ' RETIRED -- NOT ENGINE-WIRED: phrase_consistency kept only for backwards compat
-Private Const RETIRED_RETIRED_RULE23_NAME As String = "phrase_consistency"
+Private Const RETIRED_RULE23_NAME As String = "phrase_consistency"
 
 ' ============================================================
 '  PRIVATE HELPERS (Rule07)
@@ -837,7 +837,7 @@ Private Function CreateIssueDict(ByVal ruleName_ As String, _
     d("RangeEnd") = rangeEnd_
     d("Severity") = severity_
     d("AutoFixSafe") = autoFixSafe_
-    d("ReplacementText") = replacementText_
+    If autoFixSafe_ Then d("ReplacementText") = replacementText_
     Set CreateIssueDict = d
 End Function
 
