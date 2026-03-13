@@ -481,18 +481,12 @@ Private Sub UserForm_Initialize()
     neededH = yPos + LBL_H + PAD   ' bottom of status label + padding
     If neededH < 400 Then neededH = 400  ' sensible minimum
 
-    On Error Resume Next          ' InsideWidth/InsideHeight may not exist on very old hosts
-    Me.InsideWidth = FULL_W + 2 * PAD   ' = 1000
-    Me.InsideHeight = neededH
-    If Err.Number <> 0 Then
-        Err.Clear
-        Me.Width = FULL_W + 2 * PAD
-        Me.Height = neededH
-    End If
-    On Error GoTo 0
+    ' InsideWidth/InsideHeight are read-only in Word VBA UserForms.
+    ' Set the outer Width/Height directly instead.
+    Me.Width = FULL_W + 2 * PAD    ' = 1000
+    Me.Height = neededH
 
-    Debug.Print "UserForm_Initialize: Width=" & Me.Width & " Height=" & Me.Height & _
-                " InsideWidth=" & Me.InsideWidth & " InsideHeight=" & Me.InsideHeight
+    Debug.Print "UserForm_Initialize: Width=" & Me.Width & " Height=" & Me.Height
 End Sub
 
 ' ============================================================
@@ -733,9 +727,9 @@ Private Sub btnExport_Click()
 
     ' Ensure parent directory exists before writing
     Dim reportDir As String
-    reportDir = modDebugLog.GetParentDirectory(reportPath)
+    reportDir = GetParentDirectory(reportPath)
     If Len(reportDir) > 0 Then
-        modDebugLog.EnsureDirectoryExists reportDir
+        EnsureDirectoryExists reportDir
     End If
 
     lblStatus.Caption = "Exporting report..."
@@ -752,9 +746,9 @@ Private Sub btnExport_Click()
     logPath = ""
 
     On Error Resume Next
-    If modDebugLog.DEBUG_MODE Then
+    If DEBUG_MODE Then
         logPath = Left$(reportPath, Len(reportPath) - 5) & "_debug.log"
-        logSaved = modDebugLog.DebugLogSaveToTextFile(logPath)
+        logSaved = DebugLogSaveToTextFile(logPath)
     End If
     On Error GoTo 0
 
@@ -767,7 +761,7 @@ Private Sub btnExport_Click()
 
     If logSaved And Len(logPath) > 0 Then
         msg = msg & vbCrLf & vbCrLf & "Debug log saved to:" & vbCrLf & logPath
-    ElseIf modDebugLog.DEBUG_MODE And Not logSaved Then
+    ElseIf DEBUG_MODE And Not logSaved Then
         msg = msg & vbCrLf & vbCrLf & "Debug log could not be saved."
     End If
 
@@ -783,7 +777,7 @@ End Sub
 
 ' -- Helper: build a temp path for report export (cross-platform) --
 Private Function GetTempReportPath(sep As String) As String
-    GetTempReportPath = modDebugLog.GetWritableTempDir() & sep & "pleadings_report.json"
+    GetTempReportPath = GetWritableTempDir() & sep & "pleadings_report.json"
 End Function
 
 ' ============================================================
@@ -874,9 +868,9 @@ Private Sub btnSaveBrands_Click()
 
     ' Ensure directory exists (recursive, handles nested paths)
     Dim brandDir As String
-    brandDir = modDebugLog.GetParentDirectory(brandFile)
+    brandDir = GetParentDirectory(brandFile)
     If Len(brandDir) > 0 Then
-        modDebugLog.EnsureDirectoryExists brandDir
+        EnsureDirectoryExists brandDir
     End If
 
     Dim saveResult As Boolean

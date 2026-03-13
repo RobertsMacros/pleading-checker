@@ -198,9 +198,9 @@ Private Sub ManageBrands()
             savePath = GetBrandRulesPath()
             ' Ensure directory exists (recursive, handles nested paths)
             Dim brandDir As String
-            brandDir = modDebugLog.GetParentDirectory(savePath)
+            brandDir = GetParentDirectory(savePath)
             If Len(brandDir) > 0 Then
-                modDebugLog.EnsureDirectoryExists brandDir
+                EnsureDirectoryExists brandDir
             End If
             On Error Resume Next
             Dim saveOK As Boolean
@@ -247,14 +247,14 @@ Private Sub ExportReport(issues As Collection)
     On Error GoTo 0
 
     If Len(reportPath) = 0 Then
-        reportPath = modDebugLog.GetWritableTempDir() & sep & "pleadings_report.json"
+        reportPath = GetWritableTempDir() & sep & "pleadings_report.json"
     End If
 
     ' Ensure parent directory exists before writing
     Dim reportDir As String
-    reportDir = modDebugLog.GetParentDirectory(reportPath)
+    reportDir = GetParentDirectory(reportPath)
     If Len(reportDir) > 0 Then
-        modDebugLog.EnsureDirectoryExists reportDir
+        EnsureDirectoryExists reportDir
     End If
 
     Dim summary As String
@@ -267,9 +267,9 @@ Private Sub ExportReport(issues As Collection)
     logPath = ""
 
     On Error Resume Next
-    If modDebugLog.DEBUG_MODE Then
+    If DEBUG_MODE Then
         logPath = Left$(reportPath, Len(reportPath) - 5) & "_debug.log"
-        logSaved = modDebugLog.DebugLogSaveToTextFile(logPath)
+        logSaved = DebugLogSaveToTextFile(logPath)
     End If
     On Error GoTo 0
 
@@ -278,7 +278,7 @@ Private Sub ExportReport(issues As Collection)
 
     If logSaved And Len(logPath) > 0 Then
         msg = msg & vbCrLf & vbCrLf & "Debug log saved to:" & vbCrLf & logPath
-    ElseIf modDebugLog.DEBUG_MODE And Not logSaved Then
+    ElseIf DEBUG_MODE And Not logSaved Then
         msg = msg & vbCrLf & vbCrLf & "Debug log could not be saved."
     End If
 
