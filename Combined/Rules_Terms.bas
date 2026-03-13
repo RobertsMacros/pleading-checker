@@ -716,9 +716,14 @@ End Function
 
 ' ============================================================
 '  RETIRED RULE 23: PHRASE CONSISTENCY
-'  Not dispatched by the engine. Kept for backwards compatibility.
+'  NOT dispatched by RunAllPleadingsRules. Retired due to high
+'  false-positive rate on common legal phrases.
+'  Kept ONLY for backwards compatibility if called externally.
+'  Will emit a debug warning when invoked.
 ' ============================================================
 Public Function Check_PhraseConsistency(doc As Document) As Collection
+    Debug.Print "WARNING: Rules_Terms.Check_PhraseConsistency is RETIRED (Rule23). " & _
+                "Not dispatched by RunAllPleadingsRules."
     Dim issues As New Collection
 
     ' -- Define phrase groups ---------------------------------
@@ -873,7 +878,10 @@ End Function
 Private Sub EngineSetWhitelist(dict As Object)
     On Error Resume Next
     Application.Run "PleadingsEngine.SetWhitelist", dict
-    If Err.Number <> 0 Then Err.Clear
+    If Err.Number <> 0 Then
+        Debug.Print "EngineSetWhitelist: fallback (Err " & Err.Number & ": " & Err.Description & ")"
+        Err.Clear
+    End If
     On Error GoTo 0
 End Sub
 
@@ -901,6 +909,7 @@ Private Function EngineGetTermQuotePref() As String
     On Error Resume Next
     EngineGetTermQuotePref = Application.Run("PleadingsEngine.GetTermQuotePref")
     If Err.Number <> 0 Then
+        Debug.Print "EngineGetTermQuotePref: fallback (Err " & Err.Number & ": " & Err.Description & ")"
         EngineGetTermQuotePref = "DOUBLE"
         Err.Clear
     End If
@@ -914,6 +923,7 @@ Private Function EngineGetTermFormatPref() As String
     On Error Resume Next
     EngineGetTermFormatPref = Application.Run("PleadingsEngine.GetTermFormatPref")
     If Err.Number <> 0 Then
+        Debug.Print "EngineGetTermFormatPref: fallback (Err " & Err.Number & ": " & Err.Description & ")"
         EngineGetTermFormatPref = "BOLD"
         Err.Clear
     End If

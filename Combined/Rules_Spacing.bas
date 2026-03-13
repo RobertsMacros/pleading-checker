@@ -614,6 +614,7 @@ Private Function EngineGetSpaceStylePref() As String
     On Error Resume Next
     EngineGetSpaceStylePref = Application.Run("PleadingsEngine.GetSpaceStylePref")
     If Err.Number <> 0 Then
+        Debug.Print "EngineGetSpaceStylePref: fallback (Err " & Err.Number & ": " & Err.Description & ")"
         EngineGetSpaceStylePref = "ONE"
         Err.Clear
     End If

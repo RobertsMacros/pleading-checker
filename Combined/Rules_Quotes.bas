@@ -796,6 +796,7 @@ Private Function EngineGetQuoteNesting() As String
     EngineGetQuoteNesting = Application.Run( _
         "PleadingsEngine.GetQuoteNesting")
     If Err.Number <> 0 Then
+        Debug.Print "EngineGetQuoteNesting: fallback (Err " & Err.Number & ": " & Err.Description & ")"
         EngineGetQuoteNesting = "SINGLE"
         Err.Clear
     End If
@@ -810,6 +811,7 @@ Private Function EngineGetSmartQuotePref() As String
     EngineGetSmartQuotePref = Application.Run( _
         "PleadingsEngine.GetSmartQuotePref")
     If Err.Number <> 0 Then
+        Debug.Print "EngineGetSmartQuotePref: fallback (Err " & Err.Number & ": " & Err.Description & ")"
         EngineGetSmartQuotePref = "SMART"
         Err.Clear
     End If

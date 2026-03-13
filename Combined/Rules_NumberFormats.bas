@@ -798,22 +798,28 @@ End Function
 
 ' ================================================================
 '  RETIRED Rule18: SetRange
-'  Not dispatched by the engine. The engine manages page ranges
+'  NOT dispatched by the engine. The engine manages page ranges
 '  directly via SetPageRangeFromString / SetPageRange.
-'  Kept for backwards compatibility only.
+'  Kept ONLY for backwards compatibility if called externally.
+'  Will emit a debug warning when invoked.
 ' ================================================================
 Public Sub SetRange(s As Long, e As Long)
+    Debug.Print "WARNING: Rules_NumberFormats.SetRange is RETIRED (Rule18). " & _
+                "Use PleadingsEngine.SetPageRange instead."
     mStartPage = s
     mEndPage = e
 End Sub
 
 ' ================================================================
 '  RETIRED Rule18: Check_PageRange
-'  Not dispatched by the engine. The engine manages page ranges
+'  NOT dispatched by the engine. The engine manages page ranges
 '  directly via SetPageRangeFromString / SetPageRange.
-'  Kept for backwards compatibility only.
+'  Kept ONLY for backwards compatibility if called externally.
+'  Returns an empty collection; will emit a debug warning.
 ' ================================================================
 Public Function Check_PageRange(doc As Document) As Collection
+    Debug.Print "WARNING: Rules_NumberFormats.Check_PageRange is RETIRED (Rule18). " & _
+                "Not dispatched by RunAllPleadingsRules."
     Dim issues As New Collection
 
     On Error Resume Next
@@ -920,7 +926,10 @@ End Function
 Private Sub EngineSetPageRange(ByVal startPg As Long, ByVal endPg As Long)
     On Error Resume Next
     Application.Run "PleadingsEngine.SetPageRange", startPg, endPg
-    If Err.Number <> 0 Then Err.Clear
+    If Err.Number <> 0 Then
+        Debug.Print "EngineSetPageRange: fallback (Err " & Err.Number & ": " & Err.Description & ")"
+        Err.Clear
+    End If
     On Error GoTo 0
 End Sub
 
@@ -931,6 +940,7 @@ Private Function EngineGetDateFormatPref() As String
     On Error Resume Next
     EngineGetDateFormatPref = Application.Run("PleadingsEngine.GetDateFormatPref")
     If Err.Number <> 0 Then
+        Debug.Print "EngineGetDateFormatPref: fallback (Err " & Err.Number & ": " & Err.Description & ")"
         EngineGetDateFormatPref = "UK"
         Err.Clear
     End If

@@ -30,11 +30,13 @@ Attribute VB_Name = "PleadingsEngine"
 '
 ' Installation:
 '   1. Open the VBA Editor (Alt+F11)
-'   2. Tools > References > check "Microsoft Scripting Runtime"
-'   3. File > Import File > PleadingsEngine.bas
-'   4. File > Import File > PleadingsLauncher.bas
-'   5. Import whichever Rules_*.bas modules you need
-'   6. Run the macro "PleadingsChecker"
+'   2. File > Import File > PleadingsEngine.bas
+'   3. File > Import File > PleadingsLauncher.bas
+'   4. Import whichever Rules_*.bas modules you need
+'   5. Run the macro "PleadingsChecker"
+'
+'   Note: No early-bound references are required. All Scripting.Dictionary
+'   usage is late-bound via CreateObject("Scripting.Dictionary").
 ' ============================================================
 Option Explicit
 

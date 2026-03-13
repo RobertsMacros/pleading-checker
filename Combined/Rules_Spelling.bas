@@ -1704,6 +1704,7 @@ Private Function EngineIsWhitelistedTerm(ByVal term As String) As Boolean
     On Error Resume Next
     EngineIsWhitelistedTerm = Application.Run("PleadingsEngine.IsWhitelistedTerm", term)
     If Err.Number <> 0 Then
+        Debug.Print "EngineIsWhitelistedTerm: fallback (Err " & Err.Number & ": " & Err.Description & ")"
         EngineIsWhitelistedTerm = False
         Err.Clear
     End If
@@ -1717,6 +1718,7 @@ Private Function EngineGetSpellingMode() As String
     On Error Resume Next
     EngineGetSpellingMode = Application.Run("PleadingsEngine.GetSpellingMode")
     If Err.Number <> 0 Then
+        Debug.Print "EngineGetSpellingMode: fallback (Err " & Err.Number & ": " & Err.Description & ")"
         EngineGetSpellingMode = "UK"
         Err.Clear
     End If
