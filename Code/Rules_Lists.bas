@@ -668,6 +668,7 @@ Private Sub ProcessListGroup(doc As Document, _
     Dim maxCount As Long
 
     itemCount = groupEnd - groupStart + 1
+    Debug.Print "LIST_DETECT: group of " & itemCount & " items, start=" & groupStart & " end=" & groupEnd
     If itemCount < 2 Then Exit Sub ' Single-item list, nothing to check
 
     ' -- Classify the ending of each list item ------------------
@@ -730,7 +731,12 @@ Private Sub ProcessListGroup(doc As Document, _
             End If
             On Error GoTo 0
 
-            Set finding = CreateIssueDict(RULE_NAME_LISTPN, locStr, "List item ending '" & endings(i) & "' differs from " & "dominant ending '" & dominantEnding & "'", "Change ending punctuation to match list style (" & dominantEnding & ")", paraStarts(i), paraEnds(i), "possible_error")
+            Set finding = CreateIssueDict(RULE_NAME_LISTPN, locStr, _
+                "List item ending '" & endings(i) & "' differs from " & _
+                "dominant ending '" & dominantEnding & "'", _
+                "Change ending punctuation to match list style (" & dominantEnding & ")", _
+                paraStarts(i), paraEnds(i), "possible_error", False, "", _
+                "", "paragraph_span", "medium")
             issues.Add finding
         End If
 
@@ -750,7 +756,12 @@ ContinueItem:
                         Err.Clear
                     End If
 
-                    Set finding = CreateIssueDict(RULE_NAME_LISTPN, locStr, "Last list item should end with a full stop, not '" & endings(groupEnd) & "'", "End the final list item with a full stop", paraStarts(groupEnd), paraEnds(groupEnd), "possible_error")
+                    Set finding = CreateIssueDict(RULE_NAME_LISTPN, locStr, _
+                        "Last list item should end with a full stop, not '" & _
+                        endings(groupEnd) & "'", _
+                        "End the final list item with a full stop", _
+                        paraStarts(groupEnd), paraEnds(groupEnd), _
+                        "possible_error", False, "", "", "paragraph_span", "medium")
                     issues.Add finding
                 End If
             End If
@@ -792,7 +803,12 @@ ContinueItem:
                             Err.Clear
                         End If
 
-                        Set finding = CreateIssueDict(RULE_NAME_LISTPN, locStr, "Penultimate list item should include 'and' or 'or' " & "before terminal punctuation", "Add 'and' or 'or' before the semicolon", paraStarts(penIdx), paraEnds(penIdx), "possible_error")
+                        Set finding = CreateIssueDict(RULE_NAME_LISTPN, locStr, _
+                            "Penultimate list item should include 'and' or 'or' " & _
+                            "before terminal punctuation", _
+                            "Add 'and' or 'or' before the semicolon", _
+                            paraStarts(penIdx), paraEnds(penIdx), _
+                            "possible_error", False, "", "", "paragraph_span", "medium")
                         issues.Add finding
                     End If
                 End If
@@ -938,7 +954,11 @@ Private Function CreateIssueDict(ByVal ruleName_ As String, _
                                  ByVal rangeEnd_ As Long, _
                                  Optional ByVal severity_ As String = "error", _
                                  Optional ByVal autoFixSafe_ As Boolean = False, _
-                                 Optional ByVal replacementText_ As String = "") As Object
+                                 Optional ByVal replacementText_ As String = "", _
+                                 Optional ByVal matchedText_ As String = "", _
+                                 Optional ByVal anchorKind_ As String = "exact_text", _
+                                 Optional ByVal confidenceLabel_ As String = "high", _
+                                 Optional ByVal sourceParagraphIndex_ As Long = 0) As Object
     Dim d As Object
     Set d = CreateObject("Scripting.Dictionary")
     d("RuleName") = ruleName_
@@ -950,6 +970,10 @@ Private Function CreateIssueDict(ByVal ruleName_ As String, _
     d("Severity") = severity_
     d("AutoFixSafe") = autoFixSafe_
     If autoFixSafe_ Then d("ReplacementText") = replacementText_
+    d("MatchedText") = matchedText_
+    d("AnchorKind") = anchorKind_
+    d("ConfidenceLabel") = confidenceLabel_
+    d("SourceParagraphIndex") = sourceParagraphIndex_
     Set CreateIssueDict = d
 End Function
 

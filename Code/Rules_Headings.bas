@@ -275,6 +275,44 @@ End Function
 
 
 ' ============================================================
+'  PUBLIC: Strict heading detection helper.
+'  Returns True only if strong evidence exists that this is a heading:
+'    1. Word heading style / outline level (levels 1-9)
+'    2. Short standalone paragraph (<= 15 words) with bold/larger font
+'       AND heading-like style name
+'  Does NOT classify as heading merely because paragraph is short,
+'  starts with a capital, contains a colon, follows a blank line,
+'  or is indented.
+' ============================================================
+Public Function IsHeadingParagraphStrict(para As Paragraph) As Boolean
+    IsHeadingParagraphStrict = False
+    On Error Resume Next
+
+    ' Check 1: Word outline level (most reliable)
+    Dim lvl As Long
+    lvl = para.OutlineLevel
+    If Err.Number <> 0 Then lvl = 10: Err.Clear
+    If lvl >= 1 And lvl <= 9 Then
+        IsHeadingParagraphStrict = True
+        On Error GoTo 0
+        Exit Function
+    End If
+
+    ' Check 2: Style name contains "heading" (case-insensitive)
+    Dim sn As String
+    sn = ""
+    sn = LCase$(para.Style.NameLocal)
+    If Err.Number <> 0 Then sn = "": Err.Clear
+    If InStr(sn, "heading") > 0 Or InStr(sn, "titre") > 0 Then
+        IsHeadingParagraphStrict = True
+        On Error GoTo 0
+        Exit Function
+    End If
+
+    On Error GoTo 0
+End Function
+
+' ============================================================
 '  PUBLIC: Check heading capitalisation  (Rule 04)
 '
 '  LOCAL-FAMILY APPROACH:
@@ -524,7 +562,11 @@ NextPara:
                                 suggn = "Review capitalisation for consistency with nearby level " & CLng(lvlKey) & " headings"
                         End Select
 
-                        Set finding = CreateIssueDict(RULE_NAME_CAPITALISATION, loc, "Heading capitalisation mismatch: '" & cleanHText & "' uses " & hPatterns(hj) & " but nearby dominant pattern is " & dominantPattern, suggn, hStarts(hj), hEnds(hj), "possible_error")
+                        Set finding = CreateIssueDict(RULE_NAME_CAPITALISATION, loc, _
+                            "Heading capitalisation mismatch: '" & cleanHText & _
+                            "' uses " & hPatterns(hj) & " but nearby dominant pattern is " & _
+                            dominantPattern, suggn, hStarts(hj), hEnds(hj), _
+                            "possible_error", False, "", cleanHText, "heading_text", "medium")
                         issues.Add finding
                     End If
                 End If
@@ -654,7 +696,8 @@ Private Sub EmitTitleIssues(hits As Collection, _
         Set finding = CreateIssueDict(RULE_NAME_TITLE, locStr, _
             "Inconsistent title formatting: '" & minorityWord & "' used", _
             "Use '" & dominantWord & "' " & styleDesc & " (dominant style)", _
-            CLng(hitArr(0)), CLng(hitArr(1)), "error")
+            CLng(hitArr(0)), CLng(hitArr(1)), "error", False, "", _
+            minorityWord, "token")
         issues.Add finding
 NextHit:
     Next h
@@ -673,7 +716,11 @@ Private Function CreateIssueDict(ByVal ruleName_ As String, _
                                  ByVal rangeEnd_ As Long, _
                                  Optional ByVal severity_ As String = "error", _
                                  Optional ByVal autoFixSafe_ As Boolean = False, _
-                                 Optional ByVal replacementText_ As String = "") As Object
+                                 Optional ByVal replacementText_ As String = "", _
+                                 Optional ByVal matchedText_ As String = "", _
+                                 Optional ByVal anchorKind_ As String = "exact_text", _
+                                 Optional ByVal confidenceLabel_ As String = "high", _
+                                 Optional ByVal sourceParagraphIndex_ As Long = 0) As Object
     Dim d As Object
     Set d = CreateObject("Scripting.Dictionary")
     d("RuleName") = ruleName_
@@ -685,6 +732,10 @@ Private Function CreateIssueDict(ByVal ruleName_ As String, _
     d("Severity") = severity_
     d("AutoFixSafe") = autoFixSafe_
     If autoFixSafe_ Then d("ReplacementText") = replacementText_
+    d("MatchedText") = matchedText_
+    d("AnchorKind") = anchorKind_
+    d("ConfidenceLabel") = confidenceLabel_
+    d("SourceParagraphIndex") = sourceParagraphIndex_
     Set CreateIssueDict = d
 End Function
 

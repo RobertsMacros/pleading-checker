@@ -416,7 +416,8 @@ Public Function Check_SingleQuotesDefault( _
                     End If
 
                     issues.Add CreateIssueDict(RULE32, locStr, _
-                        issMsg, "", pos, pos + 1, "warning")
+                        issMsg, "", pos, pos + 1, "warning", _
+                        False, "", "", "token", "medium")
                 End If
 
                 ' Push nesting level regardless (so its close is tracked)
@@ -571,7 +572,8 @@ NxtP33:
         cStraight & " straight and " & cSmart & _
         " smart quotation marks.", _
         "Use " & prefName & " quotation marks consistently " & _
-        "throughout the document.", 0, 0, "warning")
+        "throughout the document.", 0, 1, "warning", _
+        False, "", "", "paragraph_span", "high")
 
     ' -- Flag each non-preferred quote ---------------------------
     Dim locRng As Range
@@ -593,7 +595,7 @@ NxtP33:
             UCase(Left(wrongName, 1)) & Mid(wrongName, 2) & _
             " quotation mark found in document.", _
             "Replace with " & prefName & " quotation mark.", _
-            pos, pos + 1, "warning")
+            pos, pos + 1, "warning", False, "", "", "token", "medium")
 SkipP33:
     Next j
     On Error GoTo 0
@@ -700,8 +702,15 @@ Private Sub EmitFromPositions(doc As Document, _
         locStr = EngineGetLocationString(locRng, doc)
         If Err.Number <> 0 Then locStr = "unknown location": Err.Clear
 
+        Dim qChar As String
+        qChar = ""
+        On Error Resume Next
+        qChar = Mid$(doc.Content.Text, pos + 1, 1)
+        If Err.Number <> 0 Then qChar = "": Err.Clear
+        On Error GoTo 0
         issues.Add CreateIssueDict(ruleName, locStr, _
-            issueText, suggestion, pos, pos + 1, "possible_error")
+            issueText, suggestion, pos, pos + 1, "possible_error", _
+            False, "", qChar, "token", "high")
 SkipEmit:
     Next j
     On Error GoTo 0
@@ -718,7 +727,11 @@ Private Function CreateIssueDict(ByVal ruleName_ As String, _
         ByVal rangeEnd_ As Long, _
         Optional ByVal severity_ As String = "error", _
         Optional ByVal autoFixSafe_ As Boolean = False, _
-        Optional ByVal replacementText_ As String = "") As Object
+        Optional ByVal replacementText_ As String = "", _
+        Optional ByVal matchedText_ As String = "", _
+        Optional ByVal anchorKind_ As String = "exact_text", _
+        Optional ByVal confidenceLabel_ As String = "high", _
+        Optional ByVal sourceParagraphIndex_ As Long = 0) As Object
     Dim d As Object
     Set d = CreateObject("Scripting.Dictionary")
     d("RuleName") = ruleName_
@@ -730,6 +743,10 @@ Private Function CreateIssueDict(ByVal ruleName_ As String, _
     d("Severity") = severity_
     d("AutoFixSafe") = autoFixSafe_
     If autoFixSafe_ Then d("ReplacementText") = replacementText_
+    d("MatchedText") = matchedText_
+    d("AnchorKind") = anchorKind_
+    d("ConfidenceLabel") = confidenceLabel_
+    d("SourceParagraphIndex") = sourceParagraphIndex_
     Set CreateIssueDict = d
 End Function
 

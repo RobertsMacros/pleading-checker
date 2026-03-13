@@ -152,7 +152,7 @@ Public Function Check_RepeatedWords(doc As Document) As Collection
                     End If
                 End If
 
-                Set finding = CreateIssueDict(RULE_NAME_REPEATED, locStr, issueText, suggestion, rangeStart, rangeEnd, severity)
+                Set finding = CreateIssueDict(RULE_NAME_REPEATED, locStr, issueText, suggestion, rangeStart, rangeEnd, severity, False, "", rawToken, "token")
                 issues.Add finding
             End If
 
@@ -235,6 +235,15 @@ Public Function Check_SpellOutUnderTen(doc As Document) As Collection
         If Err.Number <> 0 Then isBlockQ = False: Err.Clear
         If isBlockQ Then GoTo NextParagraph_SO
 
+        ' -- Skip headings (numbering is structural, not prose) --
+        Dim soOutlineLevel As Long
+        soOutlineLevel = 10
+        On Error Resume Next
+        soOutlineLevel = para.OutlineLevel
+        If Err.Number <> 0 Then soOutlineLevel = 10: Err.Clear
+        On Error Resume Next
+        If soOutlineLevel >= 1 And soOutlineLevel <= 9 Then GoTo NextParagraph_SO
+
         ' -- Get paragraph text ------------------------------
         paraText = paraRange.Text
         If Err.Number <> 0 Then
@@ -255,6 +264,11 @@ Public Function Check_SpellOutUnderTen(doc As Document) As Collection
 
             ' Check if character is a digit 0-9
             If ch >= "0" And ch <= "9" Then
+                ' -- Check: digit at start of paragraph (likely numbering) --
+                If IsAtParagraphStart(paraText, i, soListPrefixLen) Then
+                    GoTo NextChar
+                End If
+
                 digitVal = CInt(ch)
 
                 ' -- Check: isolated digit (not part of larger number) --
@@ -329,7 +343,11 @@ Public Function Check_SpellOutUnderTen(doc As Document) As Collection
                     End If
                 End If
 
-                Set finding = CreateIssueDict(RULE_NAME_SPELL_OUT, locStr, "Number under 10 is given as a figure in running prose.", "Write '" & numberWords(digitVal) & "' instead of '" & ch & "'.", rangeStart, rangeEnd, "warning", False)
+                Set finding = CreateIssueDict(RULE_NAME_SPELL_OUT, locStr, _
+                    "Number under 10 is given as a figure in running prose.", _
+                    "Write '" & numberWords(digitVal) & "' instead of '" & ch & "'.", _
+                    rangeStart, rangeEnd, "warning", False, "", _
+                    ch, "token", "medium")
                 issues.Add finding
             End If
 
@@ -396,8 +414,8 @@ End Function
 ' ------------------------------------------------------------
 Private Function IsPunctuation(ByVal ch As String) As Boolean
     Dim PUNCT_CHARS As String
-    PUNCT_CHARS = ".,;:!?""'()[]{}/-" & Chr(8220) & Chr(8221) & _
-                  Chr(8216) & Chr(8217) & Chr(8212) & Chr(8211)
+    PUNCT_CHARS = ".,;:!?""'()[]{}/-" & ChrW$(8220) & ChrW$(8221) & _
+                  ChrW$(8216) & ChrW$(8217) & ChrW$(8212) & ChrW$(8211)
     IsPunctuation = (InStr(1, PUNCT_CHARS, ch) > 0)
 End Function
 
@@ -905,6 +923,34 @@ Private Function IsFollowedByMonthName(ByRef txt As String, _
     Next m
 End Function
 
+' Check if the digit is effectively at the start of paragraph text
+' (possibly after whitespace/tab), which typically means paragraph numbering
+Private Function IsAtParagraphStart(ByRef txt As String, _
+                                     ByVal pos As Long, _
+                                     ByVal listPrefixLen As Long) As Boolean
+    IsAtParagraphStart = False
+    Dim effectivePos As Long
+    effectivePos = pos - listPrefixLen
+    If effectivePos > 5 Then Exit Function  ' not near start
+    ' Check that everything before this digit is whitespace/tab
+    Dim k As Long
+    For k = 1 + listPrefixLen To pos - 1
+        Dim c As String
+        c = Mid$(txt, k, 1)
+        If c <> " " And c <> vbTab And c <> ChrW(160) Then
+            Exit Function  ' non-whitespace before digit = not paragraph start
+        End If
+    Next k
+    ' Also check if digit is followed by "." or ")" which is numbering
+    If pos < Len(txt) Then
+        Dim nextCh As String
+        nextCh = Mid$(txt, pos + 1, 1)
+        If nextCh = "." Or nextCh = ")" Or nextCh = " " Then
+            IsAtParagraphStart = True
+        End If
+    End If
+End Function
+
 ' ============================================================
 '  SHARED HELPER (used by both rules' helpers)
 ' ============================================================
@@ -933,7 +979,11 @@ Private Function CreateIssueDict(ByVal ruleName_ As String, _
                                  ByVal rangeEnd_ As Long, _
                                  Optional ByVal severity_ As String = "error", _
                                  Optional ByVal autoFixSafe_ As Boolean = False, _
-                                 Optional ByVal replacementText_ As String = "") As Object
+                                 Optional ByVal replacementText_ As String = "", _
+                                 Optional ByVal matchedText_ As String = "", _
+                                 Optional ByVal anchorKind_ As String = "exact_text", _
+                                 Optional ByVal confidenceLabel_ As String = "high", _
+                                 Optional ByVal sourceParagraphIndex_ As Long = 0) As Object
     Dim d As Object
     Set d = CreateObject("Scripting.Dictionary")
     d("RuleName") = ruleName_
@@ -945,6 +995,10 @@ Private Function CreateIssueDict(ByVal ruleName_ As String, _
     d("Severity") = severity_
     d("AutoFixSafe") = autoFixSafe_
     If autoFixSafe_ Then d("ReplacementText") = replacementText_
+    d("MatchedText") = matchedText_
+    d("AnchorKind") = anchorKind_
+    d("ConfidenceLabel") = confidenceLabel_
+    d("SourceParagraphIndex") = sourceParagraphIndex_
     Set CreateIssueDict = d
 End Function
 

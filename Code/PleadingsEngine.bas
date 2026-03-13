@@ -1267,6 +1267,13 @@ Public Sub ApplyHighlights(doc As Document, _
     For i = 1 To issues.Count
         Set finding = issues(i)
 
+        ' Anchor validation gate
+        If Not ValidateIssueAnchor(finding) Then
+            TraceStep "ApplyHighlights", "INVALID ANCHOR SKIPPED i=" & i & _
+                      " rule=" & CStr(GetIssueProp(finding, "RuleName"))
+            GoTo NextHighlightIssue
+        End If
+
         ' Read range into typed locals to avoid Variant coercion issues
         On Error Resume Next
         hlRS = CLng(GetIssueProp(finding, "RangeStart"))
@@ -1299,6 +1306,7 @@ Public Sub ApplyHighlights(doc As Document, _
             TraceStep "ApplyHighlights", "SKIPPED i=" & i & _
                       " -- invalid range start=" & hlRS & " end=" & hlRE
         End If
+NextHighlightIssue:
     Next i
 
 HighlightCleanup:
@@ -1348,6 +1356,19 @@ Public Sub ApplySuggestionsAsTrackedChanges(doc As Document, _
     Dim isOnlyWhitespace As Boolean
     Dim origHasPeriod As Boolean, sugHasPeriod As Boolean
 
+    ' Get document story length for anchor validation
+    Dim docStoryLen As Long
+    On Error Resume Next
+    docStoryLen = doc.Content.End
+    If Err.Number <> 0 Then docStoryLen = -1: Err.Clear
+    On Error GoTo TrackedCleanup
+
+    ' Counters for debug summary
+    Dim cntApplied As Long, cntCommentOnly As Long
+    Dim cntSkippedAnchor As Long, cntSkippedUnsafe As Long
+    cntApplied = 0: cntCommentOnly = 0
+    cntSkippedAnchor = 0: cntSkippedUnsafe = 0
+
     ' Process from end of document backwards so tracked-change
     ' insertions / deletions do not shift positions of later issues
     For i = issues.Count To 1 Step -1
@@ -1363,6 +1384,15 @@ Public Sub ApplySuggestionsAsTrackedChanges(doc As Document, _
         autoFix = CBool(GetIssueProp(finding, "AutoFixSafe"))
         If Err.Number <> 0 Then autoFix = False: Err.Clear
         On Error GoTo TrackedCleanup
+
+        ' --- ANCHOR VALIDATION GATE ---
+        If Not ValidateIssueAnchor(finding, docStoryLen) Then
+            cntSkippedAnchor = cntSkippedAnchor + 1
+            TraceStep "ApplyTrackedChanges", "INVALID ANCHOR SKIPPED i=" & i & _
+                      " rule=" & CStr(GetIssueProp(finding, "RuleName")) & _
+                      " start=" & rsVal & " end=" & reVal
+            GoTo NextApplyIssue
+        End If
 
         If rsVal >= 0 And reVal > rsVal Then
             On Error Resume Next: Err.Clear
@@ -1434,6 +1464,7 @@ Public Sub ApplySuggestionsAsTrackedChanges(doc As Document, _
                     End If
 
                     If skipAmendment Then
+                        cntSkippedUnsafe = cntSkippedUnsafe + 1
                         TraceStep "ApplyTrackedChanges", "SKIPPED amendment i=" & i & _
                                   " orig=""" & Left$(origText, 30) & """ sug=""" & Left$(sugText, 30) & """"
                         If addComments Then
@@ -1443,13 +1474,46 @@ Public Sub ApplySuggestionsAsTrackedChanges(doc As Document, _
                         GoTo NextApplyIssue
                     End If
 
+                    ' --- UNICODE SAFETY: reject replacement char U+FFFD ---
+                    If Not IsReplacementSafe(sugText) Then
+                        cntSkippedUnsafe = cntSkippedUnsafe + 1
+                        TraceStep "ApplyTrackedChanges", "SKIPPED UNSAFE REPLACEMENT (U+FFFD) i=" & i
+                        Debug.Print "UNICODE_SAFETY: replacement text contains U+FFFD for rule=" & _
+                                    CStr(GetIssueProp(finding, "RuleName"))
+                        If addComments Then
+                            TryAddComment doc, rng, BuildCommentText(finding), cmtRef, _
+                                "ApplyTrackedChanges", "unsafe-replacement-comment i=" & i
+                        End If
+                        GoTo NextApplyIssue
+                    End If
+
+                    ' --- VERIFY EXACT MATCH before applying ---
+                    ' If MatchedText was stored at detection time, verify the
+                    ' document still contains it at this position.
+                    Dim storedMatch As String
+                    storedMatch = CStr(GetIssueProp(finding, "MatchedText"))
+                    If Len(storedMatch) > 0 And Len(origText) > 0 Then
+                        If origText <> storedMatch Then
+                            cntSkippedUnsafe = cntSkippedUnsafe + 1
+                            TraceStep "ApplyTrackedChanges", "SKIPPED STALE ANCHOR i=" & i & _
+                                      " stored=""" & Left$(storedMatch, 30) & """ actual=""" & Left$(origText, 30) & """"
+                            If addComments Then
+                                TryAddComment doc, rng, BuildCommentText(finding), cmtRef, _
+                                    "ApplyTrackedChanges", "stale-anchor-comment i=" & i
+                            End If
+                            GoTo NextApplyIssue
+                        End If
+                    End If
+
                     ' Apply tracked change
                     TraceStep "ApplyTrackedChanges", "APPLYING i=" & i & _
                               " range=" & origStart & "-" & (origStart + origLen) & _
                               " orig=""" & Left$(origText, 30) & """ -> """ & Left$(sugText, 30) & """"
                     TrySetRangeText rng, sugText, _
                         "ApplyTrackedChanges", "apply i=" & i
+                    cntApplied = cntApplied + 1
                 Else
+                    cntCommentOnly = cntCommentOnly + 1
                     If addComments Then
                         TryAddComment doc, rng, BuildCommentText(finding), cmtRef, _
                             "ApplyTrackedChanges", "comment-only i=" & i
@@ -1475,6 +1539,12 @@ TrackedCleanup:
     Application.ScreenUpdating = wasScreenUpdating
     Application.StatusBar = False
     On Error GoTo 0
+    TraceStep "ApplyTrackedChanges", "SUMMARY: applied=" & cntApplied & _
+              " comment_only=" & cntCommentOnly & " skipped_anchor=" & cntSkippedAnchor & _
+              " skipped_unsafe=" & cntSkippedUnsafe
+    Debug.Print "ApplyTrackedChanges SUMMARY: applied=" & cntApplied & _
+                " comment_only=" & cntCommentOnly & " skipped_anchor=" & cntSkippedAnchor & _
+                " skipped_unsafe=" & cntSkippedUnsafe
     TraceExit "ApplyTrackedChanges"
 End Sub
 
@@ -1561,6 +1631,27 @@ Public Function GenerateReport(issues As Collection, _
         End If
     Next i
 
+    ' Count by confidence
+    Dim confDict As Object
+    Set confDict = CreateObject("Scripting.Dictionary")
+    Dim invalidAnchorCount As Long
+    invalidAnchorCount = 0
+    For i = 1 To issues.Count
+        Set finding = issues(i)
+        Dim confLbl As String
+        confLbl = CStr(GetIssueProp(finding, "ConfidenceLabel"))
+        If Len(confLbl) = 0 Then confLbl = "unknown"
+        If confDict.Exists(confLbl) Then
+            confDict(confLbl) = confDict(confLbl) + 1
+        Else
+            confDict.Add confLbl, 1
+        End If
+        ' Check anchor validity
+        If Not ValidateIssueAnchor(finding) Then
+            invalidAnchorCount = invalidAnchorCount + 1
+        End If
+    Next i
+
     Print #fileNum, "  ""summary"": {"
     Print #fileNum, "    ""counts_per_rule"": {"
     Dim keys As Variant
@@ -1573,7 +1664,19 @@ Public Function GenerateReport(issues As Collection, _
             Print #fileNum, "      """ & EscJSON(CStr(keys(k))) & """: " & countDict(keys(k))
         End If
     Next k
-    Print #fileNum, "    }"
+    Print #fileNum, "    },"
+    Print #fileNum, "    ""counts_per_confidence"": {"
+    Dim cKeys As Variant
+    cKeys = confDict.keys
+    For k = 0 To confDict.Count - 1
+        If k < confDict.Count - 1 Then
+            Print #fileNum, "      """ & EscJSON(CStr(cKeys(k))) & """: " & confDict(cKeys(k)) & ","
+        Else
+            Print #fileNum, "      """ & EscJSON(CStr(cKeys(k))) & """: " & confDict(cKeys(k))
+        End If
+    Next k
+    Print #fileNum, "    },"
+    Print #fileNum, "    ""invalid_anchor_count"": " & invalidAnchorCount
     Print #fileNum, "  }"
     Print #fileNum, "}"
 
@@ -1892,7 +1995,11 @@ Public Function CreateIssue(ByVal ruleName_ As String, _
                             ByVal rangeEnd_ As Long, _
                             Optional ByVal severity_ As String = "error", _
                             Optional ByVal autoFixSafe_ As Boolean = False, _
-                            Optional ByVal replacementText_ As String = "") As Object
+                            Optional ByVal replacementText_ As String = "", _
+                            Optional ByVal matchedText_ As String = "", _
+                            Optional ByVal anchorKind_ As String = "exact_text", _
+                            Optional ByVal confidenceLabel_ As String = "high", _
+                            Optional ByVal sourceParagraphIndex_ As Long = 0) As Object
     Dim d As Object
     Set d = CreateObject("Scripting.Dictionary")
     d("RuleName") = ruleName_
@@ -1904,7 +2011,58 @@ Public Function CreateIssue(ByVal ruleName_ As String, _
     d("Severity") = severity_
     d("AutoFixSafe") = autoFixSafe_
     If autoFixSafe_ Then d("ReplacementText") = replacementText_
+    d("MatchedText") = matchedText_
+    d("AnchorKind") = anchorKind_
+    d("ConfidenceLabel") = confidenceLabel_
+    d("SourceParagraphIndex") = sourceParagraphIndex_
     Set CreateIssue = d
+End Function
+
+' ================================================================
+'  PUBLIC: Validate an issue anchor.  Returns True if the anchor
+'  is plausible; False if the issue should be skipped or repaired.
+' ================================================================
+Public Function ValidateIssueAnchor(ByVal finding As Object, _
+                                     Optional ByVal docStoryLen As Long = -1) As Boolean
+    ValidateIssueAnchor = False
+    On Error Resume Next
+    Dim rs As Long, re As Long
+    rs = CLng(GetIssueProp(finding, "RangeStart"))
+    If Err.Number <> 0 Then rs = -1: Err.Clear
+    re = CLng(GetIssueProp(finding, "RangeEnd"))
+    If Err.Number <> 0 Then re = -1: Err.Clear
+    On Error GoTo 0
+
+    ' Basic validity
+    If rs < 0 Then Exit Function
+    If re <= rs Then Exit Function
+    If docStoryLen > 0 And re > docStoryLen Then Exit Function
+
+    ' Suspicious 1-char anchor for multi-word finding
+    Dim issueLen As Long
+    issueLen = re - rs
+    If issueLen = 1 Then
+        Dim issueText As String
+        issueText = CStr(GetIssueProp(finding, "Issue"))
+        Dim ak As String
+        ak = CStr(GetIssueProp(finding, "AnchorKind"))
+        ' Single-char anchor is OK for exact_text / token on a single char
+        ' (e.g. a single quote or a single digit)
+        ' but suspicious for paragraph-span issues
+        If ak = "paragraph_span" Or ak = "paragraph_end" Then
+            Debug.Print "ANCHOR_WARN: 1-char anchor for " & ak & " issue: " & Left$(issueText, 60)
+        End If
+    End If
+
+    ValidateIssueAnchor = True
+End Function
+
+' ================================================================
+'  PUBLIC: Check whether a replacement text contains the Unicode
+'  replacement character U+FFFD.  If so, the replacement is unsafe.
+' ================================================================
+Public Function IsReplacementSafe(ByVal repText As String) As Boolean
+    IsReplacementSafe = (InStr(1, repText, ChrW$(65533)) = 0)
 End Function
 
 ' ================================================================
@@ -1965,7 +2123,29 @@ Private Function IssueToJSON(ByVal finding As Object) As String
         repText = CStr(GetIssueProp(finding, "ReplacementText"))
         s = s & "      ""replacement_text"": """ & EscJSON(repText) & """," & vbCrLf
     End If
-    s = s & "      ""auto_fix_safe"": " & IIf(CBool(GetIssueProp(finding, "AutoFixSafe")), "true", "false") & vbCrLf
+    s = s & "      ""auto_fix_safe"": " & IIf(CBool(GetIssueProp(finding, "AutoFixSafe")), "true", "false") & "," & vbCrLf
+    ' Enriched metadata
+    Dim mt As String: mt = CStr(GetIssueProp(finding, "MatchedText"))
+    If Len(mt) > 0 Then s = s & "      ""matched_text"": """ & EscJSON(Left$(mt, 80)) & """," & vbCrLf
+    Dim ak As String: ak = CStr(GetIssueProp(finding, "AnchorKind"))
+    If Len(ak) > 0 Then s = s & "      ""anchor_kind"": """ & EscJSON(ak) & """," & vbCrLf
+    Dim cl As String: cl = CStr(GetIssueProp(finding, "ConfidenceLabel"))
+    If Len(cl) > 0 Then s = s & "      ""confidence"": """ & EscJSON(cl) & """," & vbCrLf
+    Dim spi As Long
+    On Error Resume Next
+    spi = CLng(GetIssueProp(finding, "SourceParagraphIndex"))
+    If Err.Number <> 0 Then spi = 0: Err.Clear
+    On Error GoTo 0
+    If spi > 0 Then s = s & "      ""source_paragraph_index"": " & spi & "," & vbCrLf
+    Dim rs As Long, re As Long
+    On Error Resume Next
+    rs = CLng(GetIssueProp(finding, "RangeStart"))
+    If Err.Number <> 0 Then rs = 0: Err.Clear
+    re = CLng(GetIssueProp(finding, "RangeEnd"))
+    If Err.Number <> 0 Then re = 0: Err.Clear
+    On Error GoTo 0
+    s = s & "      ""range_start"": " & rs & "," & vbCrLf
+    s = s & "      ""range_end"": " & re & vbCrLf
     s = s & "    }"
     IssueToJSON = s
 End Function

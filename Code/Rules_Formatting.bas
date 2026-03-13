@@ -383,7 +383,13 @@ NextPara:
                 Dim locA As String
                 locA = EngineGetLocationString(rngA, doc)
 
-                Set findingA = CreateIssueDict(RULE_NAME_PARAGRAPH_BREAK, locA, "After-heading spacing inconsistency at '" & hText & "': uses " & hAft & " but dominant pattern for level " & CLng(lvlKey) & " headings is " & domAfter, "Change spacing after this heading to match: " & domAfter, CLng(hInfo(3)), CLng(hInfo(4)), "possible_error")
+                Set findingA = CreateIssueDict(RULE_NAME_PARAGRAPH_BREAK, locA, _
+                    "After-heading spacing inconsistency at '" & hText & _
+                    "': uses " & hAft & " but dominant pattern for level " & CLng(lvlKey) & _
+                    " headings is " & domAfter, _
+                    "Change spacing after this heading to match: " & domAfter, _
+                    CLng(hInfo(3)), CLng(hInfo(4)), "possible_error", False, "", _
+                    hText, "heading_text", "medium")
                 issues.Add findingA
             End If
 
@@ -395,7 +401,13 @@ NextPara:
                 Dim locB As String
                 locB = EngineGetLocationString(rngB, doc)
 
-                Set findingB = CreateIssueDict(RULE_NAME_PARAGRAPH_BREAK, locB, "Before-heading spacing inconsistency at '" & hText & "': uses " & hBef & " but dominant pattern for level " & CLng(lvlKey) & " headings is " & domBefore, "Change spacing before this heading to match: " & domBefore, CLng(hInfo(3)), CLng(hInfo(4)), "possible_error")
+                Set findingB = CreateIssueDict(RULE_NAME_PARAGRAPH_BREAK, locB, _
+                    "Before-heading spacing inconsistency at '" & hText & _
+                    "': uses " & hBef & " but dominant pattern for level " & CLng(lvlKey) & _
+                    " headings is " & domBefore, _
+                    "Change spacing before this heading to match: " & domBefore, _
+                    CLng(hInfo(3)), CLng(hInfo(4)), "possible_error", False, "", _
+                    hText, "heading_text", "medium")
                 issues.Add findingB
             End If
         Next h
@@ -765,7 +777,8 @@ NextFootnote:
                     "...' uses " & FontDescription(fk) & " but dominant " & _
                     context & " font is " & FontDescription(expectedFont), _
                     "Change to " & FontDescription(expectedFont), _
-                    pStarts(pi), pEnds(pi), "error")
+                    pStarts(pi), pEnds(pi), "possible_error", False, "", _
+                    cleanParaText, "paragraph_span", "medium")
                 issues.Add findingPara
                 GoTo NextParaFont2
             End If
@@ -813,7 +826,8 @@ NextFootnote:
                                 "Mid-paragraph font change in " & context & ": '" & cleanRunText & _
                                 "' uses " & FontDescription(fk) & " instead of " & FontDescription(expectedFont), _
                                 "Change to " & FontDescription(expectedFont), _
-                                runRange.Start, runRange.End, "error")
+                                runRange.Start, runRange.End, "possible_error", False, "", _
+                                cleanRunText, "exact_text", "medium")
                             issues.Add findingRun
                             On Error GoTo 0
                             GoTo NextParaFont2
@@ -855,7 +869,8 @@ NextParaFont2:
                         "...' uses " & FontDescription(fk) & " but dominant " & _
                         "footnote font is " & FontDescription(domFootnote), _
                         "Change to " & FontDescription(domFootnote), _
-                        fn.Range.Start, fn.Range.End, "error")
+                        fn.Range.Start, fn.Range.End, "possible_error", False, "", _
+                        cleanFNText, "paragraph_span", "medium")
                     issues.Add findingFN
                 End If
             End If
@@ -885,7 +900,11 @@ Private Function CreateIssueDict(ByVal ruleName_ As String, _
                                  ByVal rangeEnd_ As Long, _
                                  Optional ByVal severity_ As String = "error", _
                                  Optional ByVal autoFixSafe_ As Boolean = False, _
-                                 Optional ByVal replacementText_ As String = "") As Object
+                                 Optional ByVal replacementText_ As String = "", _
+                                 Optional ByVal matchedText_ As String = "", _
+                                 Optional ByVal anchorKind_ As String = "exact_text", _
+                                 Optional ByVal confidenceLabel_ As String = "high", _
+                                 Optional ByVal sourceParagraphIndex_ As Long = 0) As Object
     Dim d As Object
     Set d = CreateObject("Scripting.Dictionary")
     d("RuleName") = ruleName_
@@ -897,6 +916,10 @@ Private Function CreateIssueDict(ByVal ruleName_ As String, _
     d("Severity") = severity_
     d("AutoFixSafe") = autoFixSafe_
     If autoFixSafe_ Then d("ReplacementText") = replacementText_
+    d("MatchedText") = matchedText_
+    d("AnchorKind") = anchorKind_
+    d("ConfidenceLabel") = confidenceLabel_
+    d("SourceParagraphIndex") = sourceParagraphIndex_
     Set CreateIssueDict = d
 End Function
 
