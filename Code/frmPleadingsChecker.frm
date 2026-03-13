@@ -707,6 +707,13 @@ Private Sub btnExport_Click()
         reportPath = GetTempReportPath(sep)
     End If
 
+    ' Ensure parent directory exists before writing
+    Dim reportDir As String
+    reportDir = modDebugLog.GetParentDirectory(reportPath)
+    If Len(reportDir) > 0 Then
+        modDebugLog.EnsureDirectoryExists reportDir
+    End If
+
     lblStatus.Caption = "Exporting report..."
     Me.Repaint
     DoEvents
@@ -854,18 +861,11 @@ Private Sub btnSaveBrands_Click()
     Dim brandFile As String
     brandFile = GetBrandRulesPath()
 
-    ' Ensure directory exists
+    ' Ensure directory exists (recursive, handles nested paths)
     Dim brandDir As String
-    Dim sep As String
-    sep = Application.PathSeparator
-    Dim lastSep As Long
-    lastSep = InStrRev(brandFile, sep)
-    If lastSep > 0 Then
-        brandDir = Left$(brandFile, lastSep - 1)
-        On Error Resume Next
-        MkDir brandDir
-        Err.Clear
-        On Error GoTo 0
+    brandDir = modDebugLog.GetParentDirectory(brandFile)
+    If Len(brandDir) > 0 Then
+        modDebugLog.EnsureDirectoryExists brandDir
     End If
 
     Dim saveResult As Boolean

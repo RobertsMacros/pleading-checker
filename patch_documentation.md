@@ -508,8 +508,8 @@ End Function
 
 # Pleadings Checker VBA -- Targeted Audit Report
 
-**Date:** 2026-03-13 (pass 7)
-**Scope:** 17 modules in `Code/` (all except Rules_FootnoteHarts, Rules_TextScan, Rules_Brands)
+**Date:** 2026-03-13 (pass 8)
+**Scope:** All 20 modules in `Code/` (18,824 lines total, fully inspected)
 **Approach:** Targeted fixes only; no broad rewrites
 
 ---
@@ -755,6 +755,80 @@ VBA has no native test framework. All fixes verified by code inspection. Manual 
 ### Remaining limitations (need live Word testing)
 
 - **Performance:** `CheckManualNumbering` calls `Application.Run("Rules_Formatting.IsBlockQuotePara", para)` per paragraph via late-bound dispatch. Caching would improve performance on large documents but requires live testing to validate.
+- Broad OERN in paragraph-iteration loops (7 modules, 50-440 lines each)
+- Find.Execute loop OERN (`rng.Collapse wdCollapseEnd` itself fragile)
+- No unit-test harness
+
+---
+
+## Pass 8 — Concrete Fixes and Full Codebase Audit
+
+### Confirmed defects fixed
+
+**15. Export/report paths did not create parent directories**
+- `btnExport_Click` and `PleadingsLauncher.ExportReport` passed a report path to `GenerateReport` without ensuring the parent directory exists
+- Temp-path fallback (e.g. `C:\Temp`) could fail if the directory didn't exist
+- Debug log path (derived from report path) had the same risk
+- Fixed: added `EnsureDirectoryExists` + `GetParentDirectory` helpers to `modDebugLog.bas`; both export paths now call `EnsureDirectoryExists` before writing
+
+**16. Brand-save path used single MkDir (fails for nested directories)**
+- `btnSaveBrands_Click` (form) and `ManageBrands` (launcher) used a single `MkDir` that fails if intermediate directories don't exist (e.g. `%APPDATA%\PleadingsChecker` when `%APPDATA%` itself is missing)
+- Fixed: both now use `modDebugLog.EnsureDirectoryExists` which walks path components and creates each level
+
+### Exact procedures/modules changed (pass 8)
+
+| Module | Procedure | Change |
+|--------|-----------|--------|
+| `modDebugLog.bas` | `EnsureDirectoryExists` (new) | Recursive directory creation helper, no FSO dependency, Mac/Win compatible |
+| `modDebugLog.bas` | `GetParentDirectory` (new) | Extract parent directory from a file path |
+| `frmPleadingsChecker.frm` | `btnExport_Click` | Added `EnsureDirectoryExists` call before `GenerateReport` |
+| `frmPleadingsChecker.frm` | `btnSaveBrands_Click` | Replaced single `MkDir` with `EnsureDirectoryExists` |
+| `PleadingsLauncher.bas` | `ExportReport` | Added `EnsureDirectoryExists` call before `GenerateReport` |
+| `PleadingsLauncher.bas` | `ManageBrands` (SAVE case) | Replaced single `MkDir` with `EnsureDirectoryExists` |
+
+### Areas verified and left unchanged
+
+- **Item 1:** `RunAllPleadingsRules` already captures `wasScreenUpdating` + `wasStatusBar` on entry and restores both in cleanup
+- **Item 2:** `ApplySuggestionsAsTrackedChanges` and `ApplyHighlights` already use `TrySetRangeText` and `TryAddComment` wrappers; no raw mutations remain
+- **Item 5:** List-grouping edge case: when both `paraListID` values are 0 (unknown), groups stay merged. This is conservative and avoids false splits. Level changes within the same Word `List` object correctly stay grouped.
+- **Item 6:** Bracket count-mismatch anchors on first occurrence of that bracket type (imperfect but adequate). Nesting-error anchor correctly points to the offending closing bracket.
+- **Item 7:** All issue-dictionary access goes through `GetIssueProp` which returns `""` on missing keys. No function assumes specific key counts. `SortIssuesByPosition` does not exist.
+- **Item 8:** OERN audit across all 10 specified modules found no clearly safe new tightening targets. All existing patterns are either intentionally broad (paragraph/Find loops), already tightened with inline error checks, or wrapper functions.
+- **Item 9:** `CheckManualNumbering` performance hotspot (`IsBlockQuotePara` per paragraph) requires live testing to cache safely. Noted as limitation, not changed.
+
+### Source coverage
+
+| Module | Lines | Status |
+|--------|-------|--------|
+| PleadingsEngine.bas | 1926 | Fully inspected |
+| Rules_Spelling.bas | 1726 | Fully inspected |
+| Rules_Punctuation.bas | 1002 | Fully inspected |
+| Rules_Lists.bas | 981 | Fully inspected |
+| Rules_TextScan.bas | 976 | Fully inspected |
+| frmPleadingsChecker.frm | 951 | Fully inspected |
+| Rules_NumberFormats.bas | 949 | Fully inspected |
+| Rules_Terms.bas | 931 | Fully inspected |
+| Rules_Formatting.bas | 922 | Fully inspected |
+| Rules_Numbering.bas | 905 | Fully inspected |
+| Rules_Quotes.bas | 819 | Fully inspected |
+| modDebugLog.bas | 804 | Fully inspected |
+| Rules_Headings.bas | 707 | Fully inspected |
+| Rules_FootnoteHarts.bas | 647 | Fully inspected |
+| Rules_Spacing.bas | 622 | Fully inspected |
+| Rules_FootnoteIntegrity.bas | 502 | Fully inspected |
+| Rules_LegalTerms.bas | 487 | Fully inspected |
+| Rules_Italics.bas | 382 | Fully inspected |
+| PleadingsLauncher.bas | 334 | Fully inspected |
+| Rules_Brands.bas | 325 | Fully inspected |
+| **Total** | **18,824** | **All 20 files fully inspected** |
+
+No files were truncated or partially read. All line counts verified via `wc -l`.
+
+### Remaining limitations (need live Word testing)
+
+- **Performance:** `CheckManualNumbering` per-paragraph `Application.Run("Rules_Formatting.IsBlockQuotePara", para)` is slow on large documents; needs caching validated under live conditions
+- **List-grouping fallback:** When Word OM fails to identify a List object (both IDs = 0), adjacent distinct lists may still merge; extremely unlikely in practice
+- **Bracket count-mismatch anchoring:** Reports position of first bracket of that type, not necessarily the unmatched one
 - Broad OERN in paragraph-iteration loops (7 modules, 50-440 lines each)
 - Find.Execute loop OERN (`rng.Collapse wdCollapseEnd` itself fragile)
 - No unit-test harness

@@ -196,18 +196,11 @@ Private Sub ManageBrands()
         Case "SAVE"
             Dim savePath As String
             savePath = GetBrandRulesPath()
-            ' Ensure directory exists
+            ' Ensure directory exists (recursive, handles nested paths)
             Dim brandDir As String
-            Dim sep2 As String
-            sep2 = Application.PathSeparator
-            Dim lastSep As Long
-            lastSep = InStrRev(savePath, sep2)
-            If lastSep > 0 Then
-                brandDir = Left$(savePath, lastSep - 1)
-                On Error Resume Next
-                MkDir brandDir
-                Err.Clear
-                On Error GoTo 0
+            brandDir = modDebugLog.GetParentDirectory(savePath)
+            If Len(brandDir) > 0 Then
+                modDebugLog.EnsureDirectoryExists brandDir
             End If
             On Error Resume Next
             Dim saveOK As Boolean
@@ -267,6 +260,13 @@ Private Sub ExportReport(issues As Collection)
             If Right$(tmpDir, 1) = sep Then tmpDir = Left$(tmpDir, Len(tmpDir) - 1)
         #End If
         reportPath = tmpDir & sep & "pleadings_report.json"
+    End If
+
+    ' Ensure parent directory exists before writing
+    Dim reportDir As String
+    reportDir = modDebugLog.GetParentDirectory(reportPath)
+    If Len(reportDir) > 0 Then
+        modDebugLog.EnsureDirectoryExists reportDir
     End If
 
     Dim summary As String

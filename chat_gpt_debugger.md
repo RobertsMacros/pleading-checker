@@ -710,6 +710,13 @@ Private Sub btnExport_Click()
         reportPath = GetTempReportPath(sep)
     End If
 
+    ' Ensure parent directory exists before writing
+    Dim reportDir As String
+    reportDir = modDebugLog.GetParentDirectory(reportPath)
+    If Len(reportDir) > 0 Then
+        modDebugLog.EnsureDirectoryExists reportDir
+    End If
+
     lblStatus.Caption = "Exporting report..."
     Me.Repaint
     DoEvents
@@ -857,18 +864,11 @@ Private Sub btnSaveBrands_Click()
     Dim brandFile As String
     brandFile = GetBrandRulesPath()
 
-    ' Ensure directory exists
+    ' Ensure directory exists (recursive, handles nested paths)
     Dim brandDir As String
-    Dim sep As String
-    sep = Application.PathSeparator
-    Dim lastSep As Long
-    lastSep = InStrRev(brandFile, sep)
-    If lastSep > 0 Then
-        brandDir = Left$(brandFile, lastSep - 1)
-        On Error Resume Next
-        MkDir brandDir
-        Err.Clear
-        On Error GoTo 0
+    brandDir = modDebugLog.GetParentDirectory(brandFile)
+    If Len(brandDir) > 0 Then
+        modDebugLog.EnsureDirectoryExists brandDir
     End If
 
     Dim saveResult As Boolean
@@ -1672,6 +1672,95 @@ Public Function TryProtectDocument(ByVal doc As Document, _
 
     TryProtectDocument = True
     On Error GoTo 0
+End Function
+
+' ============================================================
+'  G. FILE-SYSTEM HELPERS (no FSO dependency)
+' ============================================================
+
+' --- Recursively ensure a folder path exists ---
+' Returns True if the folder exists (or was created), False on failure.
+Public Function EnsureDirectoryExists(ByVal folderPath As String) As Boolean
+    EnsureDirectoryExists = False
+    If Len(folderPath) = 0 Then Exit Function
+
+    ' Strip trailing separator
+    Dim sep As String
+    sep = Application.PathSeparator
+    If Right$(folderPath, 1) = sep Then
+        folderPath = Left$(folderPath, Len(folderPath) - 1)
+    End If
+    If Len(folderPath) = 0 Then Exit Function
+
+    ' Already exists?
+    On Error Resume Next
+    Dim testDir As String
+    testDir = Dir(folderPath, vbDirectory)
+    If Err.Number <> 0 Then testDir = "": Err.Clear
+    On Error GoTo 0
+    If Len(testDir) > 0 Then
+        EnsureDirectoryExists = True
+        Exit Function
+    End If
+
+    ' Walk path components, creating as needed
+    Dim parts() As String
+    parts = Split(folderPath, sep)
+    If UBound(parts) < 0 Then Exit Function
+
+    Dim built As String
+    Dim i As Long
+
+    #If Mac Then
+        ' Unix paths start with /  so parts(0) = ""
+        If Left$(folderPath, 1) = sep Then
+            built = sep & parts(1)
+            i = 2
+        Else
+            built = parts(0)
+            i = 1
+        End If
+    #Else
+        built = parts(0)   ' drive letter e.g. "C:"
+        i = 1
+    #End If
+
+    For i = i To UBound(parts)
+        built = built & sep & parts(i)
+        On Error Resume Next
+        testDir = ""
+        testDir = Dir(built, vbDirectory)
+        If Err.Number <> 0 Then testDir = "": Err.Clear
+        If Len(testDir) = 0 Then
+            MkDir built
+            If Err.Number <> 0 Then
+                If DEBUG_MODE Then
+                    Debug.Print "EnsureDirectoryExists: MkDir failed for """ & built & _
+                                """ (Err " & Err.Number & ": " & Err.Description & ")"
+                End If
+                Err.Clear
+                On Error GoTo 0
+                Exit Function
+            End If
+        End If
+        Err.Clear
+        On Error GoTo 0
+    Next i
+
+    EnsureDirectoryExists = True
+End Function
+
+' --- Extract parent directory from a file path ---
+Public Function GetParentDirectory(ByVal filePath As String) As String
+    Dim sep As String
+    sep = Application.PathSeparator
+    Dim lastSep As Long
+    lastSep = InStrRev(filePath, sep)
+    If lastSep > 0 Then
+        GetParentDirectory = Left$(filePath, lastSep - 1)
+    Else
+        GetParentDirectory = ""
+    End If
 End Function
 
 ```
@@ -3809,18 +3898,11 @@ Private Sub ManageBrands()
         Case "SAVE"
             Dim savePath As String
             savePath = GetBrandRulesPath()
-            ' Ensure directory exists
+            ' Ensure directory exists (recursive, handles nested paths)
             Dim brandDir As String
-            Dim sep2 As String
-            sep2 = Application.PathSeparator
-            Dim lastSep As Long
-            lastSep = InStrRev(savePath, sep2)
-            If lastSep > 0 Then
-                brandDir = Left$(savePath, lastSep - 1)
-                On Error Resume Next
-                MkDir brandDir
-                Err.Clear
-                On Error GoTo 0
+            brandDir = modDebugLog.GetParentDirectory(savePath)
+            If Len(brandDir) > 0 Then
+                modDebugLog.EnsureDirectoryExists brandDir
             End If
             On Error Resume Next
             Dim saveOK As Boolean
@@ -3880,6 +3962,13 @@ Private Sub ExportReport(issues As Collection)
             If Right$(tmpDir, 1) = sep Then tmpDir = Left$(tmpDir, Len(tmpDir) - 1)
         #End If
         reportPath = tmpDir & sep & "pleadings_report.json"
+    End If
+
+    ' Ensure parent directory exists before writing
+    Dim reportDir As String
+    reportDir = modDebugLog.GetParentDirectory(reportPath)
+    If Len(reportDir) > 0 Then
+        modDebugLog.EnsureDirectoryExists reportDir
     End If
 
     Dim summary As String
