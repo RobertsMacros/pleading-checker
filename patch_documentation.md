@@ -508,7 +508,7 @@ End Function
 
 # Pleadings Checker VBA -- Targeted Audit Report
 
-**Date:** 2026-03-13 (pass 9)
+**Date:** 2026-03-13 (pass 10)
 **Scope:** All 20 modules in `Code/` (18,824 lines total, fully inspected)
 **Approach:** Targeted fixes only; no broad rewrites
 
@@ -884,3 +884,51 @@ No files were truncated or partially read. All line counts verified via `wc -l`.
 - `CheckManualNumbering` performance hotspot unchanged (needs caching validated under live conditions)
 - Broad OERN in paragraph-iteration loops (7 modules)
 - No unit-test harness
+
+---
+
+## Pass 10 — Targeted Fixes
+
+### Confirmed defects fixed
+
+**20. ProtectionType diagnostic labels were wrong in DebugLogDoc**
+- `-1` was labeled "None" — should be "NoProtection" (`wdNoProtection = -1`)
+- `3` was labeled "NoProtection" — should be "AllowOnlyReading" (`wdAllowOnlyReading = 3`)
+- This caused misleading diagnostic output when debugging document protection issues
+- Fixed: labels now match the actual `WdProtectionType` enum values, added `Case Else` for unknown values
+
+**21. ApplySuggestionsAsTrackedChanges could use prose as literal replacement text**
+- When `AutoFixSafe = True` but `ReplacementText` was blank, the code fell back to `Suggestion` as the literal replacement
+- `Suggestion` is human-readable prose (e.g. "Add or correct matching parenthesis"), not a replacement string
+- Using it as `rng.Text = sugText` would corrupt the document text with diagnostic prose
+- Fixed: when `ReplacementText` is blank, skip the text amendment entirely, add a comment instead, and log clearly via `TraceStep`
+
+**22. UserForm sizing was inconsistent between design-time and runtime**
+- `.frm` header had `ClientHeight=600` (too small) while runtime code resized to computed height
+- If Initialize errored before the sizing block, the form would appear at 600pt with controls clipped
+- Fixed: header restored to `ClientHeight=1000` (safe full-size default); runtime refines with `InsideHeight` from layout
+- Added `On Error Resume Next` fallback to `Me.Width`/`Me.Height` for very old VBA hosts that may not support `InsideWidth`/`InsideHeight`
+- Debug line now logs all four dimensions: `Width`, `Height`, `InsideWidth`, `InsideHeight`
+
+### Exact procedures/modules changed (pass 10)
+
+| Module | Procedure | Change |
+|--------|-----------|--------|
+| `modDebugLog.bas` | `DebugLogDoc` | Fixed `WdProtectionType` labels; `-1`=NoProtection, `3`=AllowOnlyReading; added `Case Else` |
+| `PleadingsEngine.bas` | `ApplySuggestionsAsTrackedChanges` | Removed `Suggestion`-as-replacement fallback; blank `ReplacementText` now skips amendment and adds comment |
+| `frmPleadingsChecker.frm` | `.frm` header | `ClientHeight` restored from 600 to 1000 |
+| `frmPleadingsChecker.frm` | `UserForm_Initialize` | `InsideWidth`/`InsideHeight` with `Width`/`Height` fallback; four-dimension debug line |
+
+### Areas verified and left unchanged
+
+- **Bracket suggestions**: `CreateBracketIssue` correctly handles `"()"`, `"[]"`, `"{}"` plus individual chars
+- **Export/log paths**: form and launcher both use `GetWritableTempDir` -> `GetParentDirectory` -> `EnsureDirectoryExists` chain consistently
+- **Debug log path**: derived from report path (same directory, different suffix) — parent directory always valid
+- **Whitespace validation gate**: unchanged; still guards deletions and replacements
+- **Comment behavior**: unchanged; `BuildCommentText` still appends `Suggestion` as human-readable text in comments
+
+### Remaining runtime-only uncertainties
+
+- `InsideWidth`/`InsideHeight` fallback to `Width`/`Height` is untested on Word 2007/2010
+- Rules with `AutoFixSafe = True` but no `ReplacementText` now produce comments instead of tracked changes — this is correct behavior but will change user experience for those rules
+- The four-dimension debug line assumes `Me.InsideWidth`/`Me.InsideHeight` are readable even after the `On Error GoTo 0` — if the property doesn't exist, the debug line itself would error (extremely unlikely on any supported Word version)

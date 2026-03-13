@@ -240,17 +240,14 @@ Public Sub DebugLogDoc(ByVal labelText As String, ByVal doc As Document)
     protType = -1
     protType = doc.ProtectionType: If Err.Number <> 0 Then protType = -1: Err.Clear
     info = info & " protection=" & protType
-    If protType = -1 Then
-        info = info & "(None)"
-    ElseIf protType = 0 Then
-        info = info & "(AllowOnlyRevisions)"
-    ElseIf protType = 1 Then
-        info = info & "(AllowOnlyComments)"
-    ElseIf protType = 2 Then
-        info = info & "(AllowOnlyFormFields)"
-    ElseIf protType = 3 Then
-        info = info & "(NoProtection)"
-    End If
+    Select Case protType
+        Case -1: info = info & "(NoProtection)"         ' wdNoProtection
+        Case 0:  info = info & "(AllowOnlyRevisions)"   ' wdAllowOnlyRevisions
+        Case 1:  info = info & "(AllowOnlyComments)"    ' wdAllowOnlyComments
+        Case 2:  info = info & "(AllowOnlyFormFields)"  ' wdAllowOnlyFormFields
+        Case 3:  info = info & "(AllowOnlyReading)"     ' wdAllowOnlyReading
+        Case Else: info = info & "(Unknown=" & protType & ")"
+    End Select
 
     ' Track revisions
     Dim trackRev As Boolean

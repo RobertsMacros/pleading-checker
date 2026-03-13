@@ -1352,10 +1352,20 @@ Public Sub ApplySuggestionsAsTrackedChanges(doc As Document, _
                     Dim sugText As String
                     origStart = rng.Start
                     origLen = rng.End - rng.Start
-                    ' Prefer ReplacementText (literal replacement) over Suggestion (human-readable)
+                    ' Use ReplacementText only.  Suggestion is human-readable
+                    ' prose and must NEVER be applied as literal replacement text.
                     sugText = ""
                     sugText = CStr(GetIssueProp(finding, "ReplacementText"))
-                    If Len(sugText) = 0 Then sugText = GetIssueProp(finding, "Suggestion")
+                    If Len(sugText) = 0 Then
+                        ' No machine-safe replacement -- skip amendment, add comment
+                        TraceStep "ApplyTrackedChanges", "NO ReplacementText for i=" & i & _
+                                  " rule=" & GetIssueProp(finding, "RuleName") & "; comment-only"
+                        If addComments Then
+                            TryAddComment doc, rng, BuildCommentText(finding), cmtRef, _
+                                "ApplyTrackedChanges", "no-replacement-comment i=" & i
+                        End If
+                        GoTo NextApplyIssue
+                    End If
 
                     ' --- WHITESPACE VALIDATION GATE ---
                     Dim origText As String

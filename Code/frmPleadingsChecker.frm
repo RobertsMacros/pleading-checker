@@ -1,7 +1,7 @@
 VERSION 5.00
 Begin {C62A69F0-16DC-11CE-9E98-00AA00574A4F} frmPleadingsChecker
    Caption         =   "Pleadings Checker"
-   ClientHeight    =   600
+   ClientHeight    =   1000
    ClientLeft      =   120
    ClientTop       =   465
    ClientWidth     =   1000
@@ -473,17 +473,26 @@ Private Sub UserForm_Initialize()
     RefreshBrandList
 
     ' -- Final form size based on layout ---
-    ' Use InsideWidth/InsideHeight (= client area) rather than
-    ' Width/Height (which include title bar and window chrome)
-    ' to guarantee the control layout fits without clipping.
+    ' Use InsideWidth/InsideHeight (= client area) so title-bar
+    ' chrome does not steal space from the control layout.
+    ' The .frm header sets ClientWidth/ClientHeight = 1000 as a
+    ' safe default if Initialize errors before reaching this point.
     Dim neededH As Single
     neededH = yPos + LBL_H + PAD   ' bottom of status label + padding
     If neededH < 400 Then neededH = 400  ' sensible minimum
 
+    On Error Resume Next          ' InsideWidth/InsideHeight may not exist on very old hosts
     Me.InsideWidth = FULL_W + 2 * PAD   ' = 1000
     Me.InsideHeight = neededH
-    Debug.Print "UserForm_Initialize: InsideWidth=" & Me.InsideWidth & _
-                " InsideHeight=" & Me.InsideHeight
+    If Err.Number <> 0 Then
+        Err.Clear
+        Me.Width = FULL_W + 2 * PAD
+        Me.Height = neededH
+    End If
+    On Error GoTo 0
+
+    Debug.Print "UserForm_Initialize: Width=" & Me.Width & " Height=" & Me.Height & _
+                " InsideWidth=" & Me.InsideWidth & " InsideHeight=" & Me.InsideHeight
 End Sub
 
 ' ============================================================
