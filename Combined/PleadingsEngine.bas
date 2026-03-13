@@ -1245,6 +1245,7 @@ Public Sub ApplyHighlights(doc As Document, _
                            issues As Collection, _
                            Optional addComments As Boolean = True)
     TraceEnter "ApplyHighlights"
+    DebugLogDoc "ApplyHighlights target", doc
     TraceStep "ApplyHighlights", issues.Count & " issues, addComments=" & addComments
 
     Dim finding As Object
@@ -1256,6 +1257,9 @@ Public Sub ApplyHighlights(doc As Document, _
     wasScreenUpdating = Application.ScreenUpdating
     Application.ScreenUpdating = False
 
+    Dim wasStatusBar As Variant
+    wasStatusBar = Application.StatusBar
+
     On Error GoTo HighlightCleanup
 
     For i = 1 To issues.Count
@@ -1266,19 +1270,35 @@ Public Sub ApplyHighlights(doc As Document, _
             If Err.Number = 0 Then
                 ' Apply yellow highlight to the flagged range
                 rng.HighlightColorIndex = wdYellow
-                If Err.Number <> 0 Then Err.Clear
+                If Err.Number <> 0 Then
+                    DebugLogError "ApplyHighlights", "highlight i=" & i, Err.Number, Err.Description
+                    Err.Clear
+                End If
                 If addComments Then
                     doc.Comments.Add Range:=rng, Text:=BuildCommentText(finding)
-                    If Err.Number <> 0 Then Err.Clear
+                    If Err.Number <> 0 Then
+                        DebugLogError "ApplyHighlights", "comment i=" & i, Err.Number, Err.Description
+                        Err.Clear
+                    End If
                 End If
+            Else
+                DebugLogError "ApplyHighlights", "doc.Range i=" & i & _
+                    " start=" & GetIssueProp(finding, "RangeStart") & _
+                    " end=" & GetIssueProp(finding, "RangeEnd"), Err.Number, Err.Description
+                Err.Clear
             End If
             On Error GoTo HighlightCleanup
+        Else
+            TraceStep "ApplyHighlights", "SKIPPED i=" & i & _
+                      " -- invalid range start=" & GetIssueProp(finding, "RangeStart") & _
+                      " end=" & GetIssueProp(finding, "RangeEnd")
         End If
     Next i
 
 HighlightCleanup:
     On Error Resume Next
     Application.ScreenUpdating = wasScreenUpdating
+    Application.StatusBar = wasStatusBar
     On Error GoTo 0
     TraceExit "ApplyHighlights"
 End Sub
@@ -1390,7 +1410,10 @@ Public Sub ApplySuggestionsAsTrackedChanges(doc As Document, _
                                   " orig=""" & Left$(origText, 30) & """ sug=""" & Left$(sugText, 30) & """"
                         If addComments Then
                             doc.Comments.Add Range:=rng, Text:=BuildCommentText(finding)
-                            Err.Clear
+                            If Err.Number <> 0 Then
+                                DebugLogError "ApplyTrackedChanges", "skip-comment i=" & i, Err.Number, Err.Description
+                                Err.Clear
+                            End If
                         End If
                         GoTo NextApplyIssue
                     End If
@@ -1407,6 +1430,10 @@ Public Sub ApplySuggestionsAsTrackedChanges(doc As Document, _
                 Else
                     If addComments Then
                         doc.Comments.Add Range:=rng, Text:=BuildCommentText(finding)
+                        If Err.Number <> 0 Then
+                            DebugLogError "ApplyTrackedChanges", "comment-only i=" & i, Err.Number, Err.Description
+                            Err.Clear
+                        End If
                     End If
                 End If
             End If
@@ -1450,6 +1477,9 @@ End Function
 Public Function GenerateReport(issues As Collection, _
                                 filePath As String, _
                                 Optional doc As Document = Nothing) As String
+    TraceEnter "GenerateReport"
+    TraceStep "GenerateReport", issues.Count & " issues, path=" & filePath
+
     Dim fileNum As Integer
     Dim finding As Object
     Dim i As Long
@@ -1472,8 +1502,10 @@ Public Function GenerateReport(issues As Collection, _
     If Err.Number <> 0 Then
         GenerateReport = "Error: could not write to " & filePath & _
                          " (Err " & Err.Number & ": " & Err.Description & ")"
+        DebugLogError "GenerateReport", "open " & filePath, Err.Number, Err.Description
         Err.Clear
         On Error GoTo 0
+        TraceExit "GenerateReport", "FAILED open"
         Exit Function
     End If
     On Error GoTo 0
@@ -1529,6 +1561,7 @@ Public Function GenerateReport(issues As Collection, _
     summaryStr = "Report saved: " & filePath & vbCrLf
     summaryStr = summaryStr & "Total issues: " & issues.Count
     GenerateReport = summaryStr
+    TraceExit "GenerateReport", issues.Count & " issues written"
     Exit Function
 
 ReportWriteErr:
@@ -1536,6 +1569,8 @@ ReportWriteErr:
     Close #fileNum
     On Error GoTo 0
     GenerateReport = "Error writing report: Err " & Err.Number & ": " & Err.Description
+    DebugLogError "GenerateReport", "write", Err.Number, Err.Description
+    TraceExit "GenerateReport", "FAILED"
 End Function
 
 ' ============================================================
