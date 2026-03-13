@@ -7,7 +7,6 @@ Attribute VB_Name = "Rules_Spacing"
 '   - Check_DoubleCommas      : Flag ",," sequences
 '   - Check_SpaceBeforePunct  : Flag "word ," patterns
 '   - Check_MissingSpaceAfterDot : Flag ".X" (missing space)
-'   - Check_TrailingSpaces    : Flag trailing spaces before paragraph marks
 '
 ' Dependencies:
 '   - PleadingsEngine.bas (IsInPageRange, GetLocationString,
@@ -19,7 +18,6 @@ Private Const RULE_DOUBLE_SPACES As String = "double_spaces"
 Private Const RULE_DOUBLE_COMMAS As String = "double_commas"
 Private Const RULE_SPACE_BEFORE_PUNCT As String = "space_before_punct"
 Private Const RULE_MISSING_SPACE_DOT As String = "missing_space_after_dot"
-Private Const RULE_TRAILING_SPACES As String = "trailing_spaces"
 
 ' Known abbreviations (delimited for InStr lookup)
 Private Const ABBREV_LIST As String = _
@@ -371,83 +369,6 @@ NextParaMSD:
     Set Check_MissingSpaceAfterDot = issues
 End Function
 
-' ============================================================
-'  PUBLIC: Check_TrailingSpaces
-'  Flags trailing spaces before paragraph marks.
-' ============================================================
-Public Function Check_TrailingSpaces(doc As Document) As Collection
-    Dim issues As New Collection
-    Dim para As Paragraph
-    Dim paraRange As Range
-    Dim finding As Object
-    Dim locStr As String
-
-    On Error Resume Next
-    For Each para In doc.Paragraphs
-        Err.Clear
-        Set paraRange = para.Range
-        If Err.Number <> 0 Then Err.Clear: GoTo NextParaTS
-
-        If Not EngineIsInPageRange(paraRange) Then GoTo NextParaTS
-
-        Dim t As String
-        t = StripParaMarkChar(paraRange.Text)
-        If Err.Number <> 0 Then Err.Clear: GoTo NextParaTS
-
-        If Len(t) > 0 And Right$(t, 1) = " " Then
-            ' Count trailing spaces
-            Dim numSpaces As Long
-            numSpaces = 0
-            Dim j As Long
-            For j = Len(t) To 1 Step -1
-                If Mid$(t, j, 1) = " " Then
-                    numSpaces = numSpaces + 1
-                Else
-                    Exit For
-                End If
-            Next j
-
-            If numSpaces > 0 Then
-                ' Trailing spaces sit just before the paragraph mark
-                Dim tsStart As Long
-                tsStart = paraRange.End - 1 - numSpaces
-                Dim tsEnd As Long
-                tsEnd = paraRange.End - 1
-
-                Err.Clear
-                Dim tsRng As Range
-                Set tsRng = doc.Range(tsStart, tsEnd)
-                If Err.Number <> 0 Then
-                    locStr = "unknown location"
-                    Err.Clear
-                Else
-                    locStr = EngineGetLocationString(tsRng, doc)
-                End If
-
-                Dim tsMsg As String
-                If numSpaces = 1 Then
-                    tsMsg = "Trailing space at end of paragraph."
-                Else
-                    tsMsg = numSpaces & " trailing spaces at end of paragraph."
-                End If
-
-                ' Store matched spaces as MatchedText for verification at apply time
-                Dim matchSpaces As String
-                matchSpaces = String(numSpaces, " ")
-                Set finding = CreateIssueDict(RULE_TRAILING_SPACES, locStr, _
-                    tsMsg, "Remove trailing space(s)", _
-                    tsStart, tsEnd, "warning", True, "", _
-                    matchSpaces, "whitespace_end", "high")
-                issues.Add finding
-            End If
-        End If
-
-NextParaTS:
-    Next para
-    On Error GoTo 0
-
-    Set Check_TrailingSpaces = issues
-End Function
 
 ' ============================================================
 '  PRIVATE HELPERS

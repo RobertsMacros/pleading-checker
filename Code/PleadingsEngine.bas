@@ -26,7 +26,7 @@ Attribute VB_Name = "PleadingsEngine"
 '   - Rules_FootnoteHarts.bas   (Rules 24, 25, 26, 27)
 '   - Rules_LegalTerms.bas      (Rules 28, 29)
 '   - Rules_Italics.bas         (Rules 30, 31)
-'   - Rules_Spacing.bas        (Rules 35-39: double spaces, commas, spacing)
+'   - Rules_Spacing.bas        (Rules 35-38: double spaces, commas, spacing)
 '
 ' Installation:
 '   1. Open the VBA Editor (Alt+F11)
@@ -242,7 +242,6 @@ Public Function InitRuleConfig() As Object
     cfg.Add "double_commas", True
     cfg.Add "space_before_punct", True
     cfg.Add "missing_space_after_dot", True
-    cfg.Add "trailing_spaces", True
 
     Set InitRuleConfig = cfg
 End Function
@@ -604,12 +603,6 @@ Public Function RunAllPleadingsRules(doc As Document, _
         PerfTimerEnd "missing_space_after_dot"
     End If
 
-    If IsRuleEnabled(config, "trailing_spaces") Then
-        PerfTimerStart "trailing_spaces"
-        AddIssuesToCollection allIssues, _
-            TryRunRule("Rules_Spacing.Check_TrailingSpaces", doc)
-        PerfTimerEnd "trailing_spaces"
-    End If
 
     DoEvents
     ' -- Numbering rules --
@@ -1777,7 +1770,6 @@ Public Function GetRuleDisplayNames() As Object
     d.Add "double_commas", "Double Commas"
     d.Add "space_before_punct", "Space Before Punctuation"
     d.Add "missing_space_after_dot", "Missing Space After Full Stop"
-    d.Add "trailing_spaces", "Trailing Spaces"
 
     Set GetRuleDisplayNames = d
 End Function
@@ -1970,7 +1962,14 @@ Private Sub AddIssuesToCollection(master As Collection, _
     Dim i As Long
     If ruleIssues Is Nothing Then Exit Sub
     For i = 1 To ruleIssues.Count
+        ' Defensive filter: drop any legacy trailing_spaces issues
+        If TypeName(ruleIssues(i)) = "Dictionary" Then
+            If ruleIssues(i).Exists("RuleName") Then
+                If ruleIssues(i)("RuleName") = "trailing_spaces" Then GoTo NextAddIssue
+            End If
+        End If
         master.Add ruleIssues(i)
+NextAddIssue:
     Next i
 End Sub
 
