@@ -47,6 +47,7 @@ Private termFormatPref As String   ' "BOLD", "BOLDITALIC", "ITALIC", or "NONE"
 Private termQuotePref  As String   ' "SINGLE" or "DOUBLE"
 Private spaceStylePref As String   ' "ONE" or "TWO"
 Private nonEngTermPref As String   ' "ITALICS" or "REGULAR"
+Private pageRangeString As String  ' Raw user-entered page-range spec (preserved for reports)
 Private ruleErrorCount  As Long
 Private ruleErrorLog    As String
 
@@ -139,13 +140,13 @@ Public Function GetTargetDocument() As Document
         prompt = prompt & idx & ". " & candidates(idx).Name & vbCrLf
     Next idx
 
-    Dim input As String
-    input = InputBox(prompt, "Pleadings Checker - Select Document", "1")
-    If Len(Trim(input)) = 0 Then Exit Function  ' cancelled
+    Dim selectionText As String
+    selectionText = InputBox(prompt, "Pleadings Checker - Select Document", "1")
+    If Len(Trim(selectionText)) = 0 Then Exit Function  ' cancelled
 
     Dim chosen As Long
-    If IsNumeric(input) Then
-        chosen = CLng(input)
+    If IsNumeric(selectionText) Then
+        chosen = CLng(selectionText)
         If chosen >= 1 And chosen <= candidates.Count Then
             Set GetTargetDocument = candidates(chosen)
         Else
@@ -157,8 +158,10 @@ Public Function GetTargetDocument() As Document
 End Function
 
 ' ============================================================
-'  QUICK RUN (fallback when launcher is not imported)
-'  Runs all available rules and shows summary via MsgBox.
+'  QUICK RUN (fallback when launcher/form is not imported)
+'  Prompts for target document via GetTargetDocument(), then
+'  asks for an optional page range before running all rules
+'  with UK spelling.  Shows summary via MsgBox.
 ' ============================================================
 Public Sub RunQuick()
     TraceEnter "RunQuick"
@@ -173,7 +176,13 @@ Public Sub RunQuick()
 
     Dim cfg As Object
     Set cfg = InitRuleConfig()
-    SetPageRange 0, 0
+
+    ' Prompt for page range (blank = all pages)
+    Dim pgInput As String
+    pgInput = InputBox("Page range (e.g. 1,3,5-8) or blank for all pages:", _
+                        "Pleadings Checker - Page Range", "")
+    SetPageRangeFromString Trim(pgInput)
+
     SetSpellingMode "UK"
 
     Dim issues As Collection
@@ -1502,15 +1511,22 @@ Public Function GenerateReport(issues As Collection, _
     Dim finding As Object
     Dim i As Long
 
-    ' Resolve document name from explicit doc parameter
+    ' Resolve document name and full path from explicit doc parameter
     Dim docName As String
+    Dim docFullPath As String
     On Error Resume Next
     If Not doc Is Nothing Then
         docName = doc.Name
+        If Len(doc.Path) > 0 Then
+            docFullPath = doc.FullName
+        Else
+            docFullPath = doc.Name
+        End If
     Else
         docName = "(no document)"
+        docFullPath = "(no document)"
     End If
-    If Err.Number <> 0 Then docName = "(unknown)": Err.Clear
+    If Err.Number <> 0 Then docName = "(unknown)": docFullPath = "(unknown)": Err.Clear
     On Error GoTo 0
 
     ' Open file with error handling
@@ -1530,8 +1546,15 @@ Public Function GenerateReport(issues As Collection, _
 
     On Error GoTo ReportWriteErr
 
+    ' Build page-range label for report
+    Dim prStr As String
+    prStr = pageRangeString
+    If Len(prStr) = 0 Then prStr = "all"
+
     Print #fileNum, "{"
     Print #fileNum, "  ""document"": """ & EscJSON(docName) & ""","
+    Print #fileNum, "  ""document_path"": """ & EscJSON(docFullPath) & ""","
+    Print #fileNum, "  ""page_range"": """ & EscJSON(prStr) & ""","
     Print #fileNum, "  ""timestamp"": """ & Format(Now, "yyyy-mm-ddThh:nn:ss") & ""","
     Print #fileNum, "  ""total_issues"": " & issues.Count & ","
 
@@ -1814,10 +1837,11 @@ Public Function ShouldCreateCommentForRule(ByVal ruleName As String, _
 End Function
 
 ' ============================================================
-'  CONFIG DRIFT VALIDATION (development helper)
+'  CONFIG DRIFT VALIDATION (development helper -- not user-facing)
 '  Call from Immediate window: PleadingsEngine.ValidateConfigDrift
-'  Prints any keys present in config but missing from display
-'  names, or vice versa.
+'  Compares config keys (InitRuleConfig) against display-name
+'  keys (GetRuleDisplayNames) and prints mismatches.  Useful
+'  after adding or renaming a rule to verify everything is wired.
 ' ============================================================
 Public Sub ValidateConfigDrift()
     Dim cfg As Object
@@ -1990,8 +2014,10 @@ Public Sub SetPageRange(startPage As Long, endPage As Long)
     ' Legacy compatibility: convert start/end to page set
     If startPage = 0 And endPage = 0 Then
         Set pageRangeSet = Nothing
+        pageRangeString = ""
         Exit Sub
     End If
+    pageRangeString = CStr(startPage) & "-" & CStr(endPage)
     Set pageRangeSet = CreateObject("Scripting.Dictionary")
     Dim pg As Long
     For pg = startPage To endPage
@@ -2002,6 +2028,7 @@ End Sub
 Public Sub SetPageRangeFromString(ByVal spec As String)
     ' Parse flexible page range specification
     spec = Trim(spec)
+    pageRangeString = spec  ' Preserve original for report metadata
     If Len(spec) = 0 Then
         Set pageRangeSet = Nothing
         Exit Sub
@@ -2057,6 +2084,10 @@ NextPart:
         Set pageRangeSet = Nothing
     End If
 End Sub
+
+Public Function GetPageRangeString() As String
+    GetPageRangeString = pageRangeString
+End Function
 
 Public Function GetRuleErrorCount() As Long
     GetRuleErrorCount = ruleErrorCount

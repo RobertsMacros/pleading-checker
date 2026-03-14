@@ -13,6 +13,9 @@ Private targetDoc As Document
 
 ' ============================================================
 '  MAIN LAUNCHER (called by PleadingsEngine.PleadingsChecker)
+'  User-facing entry point: prompts for target document, then
+'  offers Run / Options / Cancel.  All subsequent operations
+'  use the selected target document, not ActiveDocument.
 ' ============================================================
 Public Sub LaunchChecker()
     Set targetDoc = Application.Run("PleadingsEngine.GetTargetDocument")
