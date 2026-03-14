@@ -67,7 +67,10 @@ Private lastResults     As Collection
 Private targetDoc       As Document
 Private editingRuleIndex As Long     ' -1 = not editing; >= 0 = list index being edited
 Private variantsPlaceholderActive As Boolean
-Private pageRangePlaceholderActive As Boolean
+
+' Page range placeholder
+Private Const PAGE_RANGE_PLACEHOLDER As String = "e.g. 1,3,5-8,9:30"
+Private mPageRangeShowingPlaceholder As Boolean
 
 ' Custom rules data: parallel arrays for the single source of truth
 Private crEnabled()     As Boolean   ' Whether rule is active at runtime
@@ -83,7 +86,7 @@ Private crSortOrder()   As Long      ' Indices into cr* arrays for display
 Private Sub UserForm_Initialize()
     editingRuleIndex = -1
     variantsPlaceholderActive = False
-    pageRangePlaceholderActive = False
+    mPageRangeShowingPlaceholder = False
     crCount = 0
     crSortMode = 0
 
@@ -197,7 +200,7 @@ Private Sub UserForm_Initialize()
         .Left = colLeft + 36: .Top = yPos: .Width = leftW - 40: .Height = TXT_H
         .Text = ""
     End With
-    ShowPageRangePlaceholder
+    InitPageRangePlaceholder
 
     yPos = yPos + TXT_H + SEC_GAP
 
@@ -832,7 +835,7 @@ Private Sub btnRun_Click()
     SyncCustomRulesToEngine
 
     ' Set page range from flexible input (ignore placeholder text)
-    PleadingsEngine.SetPageRangeFromString GetPageRangeText()
+    PleadingsEngine.SetPageRangeFromString GetPageRangeInput()
 
     ' Set mode toggles from dropdowns
     If cboSpelling.ListIndex = 1 Then
@@ -1408,38 +1411,37 @@ End Function
 ' ============================================================
 '  PAGE RANGE PLACEHOLDER HELPERS
 ' ============================================================
-Private Sub ShowPageRangePlaceholder()
+Private Sub InitPageRangePlaceholder()
     If txtPageRange Is Nothing Then Exit Sub
-    If Len(Trim$(txtPageRange.Text)) = 0 Or pageRangePlaceholderActive Then
-        txtPageRange.Text = "e.g. 1,3,5-8,9:30"
-        txtPageRange.ForeColor = &HC0C0C0  ' light grey
-        pageRangePlaceholderActive = True
-    End If
+    With txtPageRange
+        .Text = PAGE_RANGE_PLACEHOLDER
+        .ForeColor = RGB(150, 150, 150)
+    End With
+    mPageRangeShowingPlaceholder = True
 End Sub
 
-Private Sub HidePageRangePlaceholder()
-    If pageRangePlaceholderActive Then
-        txtPageRange.Text = ""
-        txtPageRange.ForeColor = &H0  ' black
-        pageRangePlaceholderActive = False
-    End If
-End Sub
-
-Private Function GetPageRangeText() As String
-    If pageRangePlaceholderActive Then
-        GetPageRangeText = ""
+Public Function GetPageRangeInput() As String
+    If mPageRangeShowingPlaceholder Then
+        GetPageRangeInput = vbNullString
     Else
-        GetPageRangeText = Trim$(txtPageRange.Text)
+        GetPageRangeInput = Trim$(txtPageRange.Text)
     End If
 End Function
 
 Private Sub txtPageRange_Enter()
-    HidePageRangePlaceholder
+    If mPageRangeShowingPlaceholder Then
+        txtPageRange.Text = ""
+        txtPageRange.ForeColor = RGB(0, 0, 0)
+        mPageRangeShowingPlaceholder = False
+    End If
 End Sub
 
 Private Sub txtPageRange_Exit(ByVal Cancel As MSForms.ReturnBoolean)
     If Len(Trim$(txtPageRange.Text)) = 0 Then
-        ShowPageRangePlaceholder
+        InitPageRangePlaceholder
+    Else
+        txtPageRange.ForeColor = RGB(0, 0, 0)
+        mPageRangeShowingPlaceholder = False
     End If
 End Sub
 
