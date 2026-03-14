@@ -49,18 +49,23 @@ Private txtBrandCorrect As MSForms.TextBox
 Private WithEvents txtBrandIncorrect As MSForms.TextBox
 Private chkAddComments  As MSForms.CheckBox
 Private chkTrackedChanges As MSForms.CheckBox
-Private optSpellingUK   As MSForms.OptionButton
-Private optSpellingUS   As MSForms.OptionButton
-Private optQuoteSingle  As MSForms.OptionButton
-Private optQuoteDouble  As MSForms.OptionButton
-Private optSmart   As MSForms.OptionButton
-Private optSmartStraight As MSForms.OptionButton
-Private optDateUK       As MSForms.OptionButton
-Private optDateUS       As MSForms.OptionButton
+Private cboSpelling     As MSForms.ComboBox
+Private cboQuoteNesting As MSForms.ComboBox
+Private cboSmartQuotes  As MSForms.ComboBox
+Private cboDateFormat   As MSForms.ComboBox
+Private cboNonEngTerms  As MSForms.ComboBox
 Private cboTermFormat   As MSForms.ComboBox
 Private cboTermQuotes   As MSForms.ComboBox
 Private cboSpaceStyle   As MSForms.ComboBox
 Private lblStatus       As MSForms.Label
+
+' Custom Term Whitelist UI controls
+Private lstWhitelist    As MSForms.ListBox
+Private WithEvents btnAddWhitelist    As MSForms.CommandButton
+Private WithEvents btnRemoveWhitelist As MSForms.CommandButton
+Private WithEvents btnSaveWhitelist   As MSForms.CommandButton
+Private WithEvents btnLoadWhitelist   As MSForms.CommandButton
+Private txtWhitelistTerm As MSForms.TextBox
 
 Private lastResults     As Collection
 Private targetDoc       As Document
@@ -186,10 +191,10 @@ Private Sub UserForm_Initialize()
 
     yPos = yPos + TXT_H + SEC_GAP
 
-    ' ---- LEFT COLUMN: Brand Rules ----
+    ' ---- LEFT COLUMN: Custom Rules ----
     Set lbl = Me.Controls.Add("Forms.Label.1", "lblBrandHeader")
     With lbl
-        .Caption = "Brand Rules"
+        .Caption = "Custom Rules"
         .Left = colLeft: .Top = yPos: .Width = 120: .Height = LBL_H
         .Font.Size = 9: .Font.Bold = True
     End With
@@ -281,12 +286,88 @@ Private Sub UserForm_Initialize()
         .Font.Size = 7
     End With
 
+    yPos = yPos + TXT_H + SEC_GAP
+
+    ' ---- LEFT COLUMN: Custom Term Whitelist ----
+    Set lbl = Me.Controls.Add("Forms.Label.1", "lblWhitelistHeader")
+    With lbl
+        .Caption = "Custom Term Whitelist"
+        .Left = colLeft: .Top = yPos: .Width = 160: .Height = LBL_H
+        .Font.Size = 9: .Font.Bold = True
+    End With
+    yPos = yPos + LBL_H + ITEM_GAP
+
+    Dim wlListW As Single
+    wlListW = leftW - BTN_W - ITEM_GAP - 4
+
+    Set lstWhitelist = Me.Controls.Add("Forms.ListBox.1", "lstWhitelist")
+    With lstWhitelist
+        .Left = colLeft: .Top = yPos
+        .Width = wlListW: .Height = 48
+        .Font.Size = 7.5
+    End With
+
+    ' Whitelist action buttons (right of list, stacked)
+    Dim wlBtnX As Single
+    wlBtnX = colLeft + wlListW + ITEM_GAP
+    Dim wlBtnY As Single
+    wlBtnY = yPos
+
+    Set btnAddWhitelist = Me.Controls.Add("Forms.CommandButton.1", "btnAddWhitelist")
+    With btnAddWhitelist
+        .Caption = "Add"
+        .Left = wlBtnX: .Top = wlBtnY: .Width = BTN_W: .Height = BTN_H
+        .Font.Size = 7.5
+    End With
+    wlBtnY = wlBtnY + BTN_H + 1
+
+    Set btnRemoveWhitelist = Me.Controls.Add("Forms.CommandButton.1", "btnRemoveWhitelist")
+    With btnRemoveWhitelist
+        .Caption = "Remove"
+        .Left = wlBtnX: .Top = wlBtnY: .Width = BTN_W: .Height = BTN_H
+        .Font.Size = 7
+    End With
+
+    yPos = yPos + lstWhitelist.Height + ITEM_GAP
+
+    ' Whitelist input row: term + Save/Load
+    Set lbl = Me.Controls.Add("Forms.Label.1", "lblWhitelistTerm")
+    With lbl
+        .Caption = "Term:"
+        .Left = colLeft: .Top = yPos + 2: .Width = 32: .Height = LBL_H
+        .Font.Size = 7.5
+    End With
+
+    Set txtWhitelistTerm = Me.Controls.Add("Forms.TextBox.1", "txtWhitelistTerm")
+    With txtWhitelistTerm
+        .Left = colLeft + 32: .Top = yPos: .Width = leftW - 112: .Height = TXT_H
+        .Font.Size = 7.5
+    End With
+
+    Set btnSaveWhitelist = Me.Controls.Add("Forms.CommandButton.1", "btnSaveWhitelist")
+    With btnSaveWhitelist
+        .Caption = "Save"
+        .Left = colLeft + leftW - 76: .Top = yPos: .Width = 36: .Height = TXT_H
+        .Font.Size = 7
+    End With
+
+    Set btnLoadWhitelist = Me.Controls.Add("Forms.CommandButton.1", "btnLoadWhitelist")
+    With btnLoadWhitelist
+        .Caption = "Load"
+        .Left = colLeft + leftW - 38: .Top = yPos: .Width = 36: .Height = TXT_H
+        .Font.Size = 7
+    End With
+
     Dim leftBottomY As Single
     leftBottomY = yPos + TXT_H
 
     ' ---- RIGHT COLUMN: Options (starting from row3Top) ----
     Dim optY As Single
     optY = row3Top
+    Dim optW As Single
+    optW = FULL_W - leftW - SEC_GAP  ' available width for right column
+    Dim cboW As Single
+    cboW = optW - 92   ' dropdown width after label
 
     Set lbl = Me.Controls.Add("Forms.Label.1", "lblOptionsHeader")
     With lbl
@@ -314,59 +395,112 @@ Private Sub UserForm_Initialize()
     End With
     optY = optY + CHK_H + ITEM_GAP
 
-    ' Spelling mode
+    ' Spelling mode (dropdown)
     Set lbl = Me.Controls.Add("Forms.Label.1", "lblSpellingMode")
     With lbl
         .Caption = "Spelling:"
-        .Left = colRight: .Top = optY + 1: .Width = 52: .Height = LBL_H
+        .Left = colRight: .Top = optY + 2: .Width = 88: .Height = LBL_H
         .Font.Size = 7.5
     End With
 
-    Set optSpellingUK = Me.Controls.Add("Forms.OptionButton.1", "optSpellingUK")
-    With optSpellingUK
-        .Caption = "UK": .Left = colRight + 52: .Top = optY: .Width = 40: .Height = CHK_H
-        .Value = True: .GroupName = "SpellingMode": .Font.Size = 7.5
+    Set cboSpelling = Me.Controls.Add("Forms.ComboBox.1", "cboSpelling")
+    With cboSpelling
+        .Left = colRight + 90: .Top = optY: .Width = cboW: .Height = TXT_H
+        .Style = fmStyleDropDownList
+        .AddItem "UK"
+        .AddItem "US"
+        .ListIndex = 0
+        .Font.Size = 7.5
+    End With
+    optY = optY + TXT_H + ITEM_GAP
+
+    ' Primary quotation marks (dropdown)
+    Set lbl = Me.Controls.Add("Forms.Label.1", "lblQuoteNesting")
+    With lbl
+        .Caption = "Primary quotation marks:"
+        .Left = colRight: .Top = optY + 2: .Width = 88: .Height = LBL_H
+        .Font.Size = 7
     End With
 
-    Set optSpellingUS = Me.Controls.Add("Forms.OptionButton.1", "optSpellingUS")
-    With optSpellingUS
-        .Caption = "US": .Left = colRight + 94: .Top = optY: .Width = 40: .Height = CHK_H
-        .Value = False: .GroupName = "SpellingMode": .Font.Size = 7.5
+    Set cboQuoteNesting = Me.Controls.Add("Forms.ComboBox.1", "cboQuoteNesting")
+    With cboQuoteNesting
+        .Left = colRight + 90: .Top = optY: .Width = cboW: .Height = TXT_H
+        .Style = fmStyleDropDownList
+        .AddItem "Single"
+        .AddItem "Double"
+        .ListIndex = 0
+        .Font.Size = 7.5
     End With
-    optY = optY + CHK_H + ITEM_GAP
+    optY = optY + TXT_H + ITEM_GAP
 
-    ' Date format
+    ' Smart quotes (dropdown)
+    Set lbl = Me.Controls.Add("Forms.Label.1", "lblSmartQuotes")
+    With lbl
+        .Caption = "Smart quotes:"
+        .Left = colRight: .Top = optY + 2: .Width = 88: .Height = LBL_H
+        .Font.Size = 7.5
+    End With
+
+    Set cboSmartQuotes = Me.Controls.Add("Forms.ComboBox.1", "cboSmartQuotes")
+    With cboSmartQuotes
+        .Left = colRight + 90: .Top = optY: .Width = cboW: .Height = TXT_H
+        .Style = fmStyleDropDownList
+        .AddItem "Smart"
+        .AddItem "Straight"
+        .ListIndex = 0
+        .Font.Size = 7.5
+    End With
+    optY = optY + TXT_H + ITEM_GAP
+
+    ' Date format (dropdown with example text)
     Set lbl = Me.Controls.Add("Forms.Label.1", "lblDateFormat")
     With lbl
-        .Caption = "Date:"
-        .Left = colRight: .Top = optY + 1: .Width = 52: .Height = LBL_H
+        .Caption = "Date format:"
+        .Left = colRight: .Top = optY + 2: .Width = 88: .Height = LBL_H
         .Font.Size = 7.5
     End With
 
-    Set optDateUK = Me.Controls.Add("Forms.OptionButton.1", "optDateUK")
-    With optDateUK
-        .Caption = "UK": .Left = colRight + 52: .Top = optY: .Width = 40: .Height = CHK_H
-        .Value = True: .GroupName = "DateFormat": .Font.Size = 7.5
+    Set cboDateFormat = Me.Controls.Add("Forms.ComboBox.1", "cboDateFormat")
+    With cboDateFormat
+        .Left = colRight + 90: .Top = optY: .Width = cboW + 46: .Height = TXT_H
+        .Style = fmStyleDropDownList
+        .AddItem "UK (e.g. 14 March 2026)"
+        .AddItem "US (e.g. March 14, 2026)"
+        .ListIndex = 0
+        .Font.Size = 7.5
+    End With
+    optY = optY + TXT_H + ITEM_GAP
+
+    ' Non-English Terms (dropdown)
+    Set lbl = Me.Controls.Add("Forms.Label.1", "lblNonEngTerms")
+    With lbl
+        .Caption = "Non-English Terms:"
+        .Left = colRight: .Top = optY + 2: .Width = 88: .Height = LBL_H
+        .Font.Size = 7.5
     End With
 
-    Set optDateUS = Me.Controls.Add("Forms.OptionButton.1", "optDateUS")
-    With optDateUS
-        .Caption = "US": .Left = colRight + 94: .Top = optY: .Width = 40: .Height = CHK_H
-        .Value = False: .GroupName = "DateFormat": .Font.Size = 7.5
+    Set cboNonEngTerms = Me.Controls.Add("Forms.ComboBox.1", "cboNonEngTerms")
+    With cboNonEngTerms
+        .Left = colRight + 90: .Top = optY: .Width = cboW: .Height = TXT_H
+        .Style = fmStyleDropDownList
+        .AddItem "Italics"
+        .AddItem "Regular text"
+        .ListIndex = 0
+        .Font.Size = 7.5
     End With
-    optY = optY + CHK_H + ITEM_GAP
+    optY = optY + TXT_H + ITEM_GAP
 
-    ' After full stop spacing
+    ' After full stop spacing (dropdown)
     Set lbl = Me.Controls.Add("Forms.Label.1", "lblSpaceStyle")
     With lbl
         .Caption = "After full stop:"
-        .Left = colRight: .Top = optY + 1: .Width = 72: .Height = LBL_H
+        .Left = colRight: .Top = optY + 2: .Width = 88: .Height = LBL_H
         .Font.Size = 7.5
     End With
 
     Set cboSpaceStyle = Me.Controls.Add("Forms.ComboBox.1", "cboSpaceStyle")
     With cboSpaceStyle
-        .Left = colRight + 72: .Top = optY: .Width = 80: .Height = TXT_H
+        .Left = colRight + 90: .Top = optY: .Width = cboW: .Height = TXT_H
         .Style = fmStyleDropDownList
         .AddItem "One space"
         .AddItem "Two spaces"
@@ -375,53 +509,11 @@ Private Sub UserForm_Initialize()
     End With
     optY = optY + TXT_H + ITEM_GAP
 
-    ' Outer quotes
-    Set lbl = Me.Controls.Add("Forms.Label.1", "lblQuoteNesting")
-    With lbl
-        .Caption = "Outer quotes:"
-        .Left = colRight: .Top = optY + 1: .Width = 72: .Height = LBL_H
-        .Font.Size = 7.5
-    End With
-
-    Set optQuoteSingle = Me.Controls.Add("Forms.OptionButton.1", "optQuoteSingle")
-    With optQuoteSingle
-        .Caption = "Single": .Left = colRight + 72: .Top = optY: .Width = 50: .Height = CHK_H
-        .Value = True: .GroupName = "QuoteNesting": .Font.Size = 7.5
-    End With
-
-    Set optQuoteDouble = Me.Controls.Add("Forms.OptionButton.1", "optQuoteDouble")
-    With optQuoteDouble
-        .Caption = "Double": .Left = colRight + 124: .Top = optY: .Width = 50: .Height = CHK_H
-        .Value = False: .GroupName = "QuoteNesting": .Font.Size = 7.5
-    End With
-    optY = optY + CHK_H + ITEM_GAP
-
-    ' Smart quotes
-    Set lbl = Me.Controls.Add("Forms.Label.1", "lblSmartQuotes")
-    With lbl
-        .Caption = "Smart quotes:"
-        .Left = colRight: .Top = optY + 1: .Width = 72: .Height = LBL_H
-        .Font.Size = 7.5
-    End With
-
-    Set optSmart = Me.Controls.Add("Forms.OptionButton.1", "optSmart")
-    With optSmart
-        .Caption = "Smart": .Left = colRight + 72: .Top = optY: .Width = 50: .Height = CHK_H
-        .Value = True: .GroupName = "SmartQuotes": .Font.Size = 7.5
-    End With
-
-    Set optSmartStraight = Me.Controls.Add("Forms.OptionButton.1", "optSmartStraight")
-    With optSmartStraight
-        .Caption = "Straight": .Left = colRight + 124: .Top = optY: .Width = 56: .Height = CHK_H
-        .Value = False: .GroupName = "SmartQuotes": .Font.Size = 7.5
-    End With
-    optY = optY + CHK_H + ITEM_GAP
-
-    ' Defined terms
+    ' Defined terms (format + quotes dropdowns)
     Set lbl = Me.Controls.Add("Forms.Label.1", "lblDefinedTerms")
     With lbl
         .Caption = "Def. terms:"
-        .Left = colRight: .Top = optY + 1: .Width = 56: .Height = LBL_H
+        .Left = colRight: .Top = optY + 2: .Width = 56: .Height = LBL_H
         .Font.Size = 7.5
     End With
 
@@ -441,7 +533,7 @@ Private Sub UserForm_Initialize()
     Set lblAnd = Me.Controls.Add("Forms.Label.1", "lblTermAnd")
     With lblAnd
         .Caption = "+"
-        .Left = colRight + 128: .Top = optY + 1: .Width = 10: .Height = LBL_H
+        .Left = colRight + 128: .Top = optY + 2: .Width = 10: .Height = LBL_H
         .Font.Size = 7.5
     End With
 
@@ -500,8 +592,9 @@ Private Sub UserForm_Initialize()
         .Font.Size = 8
     End With
 
-    ' -- Load brand list ---------------------------------------
+    ' -- Load brand list and whitelist ---------------------------
     RefreshBrandList
+    RefreshWhitelistList
 
     ' -- Final form size based on layout ---
     Dim neededH As Single
@@ -597,29 +690,36 @@ Private Sub btnRun_Click()
     ' Set page range from flexible input (ignore placeholder text)
     PleadingsEngine.SetPageRangeFromString GetPageRangeText()
 
-    ' Set mode toggles
-    If optSpellingUS.Value Then
+    ' Set mode toggles from dropdowns
+    If cboSpelling.ListIndex = 1 Then
         PleadingsEngine.SetSpellingMode "US"
     Else
         PleadingsEngine.SetSpellingMode "UK"
     End If
 
-    If optQuoteDouble.Value Then
+    If cboQuoteNesting.ListIndex = 1 Then
         PleadingsEngine.SetQuoteNesting "DOUBLE"
     Else
         PleadingsEngine.SetQuoteNesting "SINGLE"
     End If
 
-    If optSmartStraight.Value Then
+    If cboSmartQuotes.ListIndex = 1 Then
         PleadingsEngine.SetSmartQuotePref "STRAIGHT"
     Else
         PleadingsEngine.SetSmartQuotePref "SMART"
     End If
 
-    If optDateUS.Value Then
+    If cboDateFormat.ListIndex = 1 Then
         PleadingsEngine.SetDateFormatPref "US"
     Else
         PleadingsEngine.SetDateFormatPref "UK"
+    End If
+
+    ' Set non-English terms preference
+    If cboNonEngTerms.ListIndex = 1 Then
+        PleadingsEngine.SetNonEngTermPref "REGULAR"
+    Else
+        PleadingsEngine.SetNonEngTermPref "ITALICS"
     End If
 
     ' Set defined term detection preferences
@@ -822,7 +922,7 @@ Private Sub btnDeselectAll_Click()
 End Sub
 
 ' ============================================================
-'  BRAND RULES MANAGEMENT
+'  CUSTOM RULES MANAGEMENT
 ' ============================================================
 Private Sub RefreshBrandList()
     lstBrands.Clear
@@ -850,14 +950,14 @@ Private Sub btnAddBrand_Click()
 
     If correctForm = "" Or incorrectVariants = "" Then
         MsgBox "Enter both the correct form and at least one incorrect variant.", _
-               vbExclamation, "Brand Rules"
+               vbExclamation, "Custom Rules"
         Exit Sub
     End If
 
     ' Normalise comma-separated variants: trim and remove blanks
     incorrectVariants = NormaliseBrandVariants(incorrectVariants)
     If Len(incorrectVariants) = 0 Then
-        MsgBox "Enter at least one incorrect variant.", vbExclamation, "Brand Rules"
+        MsgBox "Enter at least one incorrect variant.", vbExclamation, "Custom Rules"
         Exit Sub
     End If
 
@@ -878,7 +978,7 @@ Private Sub btnAddBrand_Click()
     On Error Resume Next
     Application.Run "Rules_Brands.AddBrandRule", correctForm, incorrectVariants
     If Err.Number <> 0 Then
-        MsgBox "Brand rules module not loaded.", vbExclamation, "Brand Rules"
+        MsgBox "Brand rules module not loaded.", vbExclamation, "Custom Rules"
         Err.Clear
     End If
     On Error GoTo 0
@@ -891,7 +991,7 @@ End Sub
 
 Private Sub btnRemoveBrand_Click()
     If lstBrands.ListIndex < 0 Then
-        MsgBox "Select a brand rule to remove.", vbExclamation, "Brand Rules"
+        MsgBox "Select a brand rule to remove.", vbExclamation, "Custom Rules"
         Exit Sub
     End If
 
@@ -910,7 +1010,7 @@ End Sub
 
 Private Sub btnEditBrand_Click()
     If lstBrands.ListIndex < 0 Then
-        MsgBox "Please select a rule to edit.", vbInformation, "Brand Rules"
+        MsgBox "Please select a rule to edit.", vbInformation, "Custom Rules"
         Exit Sub
     End If
 
@@ -1039,7 +1139,7 @@ Private Sub btnSaveBrands_Click()
     saveResult = Application.Run("Rules_Brands.SaveBrandRules", brandFile)
     If Err.Number <> 0 Then
         MsgBox "Brand rules module not loaded." & vbCrLf & _
-               "Error: " & Err.Description, vbExclamation, "Brand Rules"
+               "Error: " & Err.Description, vbExclamation, "Custom Rules"
         Err.Clear
         On Error GoTo 0
         Exit Sub
@@ -1047,10 +1147,10 @@ Private Sub btnSaveBrands_Click()
     On Error GoTo 0
 
     If saveResult Then
-        MsgBox "Brand rules saved to:" & vbCrLf & brandFile, vbInformation, "Brand Rules"
+        MsgBox "Brand rules saved to:" & vbCrLf & brandFile, vbInformation, "Custom Rules"
     Else
         MsgBox "Failed to save brand rules to:" & vbCrLf & brandFile & vbCrLf & _
-               "Check the file path is writable.", vbExclamation, "Brand Rules"
+               "Check the file path is writable.", vbExclamation, "Custom Rules"
     End If
 End Sub
 
@@ -1067,7 +1167,7 @@ Private Sub btnLoadBrands_Click()
         fallbackPath = GetBrandRulesPath()
         If Dir(fallbackPath) = "" Then
             MsgBox "No saved brand rules found at:" & vbCrLf & fallbackPath, _
-                   vbExclamation, "Brand Rules"
+                   vbExclamation, "Custom Rules"
             Exit Sub
         End If
         LoadBrandRulesFromPath fallbackPath
@@ -1097,7 +1197,7 @@ Private Sub LoadBrandRulesFromPath(ByVal filePath As String)
     loadResult = Application.Run("Rules_Brands.LoadBrandRules", filePath)
     If Err.Number <> 0 Then
         MsgBox "Brand rules module not loaded." & vbCrLf & _
-               "Error: " & Err.Description, vbExclamation, "Brand Rules"
+               "Error: " & Err.Description, vbExclamation, "Custom Rules"
         Err.Clear
         On Error GoTo 0
         Exit Sub
@@ -1106,10 +1206,10 @@ Private Sub LoadBrandRulesFromPath(ByVal filePath As String)
 
     RefreshBrandList
     If loadResult Then
-        MsgBox "Brand rules loaded from:" & vbCrLf & filePath, vbInformation, "Brand Rules"
+        MsgBox "Brand rules loaded from:" & vbCrLf & filePath, vbInformation, "Custom Rules"
     Else
         MsgBox "Brand rules file could not be read:" & vbCrLf & filePath, _
-               vbExclamation, "Brand Rules"
+               vbExclamation, "Custom Rules"
     End If
 End Sub
 
@@ -1131,6 +1231,169 @@ Private Function GetBrandRulesPath() As String
                                 "Application Support" & sep & "PleadingsChecker" & sep & "brand_rules.txt"
         #Else
             GetBrandRulesPath = Environ("APPDATA") & sep & "PleadingsChecker" & sep & "brand_rules.txt"
+        #End If
+        Exit Function
+    End If
+    On Error GoTo 0
+End Function
+
+' ============================================================
+'  CUSTOM TERM WHITELIST MANAGEMENT
+' ============================================================
+Private Sub RefreshWhitelistList()
+    lstWhitelist.Clear
+    On Error Resume Next
+    Dim terms As Object
+    Set terms = Application.Run("Rules_Terms.GetWhitelistTerms")
+    If Err.Number <> 0 Then
+        Err.Clear
+        On Error GoTo 0
+        Exit Sub
+    End If
+    On Error GoTo 0
+    If terms Is Nothing Then Exit Sub
+    Dim key As Variant
+    For Each key In terms.keys
+        lstWhitelist.AddItem CStr(key)
+    Next key
+End Sub
+
+Private Sub btnAddWhitelist_Click()
+    Dim term As String
+    term = Trim(txtWhitelistTerm.Text)
+    If Len(term) = 0 Then
+        MsgBox "Enter a term to add.", vbExclamation, "Custom Term Whitelist"
+        Exit Sub
+    End If
+
+    On Error Resume Next
+    Application.Run "Rules_Terms.AddWhitelistTerm", term
+    If Err.Number <> 0 Then
+        MsgBox "Whitelist module not loaded.", vbExclamation, "Custom Term Whitelist"
+        Err.Clear
+    End If
+    On Error GoTo 0
+
+    txtWhitelistTerm.Text = ""
+    RefreshWhitelistList
+End Sub
+
+Private Sub btnRemoveWhitelist_Click()
+    If lstWhitelist.ListIndex < 0 Then
+        MsgBox "Select a term to remove.", vbExclamation, "Custom Term Whitelist"
+        Exit Sub
+    End If
+
+    Dim term As String
+    term = lstWhitelist.List(lstWhitelist.ListIndex)
+
+    On Error Resume Next
+    Application.Run "Rules_Terms.RemoveWhitelistTerm", term
+    If Err.Number <> 0 Then Err.Clear
+    On Error GoTo 0
+
+    RefreshWhitelistList
+End Sub
+
+Private Sub btnSaveWhitelist_Click()
+    Dim wlFile As String
+    wlFile = GetWhitelistPath()
+
+    Dim wlDir As String
+    wlDir = GetParentDirectory(wlFile)
+    If Len(wlDir) > 0 Then
+        EnsureDirectoryExists wlDir
+    End If
+
+    Dim saveResult As Boolean
+    On Error Resume Next
+    saveResult = Application.Run("Rules_Terms.SaveWhitelistTerms", wlFile)
+    If Err.Number <> 0 Then
+        MsgBox "Whitelist module not loaded." & vbCrLf & _
+               "Error: " & Err.Description, vbExclamation, "Custom Term Whitelist"
+        Err.Clear
+        On Error GoTo 0
+        Exit Sub
+    End If
+    On Error GoTo 0
+
+    If saveResult Then
+        MsgBox "Whitelist saved to:" & vbCrLf & wlFile, vbInformation, "Custom Term Whitelist"
+    Else
+        MsgBox "Failed to save whitelist to:" & vbCrLf & wlFile, vbExclamation, "Custom Term Whitelist"
+    End If
+End Sub
+
+Private Sub btnLoadWhitelist_Click()
+    Dim fd As Object
+    On Error Resume Next
+    Set fd = Application.FileDialog(3)
+    If Err.Number <> 0 Then
+        Err.Clear
+        On Error GoTo 0
+        Dim fallbackPath As String
+        fallbackPath = GetWhitelistPath()
+        If Dir(fallbackPath) = "" Then
+            MsgBox "No saved whitelist found at:" & vbCrLf & fallbackPath, _
+                   vbExclamation, "Custom Term Whitelist"
+            Exit Sub
+        End If
+        LoadWhitelistFromPath fallbackPath
+        Exit Sub
+    End If
+    On Error GoTo 0
+
+    With fd
+        .Title = "Load Custom Term Whitelist"
+        .AllowMultiSelect = False
+        On Error Resume Next
+        .Filters.Clear
+        .Filters.Add "Text Files", "*.txt"
+        .Filters.Add "All Files", "*.*"
+        If Err.Number <> 0 Then Err.Clear
+        On Error GoTo 0
+
+        If .Show = -1 Then
+            LoadWhitelistFromPath CStr(.SelectedItems(1))
+        End If
+    End With
+End Sub
+
+Private Sub LoadWhitelistFromPath(ByVal filePath As String)
+    Dim loadResult As Boolean
+    On Error Resume Next
+    loadResult = Application.Run("Rules_Terms.LoadWhitelistTerms", filePath)
+    If Err.Number <> 0 Then
+        MsgBox "Whitelist module not loaded." & vbCrLf & _
+               "Error: " & Err.Description, vbExclamation, "Custom Term Whitelist"
+        Err.Clear
+        On Error GoTo 0
+        Exit Sub
+    End If
+    On Error GoTo 0
+
+    RefreshWhitelistList
+    If loadResult Then
+        MsgBox "Whitelist loaded from:" & vbCrLf & filePath, vbInformation, "Custom Term Whitelist"
+    Else
+        MsgBox "Whitelist file could not be read:" & vbCrLf & filePath, _
+               vbExclamation, "Custom Term Whitelist"
+    End If
+End Sub
+
+Private Function GetWhitelistPath() As String
+    On Error Resume Next
+    GetWhitelistPath = Application.Run("Rules_Terms.GetDefaultWhitelistPath")
+    If Err.Number <> 0 Then
+        Err.Clear
+        On Error GoTo 0
+        Dim sep As String
+        sep = Application.PathSeparator
+        #If Mac Then
+            GetWhitelistPath = Environ("HOME") & sep & "Library" & sep & _
+                                "Application Support" & sep & "PleadingsChecker" & sep & "whitelist.txt"
+        #Else
+            GetWhitelistPath = Environ("APPDATA") & sep & "PleadingsChecker" & sep & "whitelist.txt"
         #End If
         Exit Function
     End If

@@ -57,6 +57,7 @@ Public Function Check_RepeatedWords(doc As Document) As Collection
         End If
 
         ' Skip paragraphs outside the configured page range
+        If EngineIsPastPageFilter(paraRange.Start) Then Exit For
         If Not EngineIsInPageRange(paraRange) Then
             GoTo NextParagraph_RW
         End If
@@ -211,6 +212,7 @@ Public Function Check_SpellOutUnderTen(doc As Document) As Collection
         End If
 
         ' Skip paragraphs outside the configured page range
+        If EngineIsPastPageFilter(paraRange.Start) Then Exit For
         If Not EngineIsInPageRange(paraRange) Then
             GoTo NextParagraph_SO
         End If
@@ -1025,6 +1027,19 @@ Private Function EngineGetLocationString(rng As Object, doc As Document) As Stri
     If Err.Number <> 0 Then
         Debug.Print "EngineGetLocationString: fallback (Err " & Err.Number & ": " & Err.Description & ")"
         EngineGetLocationString = "unknown location"
+        Err.Clear
+    End If
+    On Error GoTo 0
+End Function
+
+' ----------------------------------------------------------------
+'  Late-bound wrapper: PleadingsEngine.IsPastPageFilter
+' ----------------------------------------------------------------
+Private Function EngineIsPastPageFilter(ByVal startPos As Long) As Boolean
+    On Error Resume Next
+    EngineIsPastPageFilter = Application.Run("PleadingsEngine.IsPastPageFilter", startPos)
+    If Err.Number <> 0 Then
+        EngineIsPastPageFilter = False
         Err.Clear
     End If
     On Error GoTo 0

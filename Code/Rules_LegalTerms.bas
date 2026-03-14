@@ -187,6 +187,7 @@ Public Function Check_AlwaysCapitaliseTerms(doc As Document) As Collection
         On Error GoTo 0
 
         ' Check page range filter
+        If EngineIsPastPageFilter(paraRng.Start) Then Exit For
         If Not EngineIsInPageRange(paraRng) Then GoTo NextPara
 
         paraText = paraRng.Text
@@ -474,6 +475,19 @@ Private Function EngineGetLocationString(rng As Object, doc As Document) As Stri
     If Err.Number <> 0 Then
         Debug.Print "EngineGetLocationString: fallback (Err " & Err.Number & ": " & Err.Description & ")"
         EngineGetLocationString = "unknown location"
+        Err.Clear
+    End If
+    On Error GoTo 0
+End Function
+
+' ----------------------------------------------------------------
+'  Late-bound wrapper: PleadingsEngine.IsPastPageFilter
+' ----------------------------------------------------------------
+Private Function EngineIsPastPageFilter(ByVal startPos As Long) As Boolean
+    On Error Resume Next
+    EngineIsPastPageFilter = Application.Run("PleadingsEngine.IsPastPageFilter", startPos)
+    If Err.Number <> 0 Then
+        EngineIsPastPageFilter = False
         Err.Clear
     End If
     On Error GoTo 0

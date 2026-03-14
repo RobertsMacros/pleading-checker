@@ -139,6 +139,7 @@ Public Function Check_AnglicisedTermsNotItalic(doc As Document) As Collection
         ' Skip paragraphs outside the configured page range
         On Error Resume Next
         Dim inRange As Boolean
+        If EngineIsPastPageFilter(para.Range.Start) Then Exit For
         inRange = EngineIsInPageRange(para.Range)
         If Err.Number <> 0 Then inRange = True: Err.Clear
         On Error GoTo 0
@@ -252,6 +253,7 @@ Public Function Check_ForeignNamesNotItalic(doc As Document) As Collection
     For Each para In doc.Paragraphs
         On Error Resume Next
         Dim inRange31 As Boolean
+        If EngineIsPastPageFilter(para.Range.Start) Then Exit For
         inRange31 = EngineIsInPageRange(para.Range)
         If Err.Number <> 0 Then inRange31 = True: Err.Clear
         On Error GoTo 0
@@ -389,4 +391,17 @@ Private Function MergeArrays(a1 As Variant, a2 As Variant, a3 As Variant) As Var
     For Each v In a2: out(idx) = v: idx = idx + 1: Next v
     For Each v In a3: out(idx) = v: idx = idx + 1: Next v
     MergeArrays = out
+End Function
+
+' ----------------------------------------------------------------
+'  Late-bound wrapper: PleadingsEngine.IsPastPageFilter
+' ----------------------------------------------------------------
+Private Function EngineIsPastPageFilter(ByVal startPos As Long) As Boolean
+    On Error Resume Next
+    EngineIsPastPageFilter = Application.Run("PleadingsEngine.IsPastPageFilter", startPos)
+    If Err.Number <> 0 Then
+        EngineIsPastPageFilter = False
+        Err.Clear
+    End If
+    On Error GoTo 0
 End Function

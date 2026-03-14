@@ -62,6 +62,7 @@ Public Function Check_DoubleSpaces(doc As Document) As Collection
         Set paraRange = para.Range
         If Err.Number <> 0 Then Err.Clear: GoTo NextParaDS
 
+        If EngineIsPastPageFilter(paraRange.Start) Then Exit For
         If Not EngineIsInPageRange(paraRange) Then GoTo NextParaDS
 
         ' Block quotes are filtered at engine level by FilterBlockQuoteIssues.
@@ -199,6 +200,7 @@ Public Function Check_DoubleCommas(doc As Document) As Collection
         Set paraRange = para.Range
         If Err.Number <> 0 Then Err.Clear: GoTo NextParaDC
 
+        If EngineIsPastPageFilter(paraRange.Start) Then Exit For
         If Not EngineIsInPageRange(paraRange) Then GoTo NextParaDC
 
         paraText = paraRange.Text
@@ -320,6 +322,7 @@ Public Function Check_MissingSpaceAfterDot(doc As Document) As Collection
         Set paraRange = para.Range
         If Err.Number <> 0 Then Err.Clear: GoTo NextParaMSD
 
+        If EngineIsPastPageFilter(paraRange.Start) Then Exit For
         If Not EngineIsInPageRange(paraRange) Then GoTo NextParaMSD
 
         paraText = StripParaMarkChar(paraRange.Text)
@@ -544,6 +547,22 @@ Private Function EngineGetLocationString(rng As Object, doc As Document) As Stri
     If Err.Number <> 0 Then
         Debug.Print "EngineGetLocationString: fallback (Err " & Err.Number & ": " & Err.Description & ")"
         EngineGetLocationString = "unknown location"
+        Err.Clear
+    End If
+    On Error GoTo 0
+End Function
+
+' ----------------------------------------------------------------
+'  Late-bound wrapper: PleadingsEngine.GetSpaceStylePref
+' ----------------------------------------------------------------
+' ----------------------------------------------------------------
+'  Late-bound wrapper: PleadingsEngine.IsPastPageFilter
+' ----------------------------------------------------------------
+Private Function EngineIsPastPageFilter(ByVal startPos As Long) As Boolean
+    On Error Resume Next
+    EngineIsPastPageFilter = Application.Run("PleadingsEngine.IsPastPageFilter", startPos)
+    If Err.Number <> 0 Then
+        EngineIsPastPageFilter = False
         Err.Clear
     End If
     On Error GoTo 0

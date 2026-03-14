@@ -46,8 +46,14 @@ Private dateFormatPref As String   ' "UK" or "US" or "AUTO"
 Private termFormatPref As String   ' "BOLD", "BOLDITALIC", "ITALIC", or "NONE"
 Private termQuotePref  As String   ' "SINGLE" or "DOUBLE"
 Private spaceStylePref As String   ' "ONE" or "TWO"
+Private nonEngTermPref As String   ' "ITALICS" or "REGULAR"
 Private ruleErrorCount  As Long
 Private ruleErrorLog    As String
+
+' -- Precomputed page-filter boundaries (set once per run) --
+Private gPageFilterEnabled   As Boolean
+Private gPageFilterStartPos  As Long
+Private gPageFilterEndPos    As Long
 
 ' -- Profiling infrastructure --
 Public Const ENABLE_PROFILING As Boolean = True
@@ -275,6 +281,19 @@ End Sub
 Public Function GetSpaceStylePref() As String
     If Len(spaceStylePref) = 0 Then spaceStylePref = "ONE"
     GetSpaceStylePref = spaceStylePref
+End Function
+
+' ============================================================
+'  NON-ENGLISH TERMS FORMAT PREFERENCE (italics or regular text)
+' ============================================================
+Public Sub SetNonEngTermPref(ByVal mode As String)
+    nonEngTermPref = UCase(Trim(mode))
+    If nonEngTermPref <> "REGULAR" Then nonEngTermPref = "ITALICS"
+End Sub
+
+Public Function GetNonEngTermPref() As String
+    If Len(nonEngTermPref) = 0 Then nonEngTermPref = "ITALICS"
+    GetNonEngTermPref = nonEngTermPref
 End Function
 
 ' ============================================================
@@ -594,6 +613,9 @@ Public Function RunAllPleadingsRules(doc As Document, _
 
     ' -- Build paragraph position cache (one scan, enables O(log N) lookups) --
     BuildParagraphCache doc
+
+    ' -- Precompute page-range character boundaries (one-time, cheap thereafter) --
+    InitPageFilter doc
 
     ' -- Whitelist rule first (populates whitelistDict) --
     If IsRuleEnabled(config, "custom_term_whitelist") Then
@@ -1690,10 +1712,10 @@ Public Function GetRuleDisplayNames() As Object
     d.Add "repeated_words", "Repeated Words"
     d.Add "custom_term_whitelist", "Custom Term Whitelist"
     d.Add "date_time_format", "Date/Time Format"
-    d.Add "punctuation", "Punctuation"
+    d.Add "punctuation", "Punctuation Checker"
     d.Add "currency_number_format", "Currency/Number Formatting"
     d.Add "footnote_rules", "Footnote Rules"
-    d.Add "brand_name_enforcement", "Brand Name Enforcement"
+    d.Add "brand_name_enforcement", "Custom Rules"
     d.Add "mandated_legal_term_forms", "Mandated Legal Terms"
     d.Add "always_capitalise_terms", "Always Capitalise Terms"
     d.Add "non_english_terms", "Non-English Terms"
@@ -1717,7 +1739,7 @@ Public Function GetUILabel(ByVal ruleName As String) As String
         Case "slash_style", "bracket_integrity", "hyphens", "dash_usage", _
              "double_commas", "space_before_punct", "missing_space_after_dot", _
              "triplicate_punctuation", "punctuation"
-            GetUILabel = "Punctuation"
+            GetUILabel = "Punctuation Checker"
             Exit Function
         Case "spellchecker", "spelling", "licence_license", "check_cheque"
             GetUILabel = "Spellchecker"
@@ -1834,18 +1856,134 @@ End Sub
 '    "1,3-5,8"   - mixed
 '    ""          - all pages (no filter)
 ' ============================================================
+' ============================================================
+'  PRECOMPUTED PAGE FILTER
+'  Called once per run after SetPageRangeFromString.
+'  Translates page numbers into main-story character positions
+'  so that rule inner loops need only cheap integer comparisons.
+' ============================================================
+Public Sub InitPageFilter(doc As Document)
+    gPageFilterEnabled = False
+    gPageFilterStartPos = 0
+    gPageFilterEndPos = 0
+
+    ' Nothing to filter?
+    If pageRangeSet Is Nothing Then Exit Sub
+    If pageRangeSet.Count = 0 Then Exit Sub
+
+    ' Find min and max selected page numbers
+    Dim minPage As Long, maxPage As Long
+    Dim firstKey As Boolean
+    firstKey = True
+    Dim k As Variant
+    For Each k In pageRangeSet.keys
+        Dim pg As Long
+        pg = CLng(k)
+        If firstKey Then
+            minPage = pg: maxPage = pg: firstKey = False
+        Else
+            If pg < minPage Then minPage = pg
+            If pg > maxPage Then maxPage = pg
+        End If
+    Next k
+
+    If minPage < 1 Then minPage = 1
+
+    ' Determine total document pages
+    Dim totalPages As Long
+    On Error Resume Next
+    totalPages = doc.ComputeStatistics(wdStatisticPages)
+    If Err.Number <> 0 Then
+        Err.Clear
+        On Error GoTo 0
+        ' Cannot determine page count -- disable filter to be safe
+        Exit Sub
+    End If
+    On Error GoTo 0
+
+    ' Clamp maxPage to actual document length
+    If maxPage > totalPages Then maxPage = totalPages
+    If minPage > totalPages Then Exit Sub  ' selected pages beyond document
+
+    ' Get start position: beginning of minPage
+    Dim startRng As Range
+    On Error Resume Next
+    Set startRng = doc.GoTo(What:=wdGoToPage, Which:=wdGoToAbsolute, Count:=minPage)
+    If Err.Number <> 0 Then
+        Err.Clear
+        On Error GoTo 0
+        Exit Sub
+    End If
+    On Error GoTo 0
+    gPageFilterStartPos = startRng.Start
+
+    ' Get end position: beginning of page after maxPage, or end of main story
+    If maxPage >= totalPages Then
+        ' Last page -- use end of main story
+        gPageFilterEndPos = doc.Content.End
+    Else
+        Dim endRng As Range
+        On Error Resume Next
+        Set endRng = doc.GoTo(What:=wdGoToPage, Which:=wdGoToAbsolute, Count:=maxPage + 1)
+        If Err.Number <> 0 Then
+            Err.Clear
+            On Error GoTo 0
+            gPageFilterEndPos = doc.Content.End
+        Else
+            On Error GoTo 0
+            gPageFilterEndPos = endRng.Start
+        End If
+    End If
+
+    gPageFilterEnabled = True
+    DebugLog "Page filter enabled: pages " & minPage & "-" & maxPage & _
+             ", positions " & gPageFilterStartPos & "-" & gPageFilterEndPos
+End Sub
+
+' ============================================================
+'  CHEAP OVERLAP HELPERS (integer comparisons only)
+' ============================================================
+
+' Returns True if a range overlaps the selected main-story span
+' (or if page filtering is disabled).
 Public Function IsInPageRange(rng As Range) As Boolean
-    If pageRangeSet Is Nothing Then
+    If Not gPageFilterEnabled Then
         IsInPageRange = True
         Exit Function
     End If
-    If pageRangeSet.Count = 0 Then
+    ' Overlap test: range intersects [startPos, endPos)
+    If rng.End <= gPageFilterStartPos Then
+        IsInPageRange = False
+    ElseIf rng.Start >= gPageFilterEndPos Then
+        IsInPageRange = False
+    Else
         IsInPageRange = True
+    End If
+End Function
+
+' Position-based overlap check (no Range object needed)
+Public Function IsInPageRangeByPos(ByVal startPos As Long, ByVal endPos As Long) As Boolean
+    If Not gPageFilterEnabled Then
+        IsInPageRangeByPos = True
         Exit Function
     End If
-    Dim pageNum As Long
-    pageNum = rng.Information(wdActiveEndAdjustedPageNumber)
-    IsInPageRange = pageRangeSet.Exists(pageNum)
+    If endPos <= gPageFilterStartPos Then
+        IsInPageRangeByPos = False
+    ElseIf startPos >= gPageFilterEndPos Then
+        IsInPageRangeByPos = False
+    Else
+        IsInPageRangeByPos = True
+    End If
+End Function
+
+' Returns True when startPos is past the end of the selected range.
+' Rules iterating paragraphs in document order can use this to exit early.
+Public Function IsPastPageFilter(ByVal startPos As Long) As Boolean
+    If Not gPageFilterEnabled Then
+        IsPastPageFilter = False
+        Exit Function
+    End If
+    IsPastPageFilter = (startPos >= gPageFilterEndPos)
 End Function
 
 Public Sub SetPageRange(startPage As Long, endPage As Long)

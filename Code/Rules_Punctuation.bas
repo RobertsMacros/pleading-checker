@@ -772,6 +772,7 @@ Public Function Check_TriplicatePunctuation(doc As Document) As Collection
         If Len(paraText) < 3 Then GoTo NextTriPara
 
         ' Check page range
+        If EngineIsPastPageFilter(para.Range.Start) Then Exit For
         If Not EngineIsInPageRange(para.Range) Then GoTo NextTriPara
 
         i = 1
@@ -883,6 +884,7 @@ Public Function Check_DashUsage(doc As Document) As Collection
         Set paraRange = para.Range
         If Err.Number <> 0 Then Err.Clear: GoTo NextParaDash
 
+        If EngineIsPastPageFilter(paraRange.Start) Then Exit For
         If Not EngineIsInPageRange(paraRange) Then GoTo NextParaDash
 
         paraText = paraRange.Text
@@ -1073,6 +1075,19 @@ Private Function EngineGetLocationString(rng As Object, doc As Document) As Stri
     If Err.Number <> 0 Then
         Debug.Print "EngineGetLocationString: fallback (Err " & Err.Number & ": " & Err.Description & ")"
         EngineGetLocationString = "unknown location"
+        Err.Clear
+    End If
+    On Error GoTo 0
+End Function
+
+' ----------------------------------------------------------------
+'  Late-bound wrapper: PleadingsEngine.IsPastPageFilter
+' ----------------------------------------------------------------
+Private Function EngineIsPastPageFilter(ByVal startPos As Long) As Boolean
+    On Error Resume Next
+    EngineIsPastPageFilter = Application.Run("PleadingsEngine.IsPastPageFilter", startPos)
+    If Err.Number <> 0 Then
+        EngineIsPastPageFilter = False
         Err.Clear
     End If
     On Error GoTo 0
