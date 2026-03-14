@@ -43,53 +43,64 @@ Public Function Check_Spelling(doc As Document) As Collection
     Dim spellingMode As String
     Dim direction As String
 
-    ' -- Build the US <-> UK mapping arrays ----------------
+    ' -- Build the US <-> UK mapping arrays (cached once per call) --
     BuildSpellingArrays usWords, ukWords
 
     ' -- Determine spelling mode -------------------------
     spellingMode = EngineGetSpellingMode()
 
     If spellingMode = "US" Then
-        ' Search for UK words, suggest US replacements
         searchWords = ukWords
         targetWords = usWords
         direction = "US"
-
-        ' In US mode, no special legal exceptions
         exceptions = Split("program,practice", ",")
     Else
-        ' Default: "UK" -- search for US words, suggest UK replacements
         searchWords = usWords
         targetWords = ukWords
         direction = "UK"
-
-        ' "judgment" is standard in UK legal writing (not "judgement")
-        ' "practice" is the correct UK noun form (verb: "practise")
         exceptions = Split("program,judgment,practice", ",")
     End If
 
     ' -- Search main document body -----------------------
+    EnginePerfTimerStart "spelling_body"
     SearchRangeForSpellingIssues doc.Content, doc, searchWords, targetWords, exceptions, direction, issues
+    EnginePerfTimerEnd "spelling_body"
 
-    ' -- Search footnotes --------------------------------
+    ' -- Search footnotes via story range (single pass, not per-footnote) --
+    EnginePerfTimerStart "spelling_footnotes"
     On Error Resume Next
-    Dim fn As Footnote
-    For Each fn In doc.Footnotes
-        Err.Clear
-        SearchRangeForSpellingIssues fn.Range, doc, searchWords, targetWords, exceptions, direction, issues
-        If Err.Number <> 0 Then Err.Clear
-    Next fn
+    If doc.Footnotes.Count > 0 Then
+        Dim fnStory As Range
+        Set fnStory = doc.StoryRanges(wdFootnotesStory)
+        If Err.Number = 0 And Not fnStory Is Nothing Then
+            Err.Clear
+            SearchRangeForSpellingIssues fnStory, doc, searchWords, targetWords, exceptions, direction, issues
+            If Err.Number <> 0 Then Err.Clear
+        Else
+            Err.Clear
+        End If
+    End If
     On Error GoTo 0
+    EnginePerfTimerEnd "spelling_footnotes"
 
-    ' -- Search endnotes ---------------------------------
+    ' -- Search endnotes via story range (single pass) --
+    EnginePerfTimerStart "spelling_endnotes"
     On Error Resume Next
-    Dim en As Endnote
-    For Each en In doc.Endnotes
-        Err.Clear
-        SearchRangeForSpellingIssues en.Range, doc, searchWords, targetWords, exceptions, direction, issues
-        If Err.Number <> 0 Then Err.Clear
-    Next en
+    If doc.Endnotes.Count > 0 Then
+        Dim enStory As Range
+        Set enStory = doc.StoryRanges(wdEndnotesStory)
+        If Err.Number = 0 And Not enStory Is Nothing Then
+            Err.Clear
+            SearchRangeForSpellingIssues enStory, doc, searchWords, targetWords, exceptions, direction, issues
+            If Err.Number <> 0 Then Err.Clear
+        Else
+            Err.Clear
+        End If
+    End If
     On Error GoTo 0
+    EnginePerfTimerEnd "spelling_endnotes"
+
+    EnginePerfCount "spelling_find_passes", CLng(UBound(searchWords) - LBound(searchWords) + 1)
 
     Set Check_Spelling = issues
 End Function
@@ -614,27 +625,37 @@ End Function
 Public Function Check_LicenceLicense(doc As Document) As Collection
     Dim issues As New Collection
 
-    ' Search for both spellings in the document body
+    ' Search body
     SearchForLicenceIssues doc.Content, doc, issues
 
-    ' Search footnotes
+    ' Search footnotes via story range
     On Error Resume Next
-    Dim fn As Footnote
-    For Each fn In doc.Footnotes
-        Err.Clear
-        SearchForLicenceIssues fn.Range, doc, issues
-        If Err.Number <> 0 Then Err.Clear
-    Next fn
+    If doc.Footnotes.Count > 0 Then
+        Dim fnStory As Range
+        Set fnStory = doc.StoryRanges(wdFootnotesStory)
+        If Err.Number = 0 And Not fnStory Is Nothing Then
+            Err.Clear
+            SearchForLicenceIssues fnStory, doc, issues
+            If Err.Number <> 0 Then Err.Clear
+        Else
+            Err.Clear
+        End If
+    End If
     On Error GoTo 0
 
-    ' Search endnotes
+    ' Search endnotes via story range
     On Error Resume Next
-    Dim en As Endnote
-    For Each en In doc.Endnotes
-        Err.Clear
-        SearchForLicenceIssues en.Range, doc, issues
-        If Err.Number <> 0 Then Err.Clear
-    Next en
+    If doc.Endnotes.Count > 0 Then
+        Dim enStory As Range
+        Set enStory = doc.StoryRanges(wdEndnotesStory)
+        If Err.Number = 0 And Not enStory Is Nothing Then
+            Err.Clear
+            SearchForLicenceIssues enStory, doc, issues
+            If Err.Number <> 0 Then Err.Clear
+        Else
+            Err.Clear
+        End If
+    End If
     On Error GoTo 0
 
     Set Check_LicenceLicense = issues
@@ -1032,23 +1053,26 @@ Public Function Check_CheckCheque(doc As Document) As Collection
         Exit Function
     End If
 
-    ' Search body text for "check" / "checks" (context-aware)
+    ' Search body text
     SearchCheckCheque doc.Content, doc, issues
-
-    ' Search body text for financial compound phrases
     SearchFinancialCheckCompounds doc.Content, doc, issues
 
-    ' Search footnotes
+    ' Search footnotes via story range
     On Error Resume Next
-    Dim fn As Footnote
-    For Each fn In doc.Footnotes
-        Err.Clear
-        SearchCheckCheque fn.Range, doc, issues
-        If Err.Number <> 0 Then Err.Clear
-        Err.Clear
-        SearchFinancialCheckCompounds fn.Range, doc, issues
-        If Err.Number <> 0 Then Err.Clear
-    Next fn
+    If doc.Footnotes.Count > 0 Then
+        Dim fnStory As Range
+        Set fnStory = doc.StoryRanges(wdFootnotesStory)
+        If Err.Number = 0 And Not fnStory Is Nothing Then
+            Err.Clear
+            SearchCheckCheque fnStory, doc, issues
+            If Err.Number <> 0 Then Err.Clear
+            Err.Clear
+            SearchFinancialCheckCompounds fnStory, doc, issues
+            If Err.Number <> 0 Then Err.Clear
+        Else
+            Err.Clear
+        End If
+    End If
     On Error GoTo 0
 
     Set Check_CheckCheque = issues
@@ -1550,3 +1574,24 @@ Private Function EngineGetSpellingMode() As String
     End If
     On Error GoTo 0
 End Function
+
+Private Sub EnginePerfTimerStart(ByVal label As String)
+    On Error Resume Next
+    Application.Run "PleadingsEngine.PerfTimerStart", label
+    If Err.Number <> 0 Then Err.Clear
+    On Error GoTo 0
+End Sub
+
+Private Sub EnginePerfTimerEnd(ByVal label As String)
+    On Error Resume Next
+    Application.Run "PleadingsEngine.PerfTimerEnd", label
+    If Err.Number <> 0 Then Err.Clear
+    On Error GoTo 0
+End Sub
+
+Private Sub EnginePerfCount(ByVal label As String, Optional ByVal increment As Long = 1)
+    On Error Resume Next
+    Application.Run "PleadingsEngine.PerfCount", label, increment
+    If Err.Number <> 0 Then Err.Clear
+    On Error GoTo 0
+End Sub

@@ -589,7 +589,7 @@ Private Sub UserForm_Initialize()
     Me.Width = FULL_W + 2 * PAD
     Me.Height = neededH
 
-    Debug.Print "UserForm_Initialize: Width=" & Me.Width & " Height=" & Me.Height
+    Debug.Print "frmPleadingsChecker_Initialize: Width=" & Me.Width & " Height=" & Me.Height
 End Sub
 
 ' ============================================================
@@ -946,7 +946,7 @@ Private Sub btnRun_Click()
         Dim perfSummary As String
         perfSummary = PleadingsEngine.GetPerformanceSummary()
         slowestRules = PleadingsEngine.GetTopSlowestRules(3)
-        Debug.Print "UserForm final: Width=" & Me.Width & " Height=" & Me.Height
+        Debug.Print "frmPleadingsChecker final: Width=" & Me.Width & " Height=" & Me.Height
     End If
 
     ' Show summary
@@ -1059,8 +1059,26 @@ Private Sub btnExport_Click()
     Me.Repaint
     DoEvents
 
+    ' Generate JSON report
     Dim reportSummary As String
     reportSummary = PleadingsEngine.GenerateReport(lastResults, reportPath, targetDoc)
+
+    ' Generate plain-text report alongside JSON
+    Dim txtPath As String
+    If Len(reportPath) > 5 And LCase$(Right$(reportPath, 5)) = ".json" Then
+        txtPath = Left$(reportPath, Len(reportPath) - 5) & ".txt"
+    Else
+        txtPath = reportPath & ".txt"
+    End If
+
+    Dim txtSummary As String
+    On Error Resume Next
+    txtSummary = PleadingsEngine.GenerateTextReport(lastResults, txtPath, targetDoc)
+    If Err.Number <> 0 Then
+        txtSummary = "Text report generation failed: " & Err.Description
+        Err.Clear
+    End If
+    On Error GoTo 0
 
     Dim logPath As String
     Dim logSaved As Boolean
@@ -1078,10 +1096,12 @@ Private Sub btnExport_Click()
     errCount = PleadingsEngine.GetRuleErrorCount()
 
     Dim msg As String
-    msg = "Report saved to:" & vbCrLf & reportPath
+    msg = "Reports saved:" & vbCrLf & _
+          "  JSON: " & reportPath & vbCrLf & _
+          "  Text: " & txtPath
 
     If logSaved And Len(logPath) > 0 Then
-        msg = msg & vbCrLf & vbCrLf & "Debug log saved to:" & vbCrLf & logPath
+        msg = msg & vbCrLf & vbCrLf & "Debug log: " & logPath
     ElseIf DEBUG_MODE And Not logSaved Then
         msg = msg & vbCrLf & vbCrLf & "Debug log could not be saved."
     End If
@@ -1233,13 +1253,22 @@ End Sub
 '  CUSTOM RULES: SAVE
 ' ============================================================
 Private Sub btnSaveRules_Click()
+    If crCount = 0 Then
+        MsgBox "No custom rules to save.", vbExclamation, "Custom Rules"
+        Exit Sub
+    End If
+
     Dim rulesFile As String
     rulesFile = GetCustomRulesPath()
 
     Dim rulesDir As String
     rulesDir = GetParentDirectory(rulesFile)
     If Len(rulesDir) > 0 Then
-        EnsureDirectoryExists rulesDir
+        If Not EnsureDirectoryExists(rulesDir) Then
+            MsgBox "Could not create directory:" & vbCrLf & rulesDir & vbCrLf & vbCrLf & _
+                   "Check permissions and try again.", vbExclamation, "Custom Rules"
+            Exit Sub
+        End If
     End If
 
     ' Save all rules as tab-delimited: seq<TAB>correct<TAB>variants
@@ -1254,16 +1283,20 @@ Private Sub btnSaveRules_Click()
     Next s
     Close #fileNum
 
-    MsgBox "Custom rules saved to:" & vbCrLf & rulesFile, vbInformation, "Custom Rules"
+    MsgBox "Custom rules saved (" & crCount & " rules) to:" & vbCrLf & rulesFile, _
+           vbInformation, "Pleadings Checker"
     Exit Sub
 
 SaveFail:
+    Dim saveErrNum As Long, saveErrDesc As String
+    saveErrNum = Err.Number
+    saveErrDesc = Err.Description
     On Error Resume Next
     Close #fileNum
-    MsgBox "Failed to save custom rules to:" & vbCrLf & rulesFile & vbCrLf & _
-           "Error " & Err.Number & ": " & Err.Description, vbExclamation, "Custom Rules"
-    Err.Clear
     On Error GoTo 0
+    MsgBox "Failed to save custom rules." & vbCrLf & vbCrLf & _
+           "File: " & rulesFile & vbCrLf & _
+           "Error " & saveErrNum & ": " & saveErrDesc, vbExclamation, "Pleadings Checker"
 End Sub
 
 ' ============================================================

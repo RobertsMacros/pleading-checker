@@ -41,6 +41,22 @@ Private ruleConfig      As Object
 ' -- Cooperative cancellation --
 Public gCancelRun       As Boolean
 Private Const ERR_RUN_CANCELLED As Long = vbObjectError + 513
+
+' -- Grouped report / comment suppression infrastructure --
+Private Const SPELLING_COMMENT_THRESHOLD As Long = 25
+Private Const FOOTNOTE_COMMENT_THRESHOLD As Long = 15
+Private gSpellingGroups     As Object   ' Dictionary: "wrong|right" -> count
+Private gSpellingExamples   As Object   ' Dictionary: "wrong|right" -> first 3 locations
+Private gFootnoteGroups     As Object   ' Dictionary: "issueKey" -> Dictionary with Count, NoteNumbers, IssueText
+Private gGroupedSpellingCount As Long
+Private gGroupedFootnoteCount As Long
+Private gCommentsCreated    As Long
+Private gTrackedEditsApplied As Long
+Private gEditsSkippedUnsafe As Long
+
+' -- Unsafe autofix category set (report-only, no tracked edits) --
+Private gUnsafeAutofixRules As Object   ' Dictionary of rule names -> True
+
 Private pageRangeSet    As Object   ' Dictionary of page numbers (Long -> True)
 Private whitelistDict   As Object
 Private spellingMode    As String   ' "UK" or "US"
@@ -90,6 +106,395 @@ End Function
 Private Sub CheckCancellation()
     DoEvents
     If gCancelRun Then Err.Raise ERR_RUN_CANCELLED, "PleadingsEngine", "Run cancelled"
+End Sub
+
+' ============================================================
+'  GROUPED REPORT + COMMENT SUPPRESSION HELPERS
+' ============================================================
+Private Sub InitGroupedReportState()
+    Set gSpellingGroups = CreateObject("Scripting.Dictionary")
+    Set gSpellingExamples = CreateObject("Scripting.Dictionary")
+    Set gFootnoteGroups = CreateObject("Scripting.Dictionary")
+    gGroupedSpellingCount = 0
+    gGroupedFootnoteCount = 0
+    gCommentsCreated = 0
+    gTrackedEditsApplied = 0
+    gEditsSkippedUnsafe = 0
+
+    ' Populate unsafe autofix rules (report-only categories)
+    Set gUnsafeAutofixRules = CreateObject("Scripting.Dictionary")
+    gUnsafeAutofixRules("double_spaces") = True
+    gUnsafeAutofixRules("missing_space_after_dot") = True
+    gUnsafeAutofixRules("space_before_punct") = True
+    gUnsafeAutofixRules("hyphens") = True
+    gUnsafeAutofixRules("dash_usage") = True
+    gUnsafeAutofixRules("footnote_integrity") = True
+    gUnsafeAutofixRules("footnote_harts") = True
+    gUnsafeAutofixRules("footnote_terminal_full_stop") = True
+    gUnsafeAutofixRules("footnote_initial_capital") = True
+    gUnsafeAutofixRules("footnote_abbreviation") = True
+    gUnsafeAutofixRules("footnotes_not_endnotes") = True
+End Sub
+
+' Returns the bucket name for a given rule (for threshold grouping)
+Private Function GetRuleBucket(ByVal ruleName As String) As String
+    Dim rn As String
+    rn = LCase$(ruleName)
+    Select Case rn
+        Case "spellchecker", "spelling", "licence_license", "check_cheque"
+            GetRuleBucket = "spelling"
+        Case "footnote_integrity", "footnote_harts", "footnote_terminal_full_stop", _
+             "footnote_initial_capital", "footnote_abbreviation", _
+             "footnotes_not_endnotes", "footnote_rules"
+            GetRuleBucket = "footnote"
+        Case "double_spaces", "missing_space_after_dot", "space_before_punct", _
+             "double_commas", "trailing_spaces"
+            GetRuleBucket = "spacing"
+        Case "hyphens", "dash_usage"
+            GetRuleBucket = "dash"
+        Case Else
+            GetRuleBucket = ""
+    End Select
+End Function
+
+' Count findings by bucket in a collection
+Private Function CountByBucket(ByVal issues As Collection, ByVal bucket As String) As Long
+    Dim cnt As Long
+    cnt = 0
+    Dim i As Long
+    For i = 1 To issues.Count
+        If GetRuleBucket(CStr(GetIssueProp(issues(i), "RuleName"))) = bucket Then
+            cnt = cnt + 1
+        End If
+    Next i
+    CountByBucket = cnt
+End Function
+
+' Build grouped spelling data from issues collection
+Private Sub BuildSpellingGroups(ByVal issues As Collection)
+    Set gSpellingGroups = CreateObject("Scripting.Dictionary")
+    Set gSpellingExamples = CreateObject("Scripting.Dictionary")
+    gGroupedSpellingCount = 0
+    Dim i As Long
+    For i = 1 To issues.Count
+        Dim finding As Object
+        Set finding = issues(i)
+        If GetRuleBucket(CStr(GetIssueProp(finding, "RuleName"))) = "spelling" Then
+            gGroupedSpellingCount = gGroupedSpellingCount + 1
+            Dim matched As String
+            Dim sug As String
+            matched = CStr(GetIssueProp(finding, "MatchedText"))
+            sug = CStr(GetIssueProp(finding, "Suggestion"))
+            If Len(matched) = 0 Then matched = "(unknown)"
+            If Len(sug) = 0 Then sug = "(no suggestion)"
+            Dim pairKey As String
+            pairKey = LCase$(matched) & "|" & LCase$(sug)
+            If gSpellingGroups.Exists(pairKey) Then
+                gSpellingGroups(pairKey) = CLng(gSpellingGroups(pairKey)) + 1
+            Else
+                gSpellingGroups(pairKey) = 1
+            End If
+            ' Store first 3 example locations
+            If Not gSpellingExamples.Exists(pairKey) Then
+                gSpellingExamples(pairKey) = CStr(GetIssueProp(finding, "Location"))
+            Else
+                Dim existing As String
+                existing = CStr(gSpellingExamples(pairKey))
+                ' Count pipes to see how many we have
+                Dim pipeCount As Long
+                Dim pc As Long
+                pipeCount = 0
+                For pc = 1 To Len(existing)
+                    If Mid$(existing, pc, 1) = "|" Then pipeCount = pipeCount + 1
+                Next pc
+                If pipeCount < 2 Then
+                    gSpellingExamples(pairKey) = existing & "|" & CStr(GetIssueProp(finding, "Location"))
+                End If
+            End If
+        End If
+    Next i
+End Sub
+
+' Build grouped footnote data from issues collection
+Private Sub BuildFootnoteGroups(ByVal issues As Collection)
+    Set gFootnoteGroups = CreateObject("Scripting.Dictionary")
+    gGroupedFootnoteCount = 0
+    Dim i As Long
+    For i = 1 To issues.Count
+        Dim finding As Object
+        Set finding = issues(i)
+        If GetRuleBucket(CStr(GetIssueProp(finding, "RuleName"))) = "footnote" Then
+            gGroupedFootnoteCount = gGroupedFootnoteCount + 1
+            Dim issText As String
+            issText = CStr(GetIssueProp(finding, "Issue"))
+            Dim loc As String
+            loc = CStr(GetIssueProp(finding, "Location"))
+            Dim fnKey As String
+            fnKey = LCase$(Left$(issText, 80))
+            If gFootnoteGroups.Exists(fnKey) Then
+                Dim grp As Object
+                Set grp = gFootnoteGroups(fnKey)
+                grp("Count") = CLng(grp("Count")) + 1
+                If Len(CStr(grp("Locations"))) < 500 Then
+                    grp("Locations") = CStr(grp("Locations")) & "|" & loc
+                End If
+            Else
+                Dim newGrp As Object
+                Set newGrp = CreateObject("Scripting.Dictionary")
+                newGrp("Count") = 1
+                newGrp("IssueText") = issText
+                newGrp("Locations") = loc
+                Set gFootnoteGroups(fnKey) = newGrp
+            End If
+        End If
+    Next i
+End Sub
+
+' Check if a rule is in an unsafe autofix category
+Public Function IsUnsafeAutofixRule(ByVal ruleName As String) As Boolean
+    If gUnsafeAutofixRules Is Nothing Then
+        IsUnsafeAutofixRule = False
+        Exit Function
+    End If
+    IsUnsafeAutofixRule = gUnsafeAutofixRules.Exists(LCase$(ruleName))
+End Function
+
+' Strong anchor check for tracked changes
+Public Function IsStrongTrackedAnchor(ByVal matchedText As String) As Boolean
+    IsStrongTrackedAnchor = False
+    If Len(matchedText) = 0 Then Exit Function
+    Dim i As Long
+    Dim ch As String
+    For i = 1 To Len(matchedText)
+        ch = Mid$(matchedText, i, 1)
+        If (ch >= "A" And ch <= "Z") Or _
+           (ch >= "a" And ch <= "z") Or _
+           (ch >= "0" And ch <= "9") Then
+            IsStrongTrackedAnchor = True
+            Exit Function
+        End If
+    Next i
+End Function
+
+' Public accessors for grouped report data
+Public Function GetGroupedSpellingCount() As Long
+    GetGroupedSpellingCount = gGroupedSpellingCount
+End Function
+
+Public Function GetGroupedFootnoteCount() As Long
+    GetGroupedFootnoteCount = gGroupedFootnoteCount
+End Function
+
+Public Function GetCommentsCreated() As Long
+    GetCommentsCreated = gCommentsCreated
+End Function
+
+Public Function GetTrackedEditsApplied() As Long
+    GetTrackedEditsApplied = gTrackedEditsApplied
+End Function
+
+Public Function GetEditsSkippedUnsafe() As Long
+    GetEditsSkippedUnsafe = gEditsSkippedUnsafe
+End Function
+
+Public Function GetSpellingGroupsDict() As Object
+    Set GetSpellingGroupsDict = gSpellingGroups
+End Function
+
+Public Function GetSpellingExamplesDict() As Object
+    Set GetSpellingExamplesDict = gSpellingExamples
+End Function
+
+Public Function GetFootnoteGroupsDict() As Object
+    Set GetFootnoteGroupsDict = gFootnoteGroups
+End Function
+
+' Generate plain-text report
+Public Function GenerateTextReport(issues As Collection, _
+                                    filePath As String, _
+                                    Optional doc As Document = Nothing) As String
+    TraceEnter "GenerateTextReport"
+    Dim fileNum As Integer
+    Dim i As Long
+
+    ' Resolve document name
+    Dim docName As String
+    On Error Resume Next
+    If Not doc Is Nothing Then
+        docName = doc.Name
+    Else
+        docName = "(no document)"
+    End If
+    If Err.Number <> 0 Then docName = "(unknown)": Err.Clear
+    On Error GoTo 0
+
+    fileNum = FreeFile
+    On Error Resume Next
+    Open filePath For Output As #fileNum
+    If Err.Number <> 0 Then
+        GenerateTextReport = "Error: could not write to " & filePath
+        Err.Clear
+        On Error GoTo 0
+        Exit Function
+    End If
+    On Error GoTo 0
+
+    On Error GoTo TxtReportErr
+
+    ' ASCII art header
+    Print #fileNum, "============================================================"
+    Print #fileNum, "  ____       _               _   _       "
+    Print #fileNum, " |  _ \ ___ | |__   ___ _ __| |_( )___   "
+    Print #fileNum, " | |_) / _ \| '_ \ / _ \ '__| __|// __| "
+    Print #fileNum, " |  _ < (_) | |_) |  __/ |  | |_  \__ \ "
+    Print #fileNum, " |_| \_\___/|_.__/ \___|_|   \__| |___/  "
+    Print #fileNum, "  __  __                              "
+    Print #fileNum, " |  \/  | __ _  ___ _ __ ___  ___     "
+    Print #fileNum, " | |\/| |/ _` |/ __| '__/ _ \/ __|    "
+    Print #fileNum, " | |  | | (_| | (__| | | (_) \__ \    "
+    Print #fileNum, " |_|  |_|\__,_|\___|_|  \___/|___/    "
+    Print #fileNum, ""
+    Print #fileNum, "  PLEADINGS CHECKER REPORT"
+    Print #fileNum, "============================================================"
+    Print #fileNum, ""
+    Print #fileNum, "Document:  " & docName
+    Print #fileNum, "Date:      " & Format(Now, "yyyy-mm-dd hh:nn:ss")
+
+    Dim prStr As String
+    prStr = pageRangeString
+    If Len(prStr) = 0 Then prStr = "all"
+    Print #fileNum, "Pages:     " & prStr
+    Print #fileNum, "Issues:    " & issues.Count
+    Print #fileNum, ""
+
+    ' -- Grouped Spelling Section --
+    If gGroupedSpellingCount > 0 Then
+        Print #fileNum, "============================================================"
+        Print #fileNum, "  SPELLING (" & gGroupedSpellingCount & " occurrences, " & _
+                        gSpellingGroups.Count & " unique pairs)"
+        Print #fileNum, "============================================================"
+        Dim spKeys As Variant
+        spKeys = gSpellingGroups.keys
+        Dim sk As Long
+        For sk = 0 To gSpellingGroups.Count - 1
+            Dim pairParts() As String
+            pairParts = Split(CStr(spKeys(sk)), "|")
+            Dim spWrong As String, spRight As String
+            spWrong = pairParts(0)
+            If UBound(pairParts) >= 1 Then spRight = pairParts(1) Else spRight = "?"
+            Print #fileNum, "  " & spWrong & " -> " & spRight & _
+                            "  (" & gSpellingGroups(spKeys(sk)) & " occurrences)"
+            If gSpellingExamples.Exists(CStr(spKeys(sk))) Then
+                Dim exLocs() As String
+                exLocs = Split(CStr(gSpellingExamples(spKeys(sk))), "|")
+                Dim ex As Long
+                For ex = 0 To UBound(exLocs)
+                    Print #fileNum, "    - " & exLocs(ex)
+                Next ex
+            End If
+        Next sk
+        Print #fileNum, ""
+    End If
+
+    ' -- Grouped Footnote Section --
+    If gGroupedFootnoteCount > 0 Then
+        Print #fileNum, "============================================================"
+        Print #fileNum, "  FOOTNOTES (" & gGroupedFootnoteCount & " findings)"
+        Print #fileNum, "============================================================"
+        Dim fnKeys As Variant
+        fnKeys = gFootnoteGroups.keys
+        Dim fk As Long
+        For fk = 0 To gFootnoteGroups.Count - 1
+            Dim fnGrp As Object
+            Set fnGrp = gFootnoteGroups(fnKeys(fk))
+            Print #fileNum, "  " & CStr(fnGrp("IssueText"))
+            Print #fileNum, "    Count: " & CStr(fnGrp("Count"))
+            Dim fnLocs() As String
+            fnLocs = Split(CStr(fnGrp("Locations")), "|")
+            Dim fl As Long
+            For fl = 0 To UBound(fnLocs)
+                If fl < 5 Then Print #fileNum, "    - " & fnLocs(fl)
+            Next fl
+            If UBound(fnLocs) >= 5 Then
+                Print #fileNum, "    ... and " & (UBound(fnLocs) - 4) & " more"
+            End If
+        Next fk
+        Print #fileNum, ""
+    End If
+
+    ' -- By UI label --
+    Print #fileNum, "============================================================"
+    Print #fileNum, "  ALL FINDINGS BY TYPE"
+    Print #fileNum, "============================================================"
+
+    ' Group by UI label
+    Dim uiGroups As Object
+    Set uiGroups = CreateObject("Scripting.Dictionary")
+    For i = 1 To issues.Count
+        Dim uiLbl As String
+        uiLbl = GetUILabel(CStr(GetIssueProp(issues(i), "RuleName")))
+        If Not uiGroups.Exists(uiLbl) Then
+            Dim grpColl As Collection
+            Set grpColl = New Collection
+            Set uiGroups(uiLbl) = grpColl
+        End If
+        Dim theGroup As Collection
+        Set theGroup = uiGroups(uiLbl)
+        theGroup.Add issues(i)
+    Next i
+
+    Dim uiKeys As Variant
+    uiKeys = uiGroups.keys
+    Dim uk As Long
+    For uk = 0 To uiGroups.Count - 1
+        Dim labelGroup As Collection
+        Set labelGroup = uiGroups(uiKeys(uk))
+        Print #fileNum, ""
+        Print #fileNum, "--- " & CStr(uiKeys(uk)) & " (" & labelGroup.Count & ") ---"
+        Dim gi As Long
+        Dim maxItems As Long
+        maxItems = labelGroup.Count
+        If maxItems > 50 Then maxItems = 50
+        For gi = 1 To maxItems
+            Dim gFinding As Object
+            Set gFinding = labelGroup(gi)
+            Print #fileNum, "  [" & CStr(GetIssueProp(gFinding, "Location")) & "] " & _
+                            CStr(GetIssueProp(gFinding, "Issue"))
+        Next gi
+        If labelGroup.Count > 50 Then
+            Print #fileNum, "  ... and " & (labelGroup.Count - 50) & " more"
+        End If
+    Next uk
+
+    Print #fileNum, ""
+    Print #fileNum, "============================================================"
+    Print #fileNum, "  END OF REPORT"
+    Print #fileNum, "============================================================"
+
+    Close #fileNum
+    GenerateTextReport = "Text report saved: " & filePath
+    TraceExit "GenerateTextReport"
+    Exit Function
+
+TxtReportErr:
+    On Error Resume Next
+    Close #fileNum
+    On Error GoTo 0
+    GenerateTextReport = "Error writing text report: Err " & Err.Number & ": " & Err.Description
+    TraceExit "GenerateTextReport", "FAILED"
+End Function
+
+' Print debug summary to Immediate window
+Public Sub PrintDebugSummary(ByVal issues As Collection)
+    Debug.Print "=== PLEADINGS CHECKER DEBUG SUMMARY ==="
+    Debug.Print "  Total issues:           " & issues.Count
+    Debug.Print "  Grouped spelling count:  " & gGroupedSpellingCount
+    Debug.Print "  Grouped footnote count:  " & gGroupedFootnoteCount
+    Debug.Print "  Comments created:        " & gCommentsCreated
+    Debug.Print "  Tracked edits applied:   " & gTrackedEditsApplied
+    Debug.Print "  Edits skipped (unsafe):  " & gEditsSkippedUnsafe
+    Debug.Print "  Top 5 slowest: " & GetTopSlowestRules(5)
+    Debug.Print "=== END DEBUG SUMMARY ==="
 End Sub
 
 ' ============================================================
@@ -637,6 +1042,9 @@ Public Function RunAllPleadingsRules(doc As Document, _
     ' -- Initialise profiling --
     ResetProfiling
 
+    ' -- Initialise grouped report / comment suppression state --
+    InitGroupedReportState
+
     ' -- Capture and suppress screen redraws for performance ----
     Dim wasScreenUpdating As Boolean
     wasScreenUpdating = Application.ScreenUpdating
@@ -819,12 +1227,19 @@ RunnerCleanup:
     ' -- Hard safety guard: strip retired rule families -----------
     Set allIssues = FilterRetiredRules(allIssues)
 
+    ' -- Build grouped report data (must happen after all filtering) --
+    BuildSpellingGroups allIssues
+    BuildFootnoteGroups allIssues
+
     ' -- Print performance summary --------------------------------
     If ENABLE_PROFILING Then
         Dim perfSummary As String
         perfSummary = GetPerformanceSummary()
         Debug.Print perfSummary
     End If
+
+    ' -- Print debug summary --------------------------------
+    PrintDebugSummary allIssues
 
     TraceStep "RunAllPleadingsRules", "total issues: " & allIssues.Count & _
               ", rule errors: " & ruleErrorCount
@@ -1250,6 +1665,7 @@ Public Sub ApplyHighlights(doc As Document, _
                             CStr(GetIssueProp(finding, "RuleName")), finding) Then
                         TryAddComment doc, rng, BuildCommentText(finding), cmtRef, _
                             "ApplyHighlights", "comment i=" & i
+                        gCommentsCreated = gCommentsCreated + 1
                     End If
                 End If
             Else
@@ -1360,66 +1776,118 @@ Public Sub ApplySuggestionsAsTrackedChanges(doc As Document, _
             Set rng = doc.Range(rsVal, reVal)
             If Err.Number = 0 Then
                 If autoFix Then
+                    Dim thisRuleName As String
+                    thisRuleName = CStr(GetIssueProp(finding, "RuleName"))
+
                     origStart = rng.Start
                     origLen = rng.End - rng.Start
+
+                    ' --- UNSAFE AUTOFIX CATEGORY GATE ---
+                    ' Rules in the unsafe category are report-only; never tracked-edit
+                    If IsUnsafeAutofixRule(thisRuleName) Then
+                        cntSkippedUnsafe = cntSkippedUnsafe + 1
+                        gEditsSkippedUnsafe = gEditsSkippedUnsafe + 1
+                        TraceStep "ApplyTrackedChanges", "SKIPPED unsafe-category i=" & i & _
+                                  " rule=" & thisRuleName
+                        If addComments And ShouldCreateCommentForRule(thisRuleName, finding) Then
+                            TryAddComment doc, rng, BuildCommentText(finding), cmtRef, _
+                                "ApplyTrackedChanges", "unsafe-category-comment i=" & i
+                            gCommentsCreated = gCommentsCreated + 1
+                        End If
+                        GoTo NextApplyIssue
+                    End If
+
                     ' Use ReplacementText only.  Suggestion is human-readable
                     ' prose and must NEVER be applied as literal replacement text.
-                    ' An empty ReplacementText means "delete the range" -- distinct
-                    ' from a MISSING key which means "no replacement available".
                     sugText = ""
                     If Not HasReplacementText(finding) Then
-                        ' No machine-safe replacement -- skip amendment, add comment
                         TraceStep "ApplyTrackedChanges", "NO ReplacementText for i=" & i & _
-                                  " rule=" & CStr(GetIssueProp(finding, "RuleName")) & "; comment-only"
-                        If addComments And ShouldCreateCommentForRule( _
-                                CStr(GetIssueProp(finding, "RuleName")), finding) Then
+                                  " rule=" & thisRuleName & "; comment-only"
+                        If addComments And ShouldCreateCommentForRule(thisRuleName, finding) Then
                             TryAddComment doc, rng, BuildCommentText(finding), cmtRef, _
                                 "ApplyTrackedChanges", "no-replacement-comment i=" & i
+                            gCommentsCreated = gCommentsCreated + 1
                         End If
                         GoTo NextApplyIssue
                     End If
                     sugText = CStr(GetIssueProp(finding, "ReplacementText"))
 
-                    ' --- WHITESPACE VALIDATION GATE ---
+                    ' --- READ CURRENT TEXT AND VALIDATE ---
                     origText = ""
                     origText = rng.Text
                     If Err.Number <> 0 Then origText = "": Err.Clear
 
                     skipAmendment = False
 
+                    ' --- STRONG ANCHOR GATE ---
+                    ' Require: MatchedText non-empty, contains alphanumeric,
+                    ' current rng.Text exactly equals MatchedText
+                    Dim storedMatch As String
+                    storedMatch = CStr(GetIssueProp(finding, "MatchedText"))
+
+                    If Len(storedMatch) = 0 Then
+                        skipAmendment = True
+                        Debug.Print "STRONG_ANCHOR: Skipped -- empty MatchedText for rule=" & thisRuleName
+                    ElseIf Not IsStrongTrackedAnchor(storedMatch) Then
+                        skipAmendment = True
+                        Debug.Print "STRONG_ANCHOR: Skipped -- no alphanumeric in '" & Left$(storedMatch, 30) & "'"
+                    ElseIf Len(origText) > 0 And origText <> storedMatch Then
+                        skipAmendment = True
+                        Debug.Print "STRONG_ANCHOR: Skipped stale -- stored='" & Left$(storedMatch, 30) & "' actual='" & Left$(origText, 30) & "'"
+                    End If
+
+                    ' --- WHITESPACE-ONLY GATE ---
+                    ' Never auto-apply findings whose MatchedText is only whitespace/punctuation
+                    If Not skipAmendment And Len(origText) > 0 Then
+                        If Not IsStrongTrackedAnchor(origText) Then
+                            skipAmendment = True
+                            Debug.Print "WHITESPACE GATE: Skipped -- origText has no alphanumeric"
+                        End If
+                    End If
+
                     ' For deletions (empty suggestion = delete the range)
-                    If Len(sugText) = 0 And Len(origText) > 0 Then
-                        For chIdx = 1 To Len(origText)
-                            ch = Mid$(origText, chIdx, 1)
-                            If (ch >= "A" And ch <= "Z") Or _
-                               (ch >= "a" And ch <= "z") Or _
-                               (ch >= "0" And ch <= "9") Or _
-                               ch = "." Then
-                                skipAmendment = True
-                                Debug.Print "WHITESPACE VALIDATION: Skipped deletion of '" & origText & "' -- contains substantive character '" & ch & "'"
-                                Exit For
-                            End If
-                        Next chIdx
+                    If Not skipAmendment Then
+                        If Len(sugText) = 0 And Len(origText) > 0 Then
+                            For chIdx = 1 To Len(origText)
+                                ch = Mid$(origText, chIdx, 1)
+                                If (ch >= "A" And ch <= "Z") Or _
+                                   (ch >= "a" And ch <= "z") Or _
+                                   (ch >= "0" And ch <= "9") Or _
+                                   ch = "." Then
+                                    skipAmendment = True
+                                    Debug.Print "WHITESPACE VALIDATION: Skipped deletion of '" & origText & "'"
+                                    Exit For
+                                End If
+                            Next chIdx
+                        End If
                     End If
 
                     ' For replacements, verify we are only changing whitespace
-                    If Len(sugText) > 0 And Len(origText) > 0 Then
-                        isOnlyWhitespace = True
-                        For chIdx = 1 To Len(origText)
-                            ch = Mid$(origText, chIdx, 1)
-                            If ch <> " " And ch <> vbTab And ch <> ChrW(160) Then
-                                isOnlyWhitespace = False
-                                Exit For
-                            End If
-                        Next chIdx
+                    If Not skipAmendment Then
+                        If Len(sugText) > 0 And Len(origText) > 0 Then
+                            isOnlyWhitespace = True
+                            For chIdx = 1 To Len(origText)
+                                ch = Mid$(origText, chIdx, 1)
+                                If ch <> " " And ch <> vbTab And ch <> ChrW(160) Then
+                                    isOnlyWhitespace = False
+                                    Exit For
+                                End If
+                            Next chIdx
 
-                        If Not isOnlyWhitespace Then
-                            If Len(sugText) < Len(origText) Then
-                                origHasPeriod = (InStr(1, origText, ".") > 0)
-                                sugHasPeriod = (InStr(1, sugText, ".") > 0)
-                                If origHasPeriod And Not sugHasPeriod Then
-                                    skipAmendment = True
-                                    Debug.Print "WHITESPACE VALIDATION: Skipped replacement '" & origText & "' -> '" & sugText & "' -- would remove period"
+                            ' Whitespace-only origText: never tracked-change
+                            If isOnlyWhitespace Then
+                                skipAmendment = True
+                                Debug.Print "WHITESPACE GATE: Skipped whitespace-only origText"
+                            End If
+
+                            If Not skipAmendment And Not isOnlyWhitespace Then
+                                If Len(sugText) < Len(origText) Then
+                                    origHasPeriod = (InStr(1, origText, ".") > 0)
+                                    sugHasPeriod = (InStr(1, sugText, ".") > 0)
+                                    If origHasPeriod And Not sugHasPeriod Then
+                                        skipAmendment = True
+                                        Debug.Print "WHITESPACE VALIDATION: Skipped -- would remove period"
+                                    End If
                                 End If
                             End If
                         End If
@@ -1427,12 +1895,13 @@ Public Sub ApplySuggestionsAsTrackedChanges(doc As Document, _
 
                     If skipAmendment Then
                         cntSkippedUnsafe = cntSkippedUnsafe + 1
+                        gEditsSkippedUnsafe = gEditsSkippedUnsafe + 1
                         TraceStep "ApplyTrackedChanges", "SKIPPED amendment i=" & i & _
                                   " orig=""" & Left$(origText, 30) & """ sug=""" & Left$(sugText, 30) & """"
-                        If addComments And ShouldCreateCommentForRule( _
-                                CStr(GetIssueProp(finding, "RuleName")), finding) Then
+                        If addComments And ShouldCreateCommentForRule(thisRuleName, finding) Then
                             TryAddComment doc, rng, BuildCommentText(finding), cmtRef, _
                                 "ApplyTrackedChanges", "skip-comment i=" & i
+                            gCommentsCreated = gCommentsCreated + 1
                         End If
                         GoTo NextApplyIssue
                     End If
@@ -1440,34 +1909,14 @@ Public Sub ApplySuggestionsAsTrackedChanges(doc As Document, _
                     ' --- UNICODE SAFETY: reject replacement char U+FFFD ---
                     If Not IsReplacementSafe(sugText) Then
                         cntSkippedUnsafe = cntSkippedUnsafe + 1
+                        gEditsSkippedUnsafe = gEditsSkippedUnsafe + 1
                         TraceStep "ApplyTrackedChanges", "SKIPPED UNSAFE REPLACEMENT (U+FFFD) i=" & i
-                        Debug.Print "UNICODE_SAFETY: replacement text contains U+FFFD for rule=" & _
-                                    CStr(GetIssueProp(finding, "RuleName"))
-                        If addComments And ShouldCreateCommentForRule( _
-                                CStr(GetIssueProp(finding, "RuleName")), finding) Then
+                        If addComments And ShouldCreateCommentForRule(thisRuleName, finding) Then
                             TryAddComment doc, rng, BuildCommentText(finding), cmtRef, _
                                 "ApplyTrackedChanges", "unsafe-replacement-comment i=" & i
+                            gCommentsCreated = gCommentsCreated + 1
                         End If
                         GoTo NextApplyIssue
-                    End If
-
-                    ' --- VERIFY EXACT MATCH before applying ---
-                    ' If MatchedText was stored at detection time, verify the
-                    ' document still contains it at this position.
-                    Dim storedMatch As String
-                    storedMatch = CStr(GetIssueProp(finding, "MatchedText"))
-                    If Len(storedMatch) > 0 And Len(origText) > 0 Then
-                        If origText <> storedMatch Then
-                            cntSkippedUnsafe = cntSkippedUnsafe + 1
-                            TraceStep "ApplyTrackedChanges", "SKIPPED STALE ANCHOR i=" & i & _
-                                      " stored=""" & Left$(storedMatch, 30) & """ actual=""" & Left$(origText, 30) & """"
-                            If addComments And ShouldCreateCommentForRule( _
-                                    CStr(GetIssueProp(finding, "RuleName")), finding) Then
-                                TryAddComment doc, rng, BuildCommentText(finding), cmtRef, _
-                                    "ApplyTrackedChanges", "stale-anchor-comment i=" & i
-                            End If
-                            GoTo NextApplyIssue
-                        End If
                     End If
 
                     ' Apply tracked change
@@ -1477,12 +1926,14 @@ Public Sub ApplySuggestionsAsTrackedChanges(doc As Document, _
                     TrySetRangeText rng, sugText, _
                         "ApplyTrackedChanges", "apply i=" & i
                     cntApplied = cntApplied + 1
+                    gTrackedEditsApplied = gTrackedEditsApplied + 1
                 Else
                     cntCommentOnly = cntCommentOnly + 1
                     If addComments And ShouldCreateCommentForRule( _
                             CStr(GetIssueProp(finding, "RuleName")), finding) Then
                         TryAddComment doc, rng, BuildCommentText(finding), cmtRef, _
                             "ApplyTrackedChanges", "comment-only i=" & i
+                        gCommentsCreated = gCommentsCreated + 1
                     End If
                 End If
             Else
@@ -1687,8 +2138,41 @@ Public Function GenerateReport(issues As Collection, _
         End If
     Next k
     Print #fileNum, "    },"
-    Print #fileNum, "    ""invalid_anchor_count"": " & invalidAnchorCount
-    Print #fileNum, "  }"
+    Print #fileNum, "    ""invalid_anchor_count"": " & invalidAnchorCount & ","
+    Print #fileNum, "    ""grouped_spelling_count"": " & gGroupedSpellingCount & ","
+    Print #fileNum, "    ""grouped_footnote_count"": " & gGroupedFootnoteCount & ","
+    Print #fileNum, "    ""comments_created"": " & gCommentsCreated & ","
+    Print #fileNum, "    ""tracked_edits_applied"": " & gTrackedEditsApplied & ","
+    Print #fileNum, "    ""edits_skipped_unsafe"": " & gEditsSkippedUnsafe
+    Print #fileNum, "  },"
+
+    ' -- Grouped spelling pairs --
+    Print #fileNum, "  ""grouped_spelling"": ["
+    If Not gSpellingGroups Is Nothing Then
+        If gSpellingGroups.Count > 0 Then
+            Dim spGKeys As Variant
+            spGKeys = gSpellingGroups.keys
+            Dim spIdx As Long
+            For spIdx = 0 To gSpellingGroups.Count - 1
+                Dim spParts() As String
+                spParts = Split(CStr(spGKeys(spIdx)), "|")
+                Dim spFrom As String, spTo As String
+                spFrom = spParts(0)
+                If UBound(spParts) >= 1 Then spTo = spParts(1) Else spTo = ""
+                Dim spExLoc As String
+                spExLoc = ""
+                If gSpellingExamples.Exists(CStr(spGKeys(spIdx))) Then
+                    spExLoc = CStr(gSpellingExamples(spGKeys(spIdx)))
+                End If
+                Print #fileNum, "    {""from"": """ & EscJSON(spFrom) & """, ""to"": """ & _
+                                EscJSON(spTo) & """, ""count"": " & gSpellingGroups(spGKeys(spIdx)) & _
+                                ", ""examples"": """ & EscJSON(spExLoc) & """}" & _
+                                IIf(spIdx < gSpellingGroups.Count - 1, ",", "")
+            Next spIdx
+        End If
+    End If
+    Print #fileNum, "  ]"
+
     Print #fileNum, "}"
 
     Close #fileNum
@@ -1776,6 +2260,18 @@ Public Function GetIssueSummary(issues As Collection) As String
         result = result & "  + " & (n - maxShow) & " more" & vbCrLf
     End If
 
+    ' Grouped spelling summary
+    If gGroupedSpellingCount > SPELLING_COMMENT_THRESHOLD Then
+        result = result & vbCrLf & "Spelling: " & gGroupedSpellingCount & _
+                 " findings (" & gSpellingGroups.Count & " unique pairs) -- grouped in report" & vbCrLf
+    End If
+
+    ' Grouped footnote summary
+    If gGroupedFootnoteCount > FOOTNOTE_COMMENT_THRESHOLD Then
+        result = result & "Footnotes: " & gGroupedFootnoteCount & _
+                 " findings -- grouped in report" & vbCrLf
+    End If
+
     ' Append slowest rules from profiler
     Dim slowest As String
     slowest = GetTopSlowestRules(3)
@@ -1859,25 +2355,52 @@ End Function
 
 ' ============================================================
 '  COMMENT SUPPRESSION: returns True if a comment bubble should
-'  be created for this rule.  Returns False for trivial
-'  whitespace/spacing rules that should be tracked-change only.
+'  be created for this rule.  Returns False for:
+'  - all spacing rules (always suppressed)
+'  - all dash/hyphen rules (always suppressed)
+'  - spelling when total spelling count > threshold (grouped report mode)
+'  - footnote rules when total footnote count > threshold (grouped report mode)
 ' ============================================================
 Public Function ShouldCreateCommentForRule(ByVal ruleName As String, _
                                            Optional ByVal finding As Object = Nothing) As Boolean
     Dim rn As String
     rn = LCase$(ruleName)
+    Dim bucket As String
+    bucket = GetRuleBucket(rn)
 
-    Select Case rn
-        Case "double_spaces"
+    ' Spacing rules: always suppress comments
+    If bucket = "spacing" Then
+        ShouldCreateCommentForRule = False
+        Exit Function
+    End If
+
+    ' Dash/hyphen rules: always suppress comments
+    If bucket = "dash" Then
+        ShouldCreateCommentForRule = False
+        Exit Function
+    End If
+
+    ' Trailing spaces: always suppress
+    If rn = "trailing_spaces" Or rn = "trailing_space" Then
+        ShouldCreateCommentForRule = False
+        Exit Function
+    End If
+
+    ' Spelling: suppress if over threshold
+    If bucket = "spelling" Then
+        If gGroupedSpellingCount > SPELLING_COMMENT_THRESHOLD Then
             ShouldCreateCommentForRule = False
             Exit Function
-        Case "missing_space_after_dot"
+        End If
+    End If
+
+    ' Footnotes: suppress if over threshold
+    If bucket = "footnote" Then
+        If gGroupedFootnoteCount > FOOTNOTE_COMMENT_THRESHOLD Then
             ShouldCreateCommentForRule = False
             Exit Function
-        Case "trailing_spaces", "trailing_space"
-            ShouldCreateCommentForRule = False
-            Exit Function
-    End Select
+        End If
+    End If
 
     ' Check issue text for spacing sub-types emitted under other rule names
     If Not finding Is Nothing Then
