@@ -19,9 +19,8 @@ Attribute VB_Exposed = False
 ' ALL controls are created dynamically in UserForm_Initialize
 ' so that no .frx binary file is needed.
 '
-' Custom Rules: unified model replacing old Brand Rules and
-' Custom Term Whitelist. Each rule has Enabled, Correct, and
-' Incorrect Variants. Data is stored in Rules_Brands module.
+' Custom Rules: unified model. Each rule has Enabled, Correct,
+' and Incorrect Variants. Persistence via Rules_Brands module.
 ' ============================================================
 Option Explicit
 
@@ -66,11 +65,12 @@ Private lblStatus       As MSForms.Label
 Private lastResults     As Collection
 Private targetDoc       As Document
 Private editingRuleIndex As Long     ' -1 = not editing; >= 0 = list index being edited
-Private variantsPlaceholderActive As Boolean
 
-' Page range placeholder
+' Placeholder constants and flags
 Private Const PAGE_RANGE_PLACEHOLDER As String = "e.g. 1,3,5-8,9:30"
 Private mPageRangeShowingPlaceholder As Boolean
+Private Const VARIANTS_PLACEHOLDER As String = "e.g. colour, color, colours"
+Private mVariantsShowingPlaceholder As Boolean
 
 ' Custom rules data: parallel arrays for the single source of truth
 Private crEnabled()     As Boolean   ' Whether rule is active at runtime
@@ -85,7 +85,7 @@ Private crSortOrder()   As Long      ' Indices into cr* arrays for display
 ' ============================================================
 Private Sub UserForm_Initialize()
     editingRuleIndex = -1
-    variantsPlaceholderActive = False
+    mVariantsShowingPlaceholder = False
     mPageRangeShowingPlaceholder = False
     crCount = 0
     crSortMode = 0
@@ -178,7 +178,9 @@ Private Sub UserForm_Initialize()
     Dim row3Top As Single
     row3Top = yPos
     Dim cboW As Single
-    cboW = rightW - 92
+    Dim lblOptW As Single
+    lblOptW = 82
+    cboW = rightW - lblOptW - 2
 
     ' ---- LEFT COLUMN: Page Range ----
     Set lbl = Me.Controls.Add("Forms.Label.1", "lblPageHeader")
@@ -236,18 +238,59 @@ Private Sub UserForm_Initialize()
 
     yPos = yPos + LBL_H + ITEM_GAP
 
-    ' Custom rules listbox (multi-column table-like display)
+    ' Custom rules table: column header row + listbox
     Dim ruleListW As Single
     ruleListW = leftW - BTN_W - ITEM_GAP - 4
+    Dim colWEnabled As Single: colWEnabled = 18
+    Dim colWNum As Single:     colWNum = 18
+    Dim colWCorrect As Single: colWCorrect = CLng(ruleListW * 0.35)
+    Dim colWVariants As Single: colWVariants = ruleListW - colWEnabled - colWNum - colWCorrect
+    Dim hdrH As Single:        hdrH = 14
 
+    ' Column header labels with colored backgrounds
+    Dim lblH As MSForms.Label
+    Set lblH = Me.Controls.Add("Forms.Label.1", "lblHdrEnabled")
+    With lblH
+        .Caption = ChrW$(9745)
+        .Left = colLeft: .Top = yPos: .Width = colWEnabled: .Height = hdrH
+        .Font.Size = 7: .TextAlign = fmTextAlignCenter
+        .BackColor = RGB(230, 230, 230): .BackStyle = fmBackStyleOpaque
+    End With
+    Set lblH = Me.Controls.Add("Forms.Label.1", "lblHdrNum")
+    With lblH
+        .Caption = "#"
+        .Left = colLeft + colWEnabled: .Top = yPos: .Width = colWNum: .Height = hdrH
+        .Font.Size = 7: .Font.Bold = True: .TextAlign = fmTextAlignCenter
+        .BackColor = RGB(230, 230, 230): .BackStyle = fmBackStyleOpaque
+    End With
+    Set lblH = Me.Controls.Add("Forms.Label.1", "lblHdrCorrect")
+    With lblH
+        .Caption = " Correct"
+        .Left = colLeft + colWEnabled + colWNum: .Top = yPos
+        .Width = colWCorrect: .Height = hdrH
+        .Font.Size = 7: .Font.Bold = True
+        .BackColor = RGB(198, 239, 206): .BackStyle = fmBackStyleOpaque
+    End With
+    Set lblH = Me.Controls.Add("Forms.Label.1", "lblHdrVariants")
+    With lblH
+        .Caption = " Incorrect Variants"
+        .Left = colLeft + colWEnabled + colWNum + colWCorrect: .Top = yPos
+        .Width = colWVariants: .Height = hdrH
+        .Font.Size = 7: .Font.Bold = True
+        .BackColor = RGB(255, 199, 206): .BackStyle = fmBackStyleOpaque
+    End With
+    yPos = yPos + hdrH
+
+    ' Custom rules listbox (multi-column table-like display)
     Set lstCustomRules = Me.Controls.Add("Forms.ListBox.1", "lstCustomRules")
     With lstCustomRules
         .Left = colLeft: .Top = yPos
-        .Width = ruleListW: .Height = 72
+        .Width = ruleListW: .Height = 62
         .Font.Size = 7.5
         .Font.Name = "Consolas"
         .ColumnCount = 4
-        .ColumnWidths = "18;18;" & CStr(CLng(ruleListW * 0.35)) & ";" & CStr(CLng(ruleListW * 0.45))
+        .ColumnWidths = CStr(CLng(colWEnabled)) & ";" & CStr(CLng(colWNum)) & ";" & _
+                        CStr(CLng(colWCorrect)) & ";" & CStr(CLng(colWVariants))
         .BorderStyle = fmBorderStyleNone
         .SpecialEffect = fmSpecialEffectFlat
     End With
@@ -323,7 +366,7 @@ Private Sub UserForm_Initialize()
         .Left = colLeft + 178: .Top = yPos: .Width = ruleListW - 178 + colLeft: .Height = TXT_H
         .Font.Size = 7.5
     End With
-    ShowVariantsPlaceholder
+    InitVariantsPlaceholder
 
     Dim leftBottomY As Single
     leftBottomY = yPos + TXT_H
@@ -358,16 +401,16 @@ Private Sub UserForm_Initialize()
     End With
     optY = optY + CHK_H + ITEM_GAP
 
-    ' Spelling mode
+    ' Spelling
     Set lbl = Me.Controls.Add("Forms.Label.1", "lblSpellingMode")
     With lbl
         .Caption = "Spelling:"
-        .Left = colRight: .Top = optY + 2: .Width = 88: .Height = LBL_H
+        .Left = colRight: .Top = optY + 2: .Width = lblOptW: .Height = LBL_H
         .Font.Size = 7.5
     End With
     Set cboSpelling = Me.Controls.Add("Forms.ComboBox.1", "cboSpelling")
     With cboSpelling
-        .Left = colRight + 90: .Top = optY: .Width = cboW: .Height = TXT_H
+        .Left = colRight + lblOptW + 2: .Top = optY: .Width = cboW: .Height = TXT_H
         .Style = fmStyleDropDownList
         .AddItem "UK"
         .AddItem "US"
@@ -379,13 +422,13 @@ Private Sub UserForm_Initialize()
     ' Primary quotation marks
     Set lbl = Me.Controls.Add("Forms.Label.1", "lblQuoteNesting")
     With lbl
-        .Caption = "Primary quotation marks:"
-        .Left = colRight: .Top = optY + 2: .Width = 88: .Height = LBL_H
-        .Font.Size = 7
+        .Caption = "Primary quotes:"
+        .Left = colRight: .Top = optY + 2: .Width = lblOptW: .Height = LBL_H
+        .Font.Size = 7.5
     End With
     Set cboQuoteNesting = Me.Controls.Add("Forms.ComboBox.1", "cboQuoteNesting")
     With cboQuoteNesting
-        .Left = colRight + 90: .Top = optY: .Width = cboW: .Height = TXT_H
+        .Left = colRight + lblOptW + 2: .Top = optY: .Width = cboW: .Height = TXT_H
         .Style = fmStyleDropDownList
         .AddItem "Single"
         .AddItem "Double"
@@ -398,12 +441,12 @@ Private Sub UserForm_Initialize()
     Set lbl = Me.Controls.Add("Forms.Label.1", "lblSmartQuotes")
     With lbl
         .Caption = "Smart quotes:"
-        .Left = colRight: .Top = optY + 2: .Width = 88: .Height = LBL_H
+        .Left = colRight: .Top = optY + 2: .Width = lblOptW: .Height = LBL_H
         .Font.Size = 7.5
     End With
     Set cboSmartQuotes = Me.Controls.Add("Forms.ComboBox.1", "cboSmartQuotes")
     With cboSmartQuotes
-        .Left = colRight + 90: .Top = optY: .Width = cboW: .Height = TXT_H
+        .Left = colRight + lblOptW + 2: .Top = optY: .Width = cboW: .Height = TXT_H
         .Style = fmStyleDropDownList
         .AddItem "Smart"
         .AddItem "Straight"
@@ -416,15 +459,15 @@ Private Sub UserForm_Initialize()
     Set lbl = Me.Controls.Add("Forms.Label.1", "lblDateFormat")
     With lbl
         .Caption = "Date format:"
-        .Left = colRight: .Top = optY + 2: .Width = 88: .Height = LBL_H
+        .Left = colRight: .Top = optY + 2: .Width = lblOptW: .Height = LBL_H
         .Font.Size = 7.5
     End With
     Set cboDateFormat = Me.Controls.Add("Forms.ComboBox.1", "cboDateFormat")
     With cboDateFormat
-        .Left = colRight + 90: .Top = optY: .Width = cboW + 46: .Height = TXT_H
+        .Left = colRight + lblOptW + 2: .Top = optY: .Width = cboW: .Height = TXT_H
         .Style = fmStyleDropDownList
-        .AddItem "UK (e.g. 14 March 2026 / 14/03/2026)"
-        .AddItem "US (e.g. March 14, 2026 / 03/14/2026)"
+        .AddItem "UK (14 March 2026 / 14/03/2026)"
+        .AddItem "US (March 14, 2026 / 03/14/2026)"
         .ListIndex = 0
         .Font.Size = 7.5
     End With
@@ -433,13 +476,13 @@ Private Sub UserForm_Initialize()
     ' Non-English Terms
     Set lbl = Me.Controls.Add("Forms.Label.1", "lblNonEngTerms")
     With lbl
-        .Caption = "Non-English Terms:"
-        .Left = colRight: .Top = optY + 2: .Width = 88: .Height = LBL_H
+        .Caption = "Non-English terms:"
+        .Left = colRight: .Top = optY + 2: .Width = lblOptW: .Height = LBL_H
         .Font.Size = 7.5
     End With
     Set cboNonEngTerms = Me.Controls.Add("Forms.ComboBox.1", "cboNonEngTerms")
     With cboNonEngTerms
-        .Left = colRight + 90: .Top = optY: .Width = cboW: .Height = TXT_H
+        .Left = colRight + lblOptW + 2: .Top = optY: .Width = cboW: .Height = TXT_H
         .Style = fmStyleDropDownList
         .AddItem "Italics"
         .AddItem "Regular text"
@@ -452,12 +495,12 @@ Private Sub UserForm_Initialize()
     Set lbl = Me.Controls.Add("Forms.Label.1", "lblSpaceStyle")
     With lbl
         .Caption = "After full stop:"
-        .Left = colRight: .Top = optY + 2: .Width = 88: .Height = LBL_H
+        .Left = colRight: .Top = optY + 2: .Width = lblOptW: .Height = LBL_H
         .Font.Size = 7.5
     End With
     Set cboSpaceStyle = Me.Controls.Add("Forms.ComboBox.1", "cboSpaceStyle")
     With cboSpaceStyle
-        .Left = colRight + 90: .Top = optY: .Width = cboW: .Height = TXT_H
+        .Left = colRight + lblOptW + 2: .Top = optY: .Width = cboW: .Height = TXT_H
         .Style = fmStyleDropDownList
         .AddItem "One space"
         .AddItem "Two spaces"
@@ -466,16 +509,18 @@ Private Sub UserForm_Initialize()
     End With
     optY = optY + TXT_H + ITEM_GAP
 
-    ' Defined terms (format + quotes)
+    ' Defined terms formatting pair
+    Dim dtLblW As Single: dtLblW = 52
+    Dim dtCboW As Single: dtCboW = (rightW - dtLblW - 14) / 2
     Set lbl = Me.Controls.Add("Forms.Label.1", "lblDefinedTerms")
     With lbl
         .Caption = "Def. terms:"
-        .Left = colRight: .Top = optY + 2: .Width = 56: .Height = LBL_H
+        .Left = colRight: .Top = optY + 2: .Width = dtLblW: .Height = LBL_H
         .Font.Size = 7.5
     End With
     Set cboTermFormat = Me.Controls.Add("Forms.ComboBox.1", "cboTermFormat")
     With cboTermFormat
-        .Left = colRight + 56: .Top = optY: .Width = 70: .Height = TXT_H
+        .Left = colRight + dtLblW + 2: .Top = optY: .Width = dtCboW: .Height = TXT_H
         .Style = fmStyleDropDownList
         .AddItem "Bold"
         .AddItem "Bold Italics"
@@ -489,12 +534,14 @@ Private Sub UserForm_Initialize()
     Set lblAnd = Me.Controls.Add("Forms.Label.1", "lblTermAnd")
     With lblAnd
         .Caption = "+"
-        .Left = colRight + 128: .Top = optY + 2: .Width = 10: .Height = LBL_H
+        .Left = colRight + dtLblW + dtCboW + 4: .Top = optY + 2
+        .Width = 10: .Height = LBL_H
         .Font.Size = 7.5
     End With
     Set cboTermQuotes = Me.Controls.Add("Forms.ComboBox.1", "cboTermQuotes")
     With cboTermQuotes
-        .Left = colRight + 140: .Top = optY: .Width = 80: .Height = TXT_H
+        .Left = colRight + dtLblW + dtCboW + 14: .Top = optY
+        .Width = dtCboW: .Height = TXT_H
         .Style = fmStyleDropDownList
         .AddItem "Single quotes"
         .AddItem "Double quotes"
@@ -727,13 +774,13 @@ Private Function DisplayToDataIndex(ByVal displayIdx As Long) As Long
 End Function
 
 ' ============================================================
-'  LOAD CUSTOM RULES FROM ENGINE (Rules_Brands module)
+'  LOAD CUSTOM RULES FROM ENGINE
 ' ============================================================
 Private Sub LoadCustomRulesFromEngine()
     InitCustomRulesArrays 16
     On Error Resume Next
-    Dim brands As Object
-    Set brands = Application.Run("Rules_Brands.GetBrandRules")
+    Dim engineRules As Object
+    Set engineRules = Application.Run("Rules_Brands.GetBrandRules")
     If Err.Number <> 0 Then
         Err.Clear
         On Error GoTo 0
@@ -741,14 +788,14 @@ Private Sub LoadCustomRulesFromEngine()
         Exit Sub
     End If
     On Error GoTo 0
-    If brands Is Nothing Then
+    If engineRules Is Nothing Then
         RefreshCustomRulesList
         Exit Sub
     End If
-    Dim bKey As Variant
-    For Each bKey In brands.keys
-        AddCustomRule CStr(bKey), CStr(brands(bKey)), True
-    Next bKey
+    Dim rKey As Variant
+    For Each rKey In engineRules.keys
+        AddCustomRule CStr(rKey), CStr(engineRules(rKey)), True
+    Next rKey
     RefreshCustomRulesList
 End Sub
 
@@ -756,10 +803,10 @@ End Sub
 '  SYNC CUSTOM RULES BACK TO ENGINE (before run)
 ' ============================================================
 Private Sub SyncCustomRulesToEngine()
-    ' Clear existing brand rules and rebuild from our data model
+    ' Clear existing engine rules and rebuild from our data model
     On Error Resume Next
-    Dim oldBrands As Object
-    Set oldBrands = Application.Run("Rules_Brands.GetBrandRules")
+    Dim existingRules As Object
+    Set existingRules = Application.Run("Rules_Brands.GetBrandRules")
     If Err.Number <> 0 Then
         Err.Clear
         On Error GoTo 0
@@ -767,10 +814,10 @@ Private Sub SyncCustomRulesToEngine()
     End If
     On Error GoTo 0
 
-    ' Remove all existing rules
-    If Not oldBrands Is Nothing Then
+    ' Remove all existing rules from engine
+    If Not existingRules Is Nothing Then
         Dim oldKeys As Variant
-        oldKeys = oldBrands.keys
+        oldKeys = existingRules.keys
         Dim m As Long
         For m = UBound(oldKeys) To LBound(oldKeys) Step -1
             On Error Resume Next
@@ -780,7 +827,7 @@ Private Sub SyncCustomRulesToEngine()
         Next m
     End If
 
-    ' Add back only enabled rules
+    ' Add back only enabled custom rules
     Dim n As Long
     For n = 0 To crCount - 1
         If crEnabled(n) Then
@@ -1106,7 +1153,7 @@ Private Sub btnAddRule_Click()
 
     txtRuleCorrect.Text = ""
     ClearVariants
-    ShowVariantsPlaceholder
+    InitVariantsPlaceholder
     RefreshCustomRulesList
 End Sub
 
@@ -1131,7 +1178,7 @@ Private Sub btnRemoveRule_Click()
         btnAddRule.Caption = "Add"
         txtRuleCorrect.Text = ""
         ClearVariants
-        ShowVariantsPlaceholder
+        InitVariantsPlaceholder
     End If
 
     RefreshCustomRulesList
@@ -1152,7 +1199,7 @@ Private Sub btnEditRule_Click()
 
     editingRuleIndex = lstCustomRules.ListIndex
     txtRuleCorrect.Text = crCorrect(dataIdx)
-    HideVariantsPlaceholder
+    ClearVariants
     txtRuleVariants.Text = crVariants(dataIdx)
     btnAddRule.Caption = "Save Edit"
 End Sub
@@ -1338,9 +1385,9 @@ Private Function GetCustomRulesPath() As String
         sep = Application.PathSeparator
         #If Mac Then
             GetCustomRulesPath = Environ("HOME") & sep & "Library" & sep & _
-                                "Application Support" & sep & "PleadingsChecker" & sep & "brand_rules.txt"
+                                "Application Support" & sep & "PleadingsChecker" & sep & "custom_rules.txt"
         #Else
-            GetCustomRulesPath = Environ("APPDATA") & sep & "PleadingsChecker" & sep & "brand_rules.txt"
+            GetCustomRulesPath = Environ("APPDATA") & sep & "PleadingsChecker" & sep & "custom_rules.txt"
         #End If
         Exit Function
     End If
@@ -1350,26 +1397,18 @@ End Function
 ' ============================================================
 '  VARIANTS TEXTBOX PLACEHOLDER HELPERS
 ' ============================================================
-Private Sub ShowVariantsPlaceholder()
+Private Sub InitVariantsPlaceholder()
     If txtRuleVariants Is Nothing Then Exit Sub
-    If Len(Trim$(txtRuleVariants.Text)) = 0 Or variantsPlaceholderActive Then
-        txtRuleVariants.Text = "e.g. colour, color, colours"
-        txtRuleVariants.ForeColor = &HC0C0C0  ' light grey
-        variantsPlaceholderActive = True
-    End If
-End Sub
-
-Private Sub HideVariantsPlaceholder()
-    If variantsPlaceholderActive Then
-        txtRuleVariants.Text = ""
-        txtRuleVariants.ForeColor = &H0  ' black
-        variantsPlaceholderActive = False
-    End If
+    With txtRuleVariants
+        .Text = VARIANTS_PLACEHOLDER
+        .ForeColor = RGB(150, 150, 150)
+    End With
+    mVariantsShowingPlaceholder = True
 End Sub
 
 Private Function GetVariantsText() As String
-    If variantsPlaceholderActive Then
-        GetVariantsText = ""
+    If mVariantsShowingPlaceholder Then
+        GetVariantsText = vbNullString
     Else
         GetVariantsText = Trim$(txtRuleVariants.Text)
     End If
@@ -1377,17 +1416,24 @@ End Function
 
 Private Sub ClearVariants()
     txtRuleVariants.Text = ""
-    txtRuleVariants.ForeColor = &H0
-    variantsPlaceholderActive = False
+    txtRuleVariants.ForeColor = RGB(0, 0, 0)
+    mVariantsShowingPlaceholder = False
 End Sub
 
 Private Sub txtRuleVariants_Enter()
-    HideVariantsPlaceholder
+    If mVariantsShowingPlaceholder Then
+        txtRuleVariants.Text = ""
+        txtRuleVariants.ForeColor = RGB(0, 0, 0)
+        mVariantsShowingPlaceholder = False
+    End If
 End Sub
 
 Private Sub txtRuleVariants_Exit(ByVal Cancel As MSForms.ReturnBoolean)
     If Len(Trim$(txtRuleVariants.Text)) = 0 Then
-        ShowVariantsPlaceholder
+        InitVariantsPlaceholder
+    Else
+        txtRuleVariants.ForeColor = RGB(0, 0, 0)
+        mVariantsShowingPlaceholder = False
     End If
 End Sub
 
