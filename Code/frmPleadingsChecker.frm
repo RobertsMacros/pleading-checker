@@ -62,6 +62,7 @@ Private cboSpaceStyle   As MSForms.ComboBox
 Private lblStatus       As MSForms.Label
 
 Private lastResults     As Collection
+Private targetDoc       As Document
 
 ' ============================================================
 '  FORM INITIALISATION -- creates all controls at runtime
@@ -554,8 +555,8 @@ End Sub
 '  RUN BUTTON
 ' ============================================================
 Private Sub btnRun_Click()
-    If ActiveDocument Is Nothing Then
-        MsgBox "Please open a document first.", vbExclamation, "Pleadings Checker"
+    Set targetDoc = PleadingsEngine.GetTargetDocument()
+    If targetDoc Is Nothing Then
         Exit Sub
     End If
 
@@ -627,7 +628,7 @@ Private Sub btnRun_Click()
     Me.Repaint
     DoEvents
 
-    Set lastResults = PleadingsEngine.RunAllPleadingsRules(ActiveDocument, ruleConfig)
+    Set lastResults = PleadingsEngine.RunAllPleadingsRules(targetDoc, ruleConfig)
 
     ' Show performance summary in Immediate window
     Dim slowestRules As String
@@ -680,9 +681,9 @@ Private Sub btnRun_Click()
             addComments = (chkAddComments.Value = True)
 
             If chkTrackedChanges.Value = True Then
-                PleadingsEngine.ApplySuggestionsAsTrackedChanges ActiveDocument, lastResults, addComments
+                PleadingsEngine.ApplySuggestionsAsTrackedChanges targetDoc, lastResults, addComments
             Else
-                PleadingsEngine.ApplyHighlights ActiveDocument, lastResults, addComments
+                PleadingsEngine.ApplyHighlights targetDoc, lastResults, addComments
             End If
 
             lblStatus.Caption = lastResults.Count & " issue(s) applied."
@@ -706,13 +707,15 @@ Private Sub btnExport_Click()
     sep = Application.PathSeparator
 
     On Error Resume Next
-    If ActiveDocument.Path <> "" Then
-        Dim baseName As String
-        baseName = ActiveDocument.Name
-        Dim dotPos As Long
-        dotPos = InStrRev(baseName, ".")
-        If dotPos > 1 Then baseName = Left$(baseName, dotPos - 1)
-        reportPath = ActiveDocument.Path & sep & baseName & "_pleadings_report.json"
+    If Not targetDoc Is Nothing Then
+        If targetDoc.Path <> "" Then
+            Dim baseName As String
+            baseName = targetDoc.Name
+            Dim dotPos As Long
+            dotPos = InStrRev(baseName, ".")
+            If dotPos > 1 Then baseName = Left$(baseName, dotPos - 1)
+            reportPath = targetDoc.Path & sep & baseName & "_pleadings_report.json"
+        End If
     End If
     If Err.Number <> 0 Or Len(reportPath) = 0 Then
         Err.Clear
@@ -737,7 +740,7 @@ Private Sub btnExport_Click()
     DoEvents
 
     Dim summary As String
-    summary = PleadingsEngine.GenerateReport(lastResults, reportPath, ActiveDocument)
+    summary = PleadingsEngine.GenerateReport(lastResults, reportPath, targetDoc)
 
     ' Auto-save debug log alongside report when DEBUG_MODE is True
     Dim logPath As String

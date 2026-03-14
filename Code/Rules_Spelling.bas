@@ -26,9 +26,9 @@ Attribute VB_Name = "Rules_Spelling"
 ' ============================================================
 Option Explicit
 
-Private Const RULE_NAME As String = "spelling"
-Private Const RULE_NAME_LICENCE As String = "licence_license"
-Private Const RULE_NAME_CHECK As String = "check_cheque"
+Private Const RULE_NAME As String = "spellchecker"
+Private Const RULE_NAME_LICENCE As String = "spellchecker"
+Private Const RULE_NAME_CHECK As String = "spellchecker"
 
 ' ============================================================
 '  MAIN ENTRY POINT

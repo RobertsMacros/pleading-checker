@@ -14,7 +14,7 @@ Option Explicit
 
 Private Const RULE_NAME_SLASH As String = "slash_style"
 Private Const RULE_NAME_BRACKET As String = "bracket_integrity"
-Private Const RULE_NAME_DASH As String = "dash_usage"
+Private Const RULE_NAME_DASH As String = "hyphens"
 
 ' ?==============================================================?
 ' ?  SLASH STYLE (Rule14)                                       ?
@@ -743,6 +743,74 @@ End Function
 ' ----------------------------------------------------------------
 '  PRIVATE: Create a dictionary-based finding (no class dependency)
 ' ----------------------------------------------------------------
+Private Const RULE_NAME_TRIPLICATE As String = "triplicate_punctuation"
+
+' ============================================================
+'  TRIPLICATE PUNCTUATION
+'  Flags three or more consecutive identical punctuation marks:
+'    (((  )))  [[[  ]]]  """  '''  ,,,
+'  Deliberately excludes "..." (ellipsis).
+' ============================================================
+Public Function Check_TriplicatePunctuation(doc As Document) As Collection
+    Dim issues As New Collection
+    Dim para As Paragraph
+    Dim paraText As String
+    Dim finding As Object
+    Dim locStr As String
+    Dim i As Long
+    Dim ch As String
+    Dim runLen As Long
+
+    ' Characters to check (NOT including "." to avoid flagging ellipsis)
+    Dim targets As String
+    targets = "()[]""',"
+
+    On Error Resume Next
+    For Each para In doc.Paragraphs
+        paraText = para.Range.Text
+        If Err.Number <> 0 Then paraText = "": Err.Clear
+
+        If Len(paraText) < 3 Then GoTo NextTriPara
+
+        ' Check page range
+        If Not EngineIsInPageRange(para.Range) Then GoTo NextTriPara
+
+        i = 1
+        Do While i <= Len(paraText) - 2
+            ch = Mid$(paraText, i, 1)
+            If InStr(targets, ch) > 0 Then
+                ' Count consecutive identical chars
+                runLen = 1
+                Do While i + runLen <= Len(paraText) And Mid$(paraText, i + runLen, 1) = ch
+                    runLen = runLen + 1
+                Loop
+                If runLen >= 3 Then
+                    locStr = EngineGetLocationString(para.Range, doc)
+                    Dim matched As String
+                    matched = String$(runLen, ch)
+                    Set finding = CreateIssueDict( _
+                        RULE_NAME_TRIPLICATE, locStr, _
+                        "Triplicate punctuation: '" & matched & "'", _
+                        "Remove repeated punctuation", _
+                        para.Range.Start + i - 1, _
+                        para.Range.Start + i - 1 + runLen, _
+                        "error", False, "", matched)
+                    issues.Add finding
+                    i = i + runLen
+                Else
+                    i = i + runLen
+                End If
+            Else
+                i = i + 1
+            End If
+        Loop
+NextTriPara:
+    Next para
+    On Error GoTo 0
+
+    Set Check_TriplicatePunctuation = issues
+End Function
+
 Private Function CreateIssueDict(ByVal ruleName_ As String, _
                                  ByVal location_ As String, _
                                  ByVal issue_ As String, _

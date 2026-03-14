@@ -13,8 +13,8 @@ Attribute VB_Name = "Rules_Italics"
 Option Explicit
 
 ' -- Rule-name constants -------------------------------------
-Private Const RULE_NAME_ANGLICISED As String = "known_anglicised_terms_not_italic"
-Private Const RULE_NAME_FOREIGN   As String = "foreign_names_not_italic"
+Private Const RULE_NAME_ANGLICISED As String = "non_english_terms"
+Private Const RULE_NAME_FOREIGN   As String = "non_english_terms"
 
 ' -- Seed list of anglicised terms (Rule 30) -----------------
 Private seedTerms As Variant

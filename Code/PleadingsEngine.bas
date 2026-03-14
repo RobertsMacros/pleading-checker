@@ -65,10 +65,6 @@ Private paraCacheValid  As Boolean
 '  ENTRY POINT
 ' ============================================================
 Public Sub PleadingsChecker()
-    If ActiveDocument Is Nothing Then
-        MsgBox "Please open a document first.", vbExclamation, "Pleadings Checker"
-        Exit Sub
-    End If
     ' Show the UserForm; fall back to quick run if form not imported
     On Error Resume Next
     frmPleadingsChecker.Show
@@ -81,19 +77,101 @@ Public Sub PleadingsChecker()
 End Sub
 
 ' ============================================================
+'  TARGET DOCUMENT SELECTION
+'  Lets the user choose which open document to check.
+'  Skips the macro host (ThisDocument) unless it's the only one.
+' ============================================================
+Public Function GetTargetDocument() As Document
+    Set GetTargetDocument = Nothing
+    Dim hostName As String
+    On Error Resume Next
+    hostName = ThisDocument.Name
+    If Err.Number <> 0 Then hostName = "": Err.Clear
+    On Error GoTo 0
+
+    ' Build list of candidate documents (skip macro host)
+    Dim candidates As New Collection
+    Dim doc As Document
+    For Each doc In Documents
+        If doc.Name <> hostName Then
+            candidates.Add doc
+        End If
+    Next doc
+
+    ' No candidates: check if host is the only document
+    If candidates.Count = 0 Then
+        If Documents.Count = 1 Then
+            ' Only the host is open -- confirm
+            Dim hostChoice As VbMsgBoxResult
+            hostChoice = MsgBox("The only open document is the macro host:" & vbCrLf & _
+                                hostName & vbCrLf & vbCrLf & _
+                                "Run the checker against this document?", _
+                                vbYesNo + vbQuestion, "Pleadings Checker")
+            If hostChoice = vbYes Then
+                Set GetTargetDocument = Documents(1)
+            End If
+        Else
+            MsgBox "No suitable target document is open." & vbCrLf & _
+                   "Please open the document you want to check.", _
+                   vbExclamation, "Pleadings Checker"
+        End If
+        Exit Function
+    End If
+
+    ' Single candidate: select automatically
+    If candidates.Count = 1 Then
+        Set GetTargetDocument = candidates(1)
+        Debug.Print "GetTargetDocument: auto-selected " & candidates(1).Name
+        Exit Function
+    End If
+
+    ' Multiple candidates: show picker
+    Dim prompt As String
+    prompt = "Select the document to check:" & vbCrLf & vbCrLf
+    Dim idx As Long
+    For idx = 1 To candidates.Count
+        prompt = prompt & idx & ". " & candidates(idx).Name & vbCrLf
+    Next idx
+
+    Dim input As String
+    input = InputBox(prompt, "Pleadings Checker - Select Document", "1")
+    If Len(Trim(input)) = 0 Then Exit Function  ' cancelled
+
+    Dim chosen As Long
+    If IsNumeric(input) Then
+        chosen = CLng(input)
+        If chosen >= 1 And chosen <= candidates.Count Then
+            Set GetTargetDocument = candidates(chosen)
+        Else
+            MsgBox "Invalid selection.", vbExclamation, "Pleadings Checker"
+        End If
+    Else
+        MsgBox "Invalid selection.", vbExclamation, "Pleadings Checker"
+    End If
+End Function
+
+' ============================================================
 '  QUICK RUN (fallback when launcher is not imported)
 '  Runs all available rules and shows summary via MsgBox.
 ' ============================================================
 Public Sub RunQuick()
     TraceEnter "RunQuick"
-    DebugLogDoc "RunQuick target", ActiveDocument
+    Dim targetDoc As Document
+    Set targetDoc = GetTargetDocument()
+    If targetDoc Is Nothing Then
+        TraceExit "RunQuick", "no target selected"
+        Exit Sub
+    End If
+    DebugLogDoc "RunQuick target", targetDoc
+    Debug.Print "RunQuick: macro host=" & ThisDocument.Name & " target=" & targetDoc.Name
+
     Dim cfg As Object
     Set cfg = InitRuleConfig()
     SetPageRange 0, 0
     SetSpellingMode "UK"
 
     Dim issues As Collection
-    Set issues = RunAllPleadingsRules(ActiveDocument, cfg)
+    Set issues = RunAllPleadingsRules(targetDoc, cfg)
 
     Dim summary As String
     summary = GetIssueSummary(issues)
@@ -102,7 +180,7 @@ Public Sub RunQuick()
         MsgBox "No issues found.", vbInformation, "Pleadings Checker"
     Else
         MsgBox summary, vbInformation, "Pleadings Checker"
-        ApplySuggestionsAsTrackedChanges ActiveDocument, issues, True
+        ApplySuggestionsAsTrackedChanges targetDoc, issues, True
     End If
     TraceExit "RunQuick", issues.Count & " issues"
 End Sub
@@ -206,27 +284,25 @@ Public Function InitRuleConfig() As Object
     Dim cfg As Object
     Set cfg = CreateObject("Scripting.Dictionary")
 
-    cfg.Add "spelling", True
+    cfg.Add "spellchecker", True
     cfg.Add "repeated_words", True
     cfg.Add "custom_term_whitelist", True
     cfg.Add "date_time_format", True
-    cfg.Add "licence_license", True
-    cfg.Add "check_cheque", True
     cfg.Add "slash_style", True
-    cfg.Add "dash_usage", True
+    cfg.Add "hyphens", True
     cfg.Add "bracket_integrity", True
     cfg.Add "currency_number_format", True
     cfg.Add "footnote_rules", True
     cfg.Add "brand_name_enforcement", True
     cfg.Add "mandated_legal_term_forms", True
     cfg.Add "always_capitalise_terms", True
-    cfg.Add "known_anglicised_terms_not_italic", True
-    cfg.Add "foreign_names_not_italic", True
+    cfg.Add "non_english_terms", True
     cfg.Add "spell_out_under_ten", True
     cfg.Add "double_spaces", True
     cfg.Add "double_commas", True
     cfg.Add "space_before_punct", True
     cfg.Add "missing_space_after_dot", True
+    cfg.Add "triplicate_punctuation", True
 
     Set InitRuleConfig = cfg
 End Function
@@ -534,12 +610,16 @@ Public Function RunAllPleadingsRules(doc As Document, _
     End If
     DoEvents
 
-    ' -- Spelling (bidirectional UK/US) --
-    If IsRuleEnabled(config, "spelling") Then
-        PerfTimerStart "spelling"
+    ' -- Spellchecker (spelling + licence/license + check/cheque) --
+    If IsRuleEnabled(config, "spellchecker") Then
+        PerfTimerStart "spellchecker"
         AddIssuesToCollection allIssues, _
             TryRunRule("Rules_Spelling.Check_Spelling", doc)
-        PerfTimerEnd "spelling"
+        AddIssuesToCollection allIssues, _
+            TryRunRule("Rules_Spelling.Check_LicenceLicense", doc)
+        AddIssuesToCollection allIssues, _
+            TryRunRule("Rules_Spelling.Check_CheckCheque", doc)
+        PerfTimerEnd "spellchecker"
     End If
 
     DoEvents
@@ -589,9 +669,6 @@ Public Function RunAllPleadingsRules(doc As Document, _
     End If
 
 
-
-
-
     DoEvents
     ' -- Number format rules --
     If IsRuleEnabled(config, "date_time_format") Then
@@ -606,25 +683,6 @@ Public Function RunAllPleadingsRules(doc As Document, _
         AddIssuesToCollection allIssues, _
             TryRunRule("Rules_NumberFormats.Check_CurrencyNumberFormat", doc)
         PerfTimerEnd "currency_number_format"
-    End If
-
-
-
-
-    DoEvents
-    ' -- UK/US variant rules (in Rules_Spelling) --
-    If IsRuleEnabled(config, "licence_license") Then
-        PerfTimerStart "licence_license"
-        AddIssuesToCollection allIssues, _
-            TryRunRule("Rules_Spelling.Check_LicenceLicense", doc)
-        PerfTimerEnd "licence_license"
-    End If
-
-    If IsRuleEnabled(config, "check_cheque") Then
-        PerfTimerStart "check_cheque"
-        AddIssuesToCollection allIssues, _
-            TryRunRule("Rules_Spelling.Check_CheckCheque", doc)
-        PerfTimerEnd "check_cheque"
     End If
 
     DoEvents
@@ -643,11 +701,18 @@ Public Function RunAllPleadingsRules(doc As Document, _
         PerfTimerEnd "bracket_integrity"
     End If
 
-    If IsRuleEnabled(config, "dash_usage") Then
-        PerfTimerStart "dash_usage"
+    If IsRuleEnabled(config, "hyphens") Then
+        PerfTimerStart "hyphens"
         AddIssuesToCollection allIssues, _
             TryRunRule("Rules_Punctuation.Check_DashUsage", doc)
-        PerfTimerEnd "dash_usage"
+        PerfTimerEnd "hyphens"
+    End If
+
+    If IsRuleEnabled(config, "triplicate_punctuation") Then
+        PerfTimerStart "triplicate_punctuation"
+        AddIssuesToCollection allIssues, _
+            TryRunRule("Rules_Punctuation.Check_TriplicatePunctuation", doc)
+        PerfTimerEnd "triplicate_punctuation"
     End If
 
     DoEvents
@@ -693,19 +758,14 @@ Public Function RunAllPleadingsRules(doc As Document, _
     End If
 
     DoEvents
-    ' -- Italic rules --
-    If IsRuleEnabled(config, "known_anglicised_terms_not_italic") Then
-        PerfTimerStart "anglicised_terms_not_italic"
+    ' -- Non-English term rules (italics) --
+    If IsRuleEnabled(config, "non_english_terms") Then
+        PerfTimerStart "non_english_terms"
         AddIssuesToCollection allIssues, _
             TryRunRule("Rules_Italics.Check_AnglicisedTermsNotItalic", doc)
-        PerfTimerEnd "anglicised_terms_not_italic"
-    End If
-
-    If IsRuleEnabled(config, "foreign_names_not_italic") Then
-        PerfTimerStart "foreign_names_not_italic"
         AddIssuesToCollection allIssues, _
             TryRunRule("Rules_Italics.Check_ForeignNamesNotItalic", doc)
-        PerfTimerEnd "foreign_names_not_italic"
+        PerfTimerEnd "non_english_terms"
     End If
 
 RunnerCleanup:
@@ -1440,13 +1500,13 @@ Public Function GenerateReport(issues As Collection, _
     Dim finding As Object
     Dim i As Long
 
-    ' Resolve document name: prefer explicit doc, fall back to ActiveDocument
+    ' Resolve document name from explicit doc parameter
     Dim docName As String
     On Error Resume Next
     If Not doc Is Nothing Then
         docName = doc.Name
     Else
-        docName = ActiveDocument.Name
+        docName = "(no document)"
     End If
     If Err.Number <> 0 Then docName = "(unknown)": Err.Clear
     On Error GoTo 0
@@ -1610,27 +1670,25 @@ Public Function GetRuleDisplayNames() As Object
     Dim d As Object
     Set d = CreateObject("Scripting.Dictionary")
 
-    d.Add "spelling", "Spelling Enforcement (UK/US)"
+    d.Add "spellchecker", "Spellchecker"
     d.Add "repeated_words", "Repeated Word Detection"
     d.Add "custom_term_whitelist", "Custom Term Whitelist"
     d.Add "date_time_format", "Date/Time Format Consistency"
-    d.Add "licence_license", "Licence/License Rule"
-    d.Add "check_cheque", "Check/Cheque Rule"
     d.Add "slash_style", "Slash Style Checker"
-    d.Add "dash_usage", "En-dash/Em-dash/Hyphen"
+    d.Add "hyphens", "Hyphens"
     d.Add "bracket_integrity", "Bracket Integrity"
     d.Add "currency_number_format", "Currency/Number Formatting"
     d.Add "footnote_rules", "Footnote Rules"
     d.Add "brand_name_enforcement", "Brand Name Enforcement"
     d.Add "mandated_legal_term_forms", "Mandated Legal Term Forms"
     d.Add "always_capitalise_terms", "Always Capitalise Terms"
-    d.Add "known_anglicised_terms_not_italic", "Anglicised Terms Not Italic"
-    d.Add "foreign_names_not_italic", "Foreign Names Not Italic"
+    d.Add "non_english_terms", "Non-English Terms"
     d.Add "spell_out_under_ten", "Spell Out Numbers Under 10"
     d.Add "double_spaces", "Double Spaces"
     d.Add "double_commas", "Double Commas"
     d.Add "space_before_punct", "Space Before Punctuation"
     d.Add "missing_space_after_dot", "Missing Space After Full Stop"
+    d.Add "triplicate_punctuation", "Triplicate Punctuation"
 
     Set GetRuleDisplayNames = d
 End Function

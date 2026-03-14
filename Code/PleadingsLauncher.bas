@@ -9,19 +9,21 @@ Attribute VB_Name = "PleadingsLauncher"
 ' ============================================================
 Option Explicit
 
+Private targetDoc As Document
+
 ' ============================================================
 '  MAIN LAUNCHER (called by PleadingsEngine.PleadingsChecker)
 ' ============================================================
 Public Sub LaunchChecker()
-    If ActiveDocument Is Nothing Then
-        MsgBox "Please open a document first.", vbExclamation, "Pleadings Checker"
+    Set targetDoc = Application.Run("PleadingsEngine.GetTargetDocument")
+    If targetDoc Is Nothing Then
         Exit Sub
     End If
 
     ' -- Choose action --
     Dim choice As Long
     choice = MsgBox("Pleadings Checker" & vbCrLf & vbCrLf & _
-                    "Document: " & ActiveDocument.Name & vbCrLf & vbCrLf & _
+                    "Document: " & targetDoc.Name & vbCrLf & vbCrLf & _
                     "All imported rule modules will run." & vbCrLf & _
                     "Click Yes to run checks, No for options, Cancel to exit.", _
                     vbYesNoCancel + vbInformation, "Pleadings Checker")
@@ -66,7 +68,7 @@ Private Sub RunChecks()
     DoEvents
 
     Dim issues As Collection
-    Set issues = Application.Run("PleadingsEngine.RunAllPleadingsRules", ActiveDocument, cfg)
+    Set issues = Application.Run("PleadingsEngine.RunAllPleadingsRules", targetDoc, cfg)
 
     Application.StatusBar = ""
 
@@ -106,11 +108,11 @@ Private Sub RunChecks()
 
     Select Case applyChoice
         Case vbYes
-            Application.Run "PleadingsEngine.ApplySuggestionsAsTrackedChanges", ActiveDocument, issues, True
+            Application.Run "PleadingsEngine.ApplySuggestionsAsTrackedChanges", targetDoc, issues, True
             MsgBox issues.Count & " issue(s) applied as tracked changes.", _
                    vbInformation, "Pleadings Checker"
         Case vbNo
-            Application.Run "PleadingsEngine.ApplyHighlights", ActiveDocument, issues, True
+            Application.Run "PleadingsEngine.ApplyHighlights", targetDoc, issues, True
             MsgBox issues.Count & " issue(s) highlighted with comments.", _
                    vbInformation, "Pleadings Checker"
         Case vbCancel
@@ -232,13 +234,15 @@ Private Sub ExportReport(issues As Collection)
     sep = Application.PathSeparator
 
     On Error Resume Next
-    If ActiveDocument.Path <> "" Then
-        Dim baseName As String
-        baseName = ActiveDocument.Name
-        Dim dotPos As Long
-        dotPos = InStrRev(baseName, ".")
-        If dotPos > 1 Then baseName = Left$(baseName, dotPos - 1)
-        reportPath = ActiveDocument.Path & sep & baseName & "_pleadings_report.json"
+    If Not targetDoc Is Nothing Then
+        If targetDoc.Path <> "" Then
+            Dim baseName As String
+            baseName = targetDoc.Name
+            Dim dotPos As Long
+            dotPos = InStrRev(baseName, ".")
+            If dotPos > 1 Then baseName = Left$(baseName, dotPos - 1)
+            reportPath = targetDoc.Path & sep & baseName & "_pleadings_report.json"
+        End If
     End If
     If Err.Number <> 0 Or Len(reportPath) = 0 Then
         Err.Clear
@@ -258,7 +262,7 @@ Private Sub ExportReport(issues As Collection)
     End If
 
     Dim summary As String
-    summary = Application.Run("PleadingsEngine.GenerateReport", issues, reportPath, ActiveDocument)
+    summary = Application.Run("PleadingsEngine.GenerateReport", issues, reportPath, targetDoc)
 
     ' Auto-save debug log alongside report when DEBUG_MODE is True
     Dim logPath As String
