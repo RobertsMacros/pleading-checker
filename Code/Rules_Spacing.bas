@@ -282,7 +282,7 @@ Public Function Check_SpaceBeforePunct(doc As Document) As Collection
         ' Range covers only the space (not the punctuation character)
         ' Store the space as MatchedText
         Set finding = CreateIssueDict(RULE_SPACE_BEFORE_PUNCT, locStr, _
-            "Unexpected space before '" & punctChar & "'.", _
+            "Unexpected space before '" & punctChar & "'", _
             "Remove the space before punctuation", rng.Start, rng.Start + 1, "error", True, "", _
             " ", "exact_text", "high")
         issues.Add finding

@@ -1,10 +1,10 @@
 VERSION 5.00
 Begin {C62A69F0-16DC-11CE-9E98-00AA00574A4F} frmPleadingsChecker
    Caption         =   "Pleadings Checker"
-   ClientHeight    =   1000
+   ClientHeight    =   500
    ClientLeft      =   120
    ClientTop       =   465
-   ClientWidth     =   1000
+   ClientWidth     =   700
    StartUpPosition =   1  'CenterOwner
 End
 Attribute VB_Name = "frmPleadingsChecker"
@@ -43,7 +43,7 @@ Private WithEvents btnSaveBrands    As MSForms.CommandButton
 Private WithEvents btnLoadBrands    As MSForms.CommandButton
 
 Private fraRules        As MSForms.Frame
-Private txtPageRange    As MSForms.TextBox
+Private WithEvents txtPageRange As MSForms.TextBox
 Private lstBrands       As MSForms.ListBox
 Private txtBrandCorrect As MSForms.TextBox
 Private WithEvents txtBrandIncorrect As MSForms.TextBox
@@ -65,7 +65,8 @@ Private lblStatus       As MSForms.Label
 Private lastResults     As Collection
 Private targetDoc       As Document
 Private editingBrandIndex As Long      ' -1 = not editing; >= 0 = list index being edited
-Private placeholderActive As Boolean   ' True if placeholder text is showing
+Private placeholderActive As Boolean   ' True if brand placeholder text is showing
+Private pageRangePlaceholderActive As Boolean  ' True if page range placeholder is showing
 
 ' ============================================================
 '  FORM INITIALISATION -- creates all controls at runtime
@@ -73,20 +74,21 @@ Private placeholderActive As Boolean   ' True if placeholder text is showing
 Private Sub UserForm_Initialize()
     editingBrandIndex = -1
     placeholderActive = False
+    pageRangePlaceholderActive = False
 
     Dim lbl As MSForms.Label
     Dim yPos As Single
 
     ' -- Overall form padding ----------------------------------
-    Const PAD As Single = 12
-    Const FULL_W As Single = 976     ' usable width (form 1000 - 2*PAD)
-    Const BTN_W As Single = 108
-    Const BTN_H As Single = 26
-    Const TXT_H As Single = 22
-    Const CHK_H As Single = 18
-    Const LBL_H As Single = 16
-    Const SEC_GAP As Single = 10     ' gap between sections
-    Const ITEM_GAP As Single = 4     ' gap within sections
+    Const PAD As Single = 10
+    Const FULL_W As Single = 680     ' narrower, more compact form
+    Const BTN_W As Single = 78
+    Const BTN_H As Single = 22
+    Const TXT_H As Single = 20
+    Const CHK_H As Single = 16
+    Const LBL_H As Single = 14
+    Const SEC_GAP As Single = 6      ' gap between sections
+    Const ITEM_GAP As Single = 2     ' gap within sections
 
     ' -- Build rule data first (need count for layout) ---------
     Set ruleConfig = PleadingsEngine.InitRuleConfig()
@@ -110,35 +112,35 @@ Private Sub UserForm_Initialize()
     Set lbl = Me.Controls.Add("Forms.Label.1", "lblRulesHeader")
     With lbl
         .Caption = "Rules"
-        .Left = PAD: .Top = yPos: .Width = 60: .Height = LBL_H
-        .Font.Size = 10: .Font.Bold = True
+        .Left = PAD: .Top = yPos: .Width = 40: .Height = LBL_H
+        .Font.Size = 9: .Font.Bold = True
     End With
 
     Set btnSelectAll = Me.Controls.Add("Forms.CommandButton.1", "btnSelectAll")
     With btnSelectAll
         .Caption = "Select All"
-        .Left = PAD + 66: .Top = yPos - 2: .Width = 78: .Height = 22
-        .Font.Size = 8
+        .Left = PAD + 44: .Top = yPos - 1: .Width = 62: .Height = 18
+        .Font.Size = 7
     End With
 
     Set btnDeselectAll = Me.Controls.Add("Forms.CommandButton.1", "btnDeselectAll")
     With btnDeselectAll
         .Caption = "Deselect All"
-        .Left = PAD + 66 + 82: .Top = yPos - 2: .Width = 78: .Height = 22
-        .Font.Size = 8
+        .Left = PAD + 44 + 64: .Top = yPos - 1: .Width = 62: .Height = 18
+        .Font.Size = 7
     End With
 
-    yPos = yPos + 22 + ITEM_GAP
+    yPos = yPos + 18 + ITEM_GAP
 
     ' ==========================================================
-    '  ROW 2: Rule checkboxes in multi-column scrollable frame
+    '  ROW 2: Rule checkboxes in scrollable frame
     ' ==========================================================
     Set fraRules = Me.Controls.Add("Forms.Frame.1", "fraRules")
     With fraRules
         .Caption = ""
         .Left = PAD: .Top = yPos
         .Width = FULL_W
-        .Height = 120
+        .Height = 80
         .ScrollBars = fmScrollBarsVertical
         .KeepScrollBarsVisible = fmScrollBarsVertical
     End With
@@ -148,232 +150,64 @@ Private Sub UserForm_Initialize()
     yPos = yPos + fraRules.Height + SEC_GAP
 
     ' ==========================================================
-    '  ROW 3: Page Range + Options side by side
+    '  ROW 3: Left column (Page Range + Brand Rules)
+    '         Right column (Options)
     ' ==========================================================
     Dim colLeft As Single
     Dim colRight As Single
+    Dim leftW As Single
     colLeft = PAD
-    colRight = PAD + FULL_W / 2 + SEC_GAP
+    leftW = FULL_W * 0.52
+    colRight = PAD + leftW + SEC_GAP
+    Dim row3Top As Single
+    row3Top = yPos
 
-    ' -- Left: Page Range --
+    ' ---- LEFT COLUMN: Page Range ----
     Set lbl = Me.Controls.Add("Forms.Label.1", "lblPageHeader")
     With lbl
-        .Caption = "Page Range (optional)"
-        .Left = colLeft: .Top = yPos: .Width = 200: .Height = LBL_H
-        .Font.Size = 10: .Font.Bold = True
-    End With
-
-    ' -- Right: Options --
-    Set lbl = Me.Controls.Add("Forms.Label.1", "lblOptionsHeader")
-    With lbl
-        .Caption = "Options"
-        .Left = colRight: .Top = yPos: .Width = 200: .Height = LBL_H
-        .Font.Size = 10: .Font.Bold = True
+        .Caption = "Page Range"
+        .Left = colLeft: .Top = yPos: .Width = 120: .Height = LBL_H
+        .Font.Size = 9: .Font.Bold = True
     End With
     yPos = yPos + LBL_H + ITEM_GAP
 
-    ' Page range field (flexible format: "5", "3-7", "1,3,5", "1,3-5,8")
     Set lbl = Me.Controls.Add("Forms.Label.1", "lblPageRange")
     With lbl
         .Caption = "Pages:"
-        .Left = colLeft: .Top = yPos + 3: .Width = 40: .Height = LBL_H
+        .Left = colLeft: .Top = yPos + 2: .Width = 36: .Height = LBL_H
     End With
 
     Set txtPageRange = Me.Controls.Add("Forms.TextBox.1", "txtPageRange")
     With txtPageRange
-        .Left = colLeft + 40: .Top = yPos: .Width = 196: .Height = TXT_H
+        .Left = colLeft + 36: .Top = yPos: .Width = leftW - 40: .Height = TXT_H
         .Text = ""
     End With
-
-    ' Options checkboxes (right column, same rows)
-    Set chkAddComments = Me.Controls.Add("Forms.CheckBox.1", "chkAddComments")
-    With chkAddComments
-        .Caption = "Add comments to document"
-        .Left = colRight: .Top = yPos: .Width = 240: .Height = CHK_H
-        .Value = True
-    End With
-    yPos = yPos + TXT_H + ITEM_GAP
-
-    Set chkTrackedChanges = Me.Controls.Add("Forms.CheckBox.1", "chkTrackedChanges")
-    With chkTrackedChanges
-        .Caption = "Apply suggestions as tracked changes"
-        .Left = colRight: .Top = yPos: .Width = 280: .Height = CHK_H
-        .Value = True
-    End With
-    yPos = yPos + CHK_H + ITEM_GAP
-
-    ' -- Spelling mode toggle (UK / US) --
-    Set lbl = Me.Controls.Add("Forms.Label.1", "lblSpellingMode")
-    With lbl
-        .Caption = "Spelling mode:"
-        .Left = colRight: .Top = yPos + 2: .Width = 80: .Height = LBL_H
-    End With
-
-    Set optSpellingUK = Me.Controls.Add("Forms.OptionButton.1", "optSpellingUK")
-    With optSpellingUK
-        .Caption = "UK"
-        .Left = colRight + 82: .Top = yPos: .Width = 50: .Height = CHK_H
-        .Value = True
-        .GroupName = "SpellingMode"
-    End With
-
-    Set optSpellingUS = Me.Controls.Add("Forms.OptionButton.1", "optSpellingUS")
-    With optSpellingUS
-        .Caption = "US"
-        .Left = colRight + 134: .Top = yPos: .Width = 50: .Height = CHK_H
-        .Value = False
-        .GroupName = "SpellingMode"
-    End With
-
-    yPos = yPos + CHK_H + ITEM_GAP
-
-    ' -- Quote nesting toggle (Single outer = UK / Double outer = US) --
-    Set lbl = Me.Controls.Add("Forms.Label.1", "lblQuoteNesting")
-    With lbl
-        .Caption = "Outer quotes:"
-        .Left = colRight: .Top = yPos + 2: .Width = 80: .Height = LBL_H
-    End With
-
-    Set optQuoteSingle = Me.Controls.Add("Forms.OptionButton.1", "optQuoteSingle")
-    With optQuoteSingle
-        .Caption = "Single"
-        .Left = colRight + 82: .Top = yPos: .Width = 60: .Height = CHK_H
-        .Value = True
-        .GroupName = "QuoteNesting"
-    End With
-
-    Set optQuoteDouble = Me.Controls.Add("Forms.OptionButton.1", "optQuoteDouble")
-    With optQuoteDouble
-        .Caption = "Double"
-        .Left = colRight + 144: .Top = yPos: .Width = 60: .Height = CHK_H
-        .Value = False
-        .GroupName = "QuoteNesting"
-    End With
-    yPos = yPos + CHK_H + ITEM_GAP
-
-    ' -- Smart quotes toggle (Smart / Straight) --
-    Set lbl = Me.Controls.Add("Forms.Label.1", "lblSmartQuotes")
-    With lbl
-        .Caption = "Smart quotes:"
-        .Left = colRight: .Top = yPos + 2: .Width = 80: .Height = LBL_H
-    End With
-
-    Set optSmart = Me.Controls.Add("Forms.OptionButton.1", "optSmart")
-    With optSmart
-        .Caption = "Smart"
-        .Left = colRight + 82: .Top = yPos: .Width = 60: .Height = CHK_H
-        .Value = True
-        .GroupName = "SmartQuotes"
-    End With
-
-    Set optSmartStraight = Me.Controls.Add("Forms.OptionButton.1", "optSmartStraight")
-    With optSmartStraight
-        .Caption = "Straight"
-        .Left = colRight + 144: .Top = yPos: .Width = 70: .Height = CHK_H
-        .Value = False
-        .GroupName = "SmartQuotes"
-    End With
-    yPos = yPos + CHK_H + ITEM_GAP
-
-    ' -- Date format toggle (UK / US) --
-    Set lbl = Me.Controls.Add("Forms.Label.1", "lblDateFormat")
-    With lbl
-        .Caption = "Date format:"
-        .Left = colRight: .Top = yPos + 2: .Width = 80: .Height = LBL_H
-    End With
-
-    Set optDateUK = Me.Controls.Add("Forms.OptionButton.1", "optDateUK")
-    With optDateUK
-        .Caption = "UK"
-        .Left = colRight + 82: .Top = yPos: .Width = 50: .Height = CHK_H
-        .Value = True
-        .GroupName = "DateFormat"
-    End With
-
-    Set optDateUS = Me.Controls.Add("Forms.OptionButton.1", "optDateUS")
-    With optDateUS
-        .Caption = "US"
-        .Left = colRight + 134: .Top = yPos: .Width = 50: .Height = CHK_H
-        .Value = False
-        .GroupName = "DateFormat"
-    End With
-
-    yPos = yPos + CHK_H + ITEM_GAP
-
-    ' -- Defined Terms: [format dropdown] and [quotes dropdown] --
-    Set lbl = Me.Controls.Add("Forms.Label.1", "lblDefinedTerms")
-    With lbl
-        .Caption = "Defined Terms:"
-        .Left = colRight: .Top = yPos + 2: .Width = 80: .Height = LBL_H
-    End With
-
-    Set cboTermFormat = Me.Controls.Add("Forms.ComboBox.1", "cboTermFormat")
-    With cboTermFormat
-        .Left = colRight + 82: .Top = yPos: .Width = 90: .Height = TXT_H
-        .Style = fmStyleDropDownList
-        .AddItem "Bold"
-        .AddItem "Bold Italics"
-        .AddItem "Italics"
-        .AddItem "None"
-        .ListIndex = 0
-    End With
-
-    Dim lblAnd As MSForms.Label
-    Set lblAnd = Me.Controls.Add("Forms.Label.1", "lblTermAnd")
-    With lblAnd
-        .Caption = "and"
-        .Left = colRight + 175: .Top = yPos + 2: .Width = 22: .Height = LBL_H
-    End With
-
-    Set cboTermQuotes = Me.Controls.Add("Forms.ComboBox.1", "cboTermQuotes")
-    With cboTermQuotes
-        .Left = colRight + 198: .Top = yPos: .Width = 100: .Height = TXT_H
-        .Style = fmStyleDropDownList
-        .AddItem "Single quotes"
-        .AddItem "Double quotes"
-        .ListIndex = 1
-    End With
-
-    yPos = yPos + TXT_H + ITEM_GAP
-
-    ' -- Space style after full stops dropdown --
-    Set lbl = Me.Controls.Add("Forms.Label.1", "lblSpaceStyle")
-    With lbl
-        .Caption = "After full stop:"
-        .Left = colRight: .Top = yPos + 2: .Width = 80: .Height = LBL_H
-    End With
-
-    Set cboSpaceStyle = Me.Controls.Add("Forms.ComboBox.1", "cboSpaceStyle")
-    With cboSpaceStyle
-        .Left = colRight + 82: .Top = yPos: .Width = 120: .Height = TXT_H
-        .Style = fmStyleDropDownList
-        .AddItem "One space"
-        .AddItem "Two spaces"
-        .ListIndex = 0
-    End With
+    ShowPageRangePlaceholder
 
     yPos = yPos + TXT_H + SEC_GAP
 
-    ' ==========================================================
-    '  ROW 4: Brand Rules
-    ' ==========================================================
+    ' ---- LEFT COLUMN: Brand Rules ----
     Set lbl = Me.Controls.Add("Forms.Label.1", "lblBrandHeader")
     With lbl
         .Caption = "Brand Rules"
-        .Left = PAD: .Top = yPos: .Width = 200: .Height = LBL_H
-        .Font.Size = 10: .Font.Bold = True
+        .Left = colLeft: .Top = yPos: .Width = 120: .Height = LBL_H
+        .Font.Size = 9: .Font.Bold = True
     End With
     yPos = yPos + LBL_H + ITEM_GAP
 
+    Dim brandListW As Single
+    brandListW = leftW - BTN_W - ITEM_GAP - 4
+
     Set lstBrands = Me.Controls.Add("Forms.ListBox.1", "lstBrands")
     With lstBrands
-        .Left = PAD: .Top = yPos: .Width = FULL_W - BTN_W - SEC_GAP
-        .Height = 72
+        .Left = colLeft: .Top = yPos
+        .Width = brandListW: .Height = 56
+        .Font.Size = 7.5
     End With
 
-    ' Brand action buttons (right of list)
+    ' Brand action buttons (right of list, stacked)
     Dim btnX As Single
-    btnX = PAD + lstBrands.Width + ITEM_GAP
+    btnX = colLeft + brandListW + ITEM_GAP
     Dim brandBtnY As Single
     brandBtnY = yPos
 
@@ -381,123 +215,300 @@ Private Sub UserForm_Initialize()
     With btnAddBrand
         .Caption = "Add"
         .Left = btnX: .Top = brandBtnY: .Width = BTN_W: .Height = BTN_H
+        .Font.Size = 7.5
     End With
-    brandBtnY = brandBtnY + BTN_H + 2
+    brandBtnY = brandBtnY + BTN_H + 1
 
     Set btnRemoveBrand = Me.Controls.Add("Forms.CommandButton.1", "btnRemoveBrand")
     With btnRemoveBrand
         .Caption = "Remove"
         .Left = btnX: .Top = brandBtnY: .Width = BTN_W / 2 - 1: .Height = BTN_H
+        .Font.Size = 7
     End With
 
     Set btnEditBrand = Me.Controls.Add("Forms.CommandButton.1", "btnEditBrand")
     With btnEditBrand
         .Caption = "Edit"
         .Left = btnX + BTN_W / 2 + 1: .Top = brandBtnY: .Width = BTN_W / 2 - 1: .Height = BTN_H
-    End With
-
-    ' Save/Load beside Add/Remove
-    Dim btnX2 As Single
-    btnX2 = btnX
-    brandBtnY = brandBtnY + BTN_H + 2
-
-    Set btnSaveBrands = Me.Controls.Add("Forms.CommandButton.1", "btnSaveBrands")
-    With btnSaveBrands
-        .Caption = "Save Rules"
-        .Left = btnX2: .Top = brandBtnY: .Width = BTN_W / 2 - 1: .Height = BTN_H
-        .Font.Size = 8
-    End With
-
-    Set btnLoadBrands = Me.Controls.Add("Forms.CommandButton.1", "btnLoadBrands")
-    With btnLoadBrands
-        .Caption = "Load Rules"
-        .Left = btnX2 + BTN_W / 2 + 1: .Top = brandBtnY: .Width = BTN_W / 2 - 1: .Height = BTN_H
-        .Font.Size = 8
+        .Font.Size = 7
     End With
 
     yPos = yPos + lstBrands.Height + ITEM_GAP
 
-    ' Brand input fields
+    ' Brand input row: Correct + Incorrect + Save/Load
     Set lbl = Me.Controls.Add("Forms.Label.1", "lblCorrectForm")
     With lbl
-        .Caption = "Correct Form:"
-        .Left = PAD: .Top = yPos + 3: .Width = 78: .Height = LBL_H
+        .Caption = "Correct:"
+        .Left = colLeft: .Top = yPos + 2: .Width = 42: .Height = LBL_H
+        .Font.Size = 7.5
     End With
 
     Set txtBrandCorrect = Me.Controls.Add("Forms.TextBox.1", "txtBrandCorrect")
     With txtBrandCorrect
-        .Left = PAD + 78: .Top = yPos: .Width = 150: .Height = TXT_H
+        .Left = colLeft + 42: .Top = yPos: .Width = 90: .Height = TXT_H
+        .Font.Size = 7.5
     End With
 
     Set lbl = Me.Controls.Add("Forms.Label.1", "lblIncorrectVars")
     With lbl
-        .Caption = "Incorrect variants (comma-separated):"
-        .Left = PAD + 240: .Top = yPos + 3: .Width = 160: .Height = LBL_H
+        .Caption = "Variants:"
+        .Left = colLeft + 136: .Top = yPos + 2: .Width = 42: .Height = LBL_H
+        .Font.Size = 7.5
     End With
 
     Set txtBrandIncorrect = Me.Controls.Add("Forms.TextBox.1", "txtBrandIncorrect")
     With txtBrandIncorrect
-        .Left = PAD + 400: .Top = yPos: .Width = 130: .Height = TXT_H
+        .Left = colLeft + 178: .Top = yPos: .Width = 100: .Height = TXT_H
+        .Font.Size = 7.5
     End With
     ShowBrandPlaceholder
 
-    yPos = yPos + TXT_H + SEC_GAP
+    ' Save/Load buttons inline after inputs
+    Dim slX As Single
+    slX = colLeft + 282
+
+    Set btnSaveBrands = Me.Controls.Add("Forms.CommandButton.1", "btnSaveBrands")
+    With btnSaveBrands
+        .Caption = "Save"
+        .Left = slX: .Top = yPos: .Width = 36: .Height = TXT_H
+        .Font.Size = 7
+    End With
+
+    Set btnLoadBrands = Me.Controls.Add("Forms.CommandButton.1", "btnLoadBrands")
+    With btnLoadBrands
+        .Caption = "Load"
+        .Left = slX + 38: .Top = yPos: .Width = 36: .Height = TXT_H
+        .Font.Size = 7
+    End With
+
+    Dim leftBottomY As Single
+    leftBottomY = yPos + TXT_H
+
+    ' ---- RIGHT COLUMN: Options (starting from row3Top) ----
+    Dim optY As Single
+    optY = row3Top
+
+    Set lbl = Me.Controls.Add("Forms.Label.1", "lblOptionsHeader")
+    With lbl
+        .Caption = "Options"
+        .Left = colRight: .Top = optY: .Width = 120: .Height = LBL_H
+        .Font.Size = 9: .Font.Bold = True
+    End With
+    optY = optY + LBL_H + ITEM_GAP
+
+    Set chkAddComments = Me.Controls.Add("Forms.CheckBox.1", "chkAddComments")
+    With chkAddComments
+        .Caption = "Add comments"
+        .Left = colRight: .Top = optY: .Width = 140: .Height = CHK_H
+        .Value = True
+        .Font.Size = 7.5
+    End With
+    optY = optY + CHK_H + ITEM_GAP
+
+    Set chkTrackedChanges = Me.Controls.Add("Forms.CheckBox.1", "chkTrackedChanges")
+    With chkTrackedChanges
+        .Caption = "Tracked changes"
+        .Left = colRight: .Top = optY: .Width = 140: .Height = CHK_H
+        .Value = True
+        .Font.Size = 7.5
+    End With
+    optY = optY + CHK_H + ITEM_GAP
+
+    ' Spelling mode
+    Set lbl = Me.Controls.Add("Forms.Label.1", "lblSpellingMode")
+    With lbl
+        .Caption = "Spelling:"
+        .Left = colRight: .Top = optY + 1: .Width = 52: .Height = LBL_H
+        .Font.Size = 7.5
+    End With
+
+    Set optSpellingUK = Me.Controls.Add("Forms.OptionButton.1", "optSpellingUK")
+    With optSpellingUK
+        .Caption = "UK": .Left = colRight + 52: .Top = optY: .Width = 40: .Height = CHK_H
+        .Value = True: .GroupName = "SpellingMode": .Font.Size = 7.5
+    End With
+
+    Set optSpellingUS = Me.Controls.Add("Forms.OptionButton.1", "optSpellingUS")
+    With optSpellingUS
+        .Caption = "US": .Left = colRight + 94: .Top = optY: .Width = 40: .Height = CHK_H
+        .Value = False: .GroupName = "SpellingMode": .Font.Size = 7.5
+    End With
+    optY = optY + CHK_H + ITEM_GAP
+
+    ' Date format
+    Set lbl = Me.Controls.Add("Forms.Label.1", "lblDateFormat")
+    With lbl
+        .Caption = "Date:"
+        .Left = colRight: .Top = optY + 1: .Width = 52: .Height = LBL_H
+        .Font.Size = 7.5
+    End With
+
+    Set optDateUK = Me.Controls.Add("Forms.OptionButton.1", "optDateUK")
+    With optDateUK
+        .Caption = "UK": .Left = colRight + 52: .Top = optY: .Width = 40: .Height = CHK_H
+        .Value = True: .GroupName = "DateFormat": .Font.Size = 7.5
+    End With
+
+    Set optDateUS = Me.Controls.Add("Forms.OptionButton.1", "optDateUS")
+    With optDateUS
+        .Caption = "US": .Left = colRight + 94: .Top = optY: .Width = 40: .Height = CHK_H
+        .Value = False: .GroupName = "DateFormat": .Font.Size = 7.5
+    End With
+    optY = optY + CHK_H + ITEM_GAP
+
+    ' After full stop spacing
+    Set lbl = Me.Controls.Add("Forms.Label.1", "lblSpaceStyle")
+    With lbl
+        .Caption = "After full stop:"
+        .Left = colRight: .Top = optY + 1: .Width = 72: .Height = LBL_H
+        .Font.Size = 7.5
+    End With
+
+    Set cboSpaceStyle = Me.Controls.Add("Forms.ComboBox.1", "cboSpaceStyle")
+    With cboSpaceStyle
+        .Left = colRight + 72: .Top = optY: .Width = 80: .Height = TXT_H
+        .Style = fmStyleDropDownList
+        .AddItem "One space"
+        .AddItem "Two spaces"
+        .ListIndex = 0
+        .Font.Size = 7.5
+    End With
+    optY = optY + TXT_H + ITEM_GAP
+
+    ' Outer quotes
+    Set lbl = Me.Controls.Add("Forms.Label.1", "lblQuoteNesting")
+    With lbl
+        .Caption = "Outer quotes:"
+        .Left = colRight: .Top = optY + 1: .Width = 72: .Height = LBL_H
+        .Font.Size = 7.5
+    End With
+
+    Set optQuoteSingle = Me.Controls.Add("Forms.OptionButton.1", "optQuoteSingle")
+    With optQuoteSingle
+        .Caption = "Single": .Left = colRight + 72: .Top = optY: .Width = 50: .Height = CHK_H
+        .Value = True: .GroupName = "QuoteNesting": .Font.Size = 7.5
+    End With
+
+    Set optQuoteDouble = Me.Controls.Add("Forms.OptionButton.1", "optQuoteDouble")
+    With optQuoteDouble
+        .Caption = "Double": .Left = colRight + 124: .Top = optY: .Width = 50: .Height = CHK_H
+        .Value = False: .GroupName = "QuoteNesting": .Font.Size = 7.5
+    End With
+    optY = optY + CHK_H + ITEM_GAP
+
+    ' Smart quotes
+    Set lbl = Me.Controls.Add("Forms.Label.1", "lblSmartQuotes")
+    With lbl
+        .Caption = "Smart quotes:"
+        .Left = colRight: .Top = optY + 1: .Width = 72: .Height = LBL_H
+        .Font.Size = 7.5
+    End With
+
+    Set optSmart = Me.Controls.Add("Forms.OptionButton.1", "optSmart")
+    With optSmart
+        .Caption = "Smart": .Left = colRight + 72: .Top = optY: .Width = 50: .Height = CHK_H
+        .Value = True: .GroupName = "SmartQuotes": .Font.Size = 7.5
+    End With
+
+    Set optSmartStraight = Me.Controls.Add("Forms.OptionButton.1", "optSmartStraight")
+    With optSmartStraight
+        .Caption = "Straight": .Left = colRight + 124: .Top = optY: .Width = 56: .Height = CHK_H
+        .Value = False: .GroupName = "SmartQuotes": .Font.Size = 7.5
+    End With
+    optY = optY + CHK_H + ITEM_GAP
+
+    ' Defined terms
+    Set lbl = Me.Controls.Add("Forms.Label.1", "lblDefinedTerms")
+    With lbl
+        .Caption = "Def. terms:"
+        .Left = colRight: .Top = optY + 1: .Width = 56: .Height = LBL_H
+        .Font.Size = 7.5
+    End With
+
+    Set cboTermFormat = Me.Controls.Add("Forms.ComboBox.1", "cboTermFormat")
+    With cboTermFormat
+        .Left = colRight + 56: .Top = optY: .Width = 70: .Height = TXT_H
+        .Style = fmStyleDropDownList
+        .AddItem "Bold"
+        .AddItem "Bold Italics"
+        .AddItem "Italics"
+        .AddItem "None"
+        .ListIndex = 0
+        .Font.Size = 7.5
+    End With
+
+    Dim lblAnd As MSForms.Label
+    Set lblAnd = Me.Controls.Add("Forms.Label.1", "lblTermAnd")
+    With lblAnd
+        .Caption = "+"
+        .Left = colRight + 128: .Top = optY + 1: .Width = 10: .Height = LBL_H
+        .Font.Size = 7.5
+    End With
+
+    Set cboTermQuotes = Me.Controls.Add("Forms.ComboBox.1", "cboTermQuotes")
+    With cboTermQuotes
+        .Left = colRight + 140: .Top = optY: .Width = 80: .Height = TXT_H
+        .Style = fmStyleDropDownList
+        .AddItem "Single quotes"
+        .AddItem "Double quotes"
+        .ListIndex = 1
+        .Font.Size = 7.5
+    End With
+
+    ' Use the taller of left-column or right-column bottoms
+    Dim row3BottomY As Single
+    If leftBottomY > optY Then row3BottomY = leftBottomY Else row3BottomY = optY
+    yPos = row3BottomY + SEC_GAP
 
     ' ==========================================================
-    '  ROW 5: Action Buttons
+    '  ROW 4: Action Buttons
     ' ==========================================================
-    Const ACT_BTN_H As Single = 32
-    Const ACT_BTN_W As Single = 120
-    Const ACT_GAP As Single = 10
+    Const ACT_BTN_H As Single = 28
+    Const ACT_BTN_W As Single = 100
+    Const ACT_GAP As Single = 8
 
     Set btnRun = Me.Controls.Add("Forms.CommandButton.1", "btnRun")
     With btnRun
         .Caption = "Run Checks"
-        .Left = PAD: .Top = yPos: .Width = ACT_BTN_W + 20: .Height = ACT_BTN_H
+        .Left = PAD: .Top = yPos: .Width = ACT_BTN_W: .Height = ACT_BTN_H
         .Font.Bold = True
     End With
 
     Set btnExport = Me.Controls.Add("Forms.CommandButton.1", "btnExport")
     With btnExport
         .Caption = "Export Report"
-        .Left = PAD + ACT_BTN_W + 20 + ACT_GAP: .Top = yPos
+        .Left = PAD + ACT_BTN_W + ACT_GAP: .Top = yPos
         .Width = ACT_BTN_W: .Height = ACT_BTN_H
     End With
 
     Set btnClose = Me.Controls.Add("Forms.CommandButton.1", "btnClose")
     With btnClose
         .Caption = "Close"
-        .Left = PAD + 3 * (ACT_BTN_W + ACT_GAP) + 12: .Top = yPos
-        .Width = 84: .Height = ACT_BTN_H
+        .Left = PAD + 2 * (ACT_BTN_W + ACT_GAP): .Top = yPos
+        .Width = 70: .Height = ACT_BTN_H
     End With
 
     yPos = yPos + ACT_BTN_H + ITEM_GAP
 
     ' ==========================================================
-    '  ROW 6: Status Bar
+    '  ROW 5: Status Bar
     ' ==========================================================
     Set lblStatus = Me.Controls.Add("Forms.Label.1", "lblStatus")
     With lblStatus
         .Caption = "Ready. Select rules and click Run."
         .Left = PAD: .Top = yPos: .Width = FULL_W: .Height = LBL_H
-        .Font.Size = 9
+        .Font.Size = 8
     End With
 
     ' -- Load brand list ---------------------------------------
     RefreshBrandList
 
     ' -- Final form size based on layout ---
-    ' Use InsideWidth/InsideHeight (= client area) so title-bar
-    ' chrome does not steal space from the control layout.
-    ' The .frm header sets ClientWidth/ClientHeight = 1000 as a
-    ' safe default if Initialize errors before reaching this point.
     Dim neededH As Single
-    neededH = yPos + LBL_H + PAD   ' bottom of status label + padding
-    If neededH < 400 Then neededH = 400  ' sensible minimum
+    neededH = yPos + LBL_H + PAD
+    If neededH < 300 Then neededH = 300
 
-    ' InsideWidth/InsideHeight are read-only in Word VBA UserForms.
-    ' Set the outer Width/Height directly instead.
-    Me.Width = FULL_W + 2 * PAD    ' = 1000
+    Me.Width = FULL_W + 2 * PAD
     Me.Height = neededH
 
     Debug.Print "UserForm_Initialize: Width=" & Me.Width & " Height=" & Me.Height
@@ -583,8 +594,8 @@ Private Sub btnRun_Click()
         End If
     Next i
 
-    ' Set page range from flexible input
-    PleadingsEngine.SetPageRangeFromString txtPageRange.Text
+    ' Set page range from flexible input (ignore placeholder text)
+    PleadingsEngine.SetPageRangeFromString GetPageRangeText()
 
     ' Set mode toggles
     If optSpellingUS.Value Then
@@ -973,6 +984,42 @@ End Sub
 Private Sub txtBrandIncorrect_Exit(ByVal Cancel As MSForms.ReturnBoolean)
     If Len(Trim(txtBrandIncorrect.Text)) = 0 Then
         ShowBrandPlaceholder
+    End If
+End Sub
+
+' -- Placeholder helpers for txtPageRange --
+Private Sub ShowPageRangePlaceholder()
+    If txtPageRange Is Nothing Then Exit Sub
+    If Len(Trim(txtPageRange.Text)) = 0 Or pageRangePlaceholderActive Then
+        txtPageRange.Text = "e.g. 1,3,5-8"
+        txtPageRange.ForeColor = &HC0C0C0  ' light grey
+        pageRangePlaceholderActive = True
+    End If
+End Sub
+
+Private Sub HidePageRangePlaceholder()
+    If pageRangePlaceholderActive Then
+        txtPageRange.Text = ""
+        txtPageRange.ForeColor = &H0  ' black
+        pageRangePlaceholderActive = False
+    End If
+End Sub
+
+Private Function GetPageRangeText() As String
+    If pageRangePlaceholderActive Then
+        GetPageRangeText = ""
+    Else
+        GetPageRangeText = Trim(txtPageRange.Text)
+    End If
+End Function
+
+Private Sub txtPageRange_Enter()
+    HidePageRangePlaceholder
+End Sub
+
+Private Sub txtPageRange_Exit(ByVal Cancel As MSForms.ReturnBoolean)
+    If Len(Trim(txtPageRange.Text)) = 0 Then
+        ShowPageRangePlaceholder
     End If
 End Sub
 

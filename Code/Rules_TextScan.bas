@@ -125,11 +125,10 @@ Public Function Check_RepeatedWords(doc As Document) As Collection
                 ' Determine severity
                 If IsKnownValidRepetition(currWord, knownValid) Then
                     severity = "possible_error"
-                    issueText = "Repeated word '" & currWord & "' " & _
-                                "-- review context; may be intentional"
+                    issueText = "Repeated word '" & currWord & "'"
                 Else
                     severity = "error"
-                    issueText = "Repeated word '" & currWord & "' detected"
+                    issueText = "Repeated word '" & currWord & "'"
                 End If
 
                 suggestion = "Remove the duplicate '" & currWord & "'"
