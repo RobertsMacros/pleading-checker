@@ -17,10 +17,11 @@ Attribute VB_Exposed = False
 ' UserForm for the Pleadings Checker rule engine.
 '
 ' ALL controls are created dynamically in UserForm_Initialize
-' so that no .frx binary file is needed.  The form adapts its
-' rule checkbox list from the engine metadata automatically.
+' so that no .frx binary file is needed.
 '
-' All controls are created dynamically below.
+' Custom Rules: unified model replacing old Brand Rules and
+' Custom Term Whitelist. Each rule has Enabled, Correct, and
+' Incorrect Variants. Data is stored in Rules_Brands module.
 ' ============================================================
 Option Explicit
 
@@ -36,17 +37,20 @@ Private WithEvents btnExport        As MSForms.CommandButton
 Private WithEvents btnClose         As MSForms.CommandButton
 Private WithEvents btnSelectAll     As MSForms.CommandButton
 Private WithEvents btnDeselectAll   As MSForms.CommandButton
-Private WithEvents btnAddBrand      As MSForms.CommandButton
-Private WithEvents btnRemoveBrand   As MSForms.CommandButton
-Private WithEvents btnEditBrand     As MSForms.CommandButton
-Private WithEvents btnSaveBrands    As MSForms.CommandButton
-Private WithEvents btnLoadBrands    As MSForms.CommandButton
+Private WithEvents btnAddRule       As MSForms.CommandButton
+Private WithEvents btnRemoveRule    As MSForms.CommandButton
+Private WithEvents btnEditRule      As MSForms.CommandButton
+Private WithEvents btnSaveRules     As MSForms.CommandButton
+Private WithEvents btnLoadRules     As MSForms.CommandButton
+Private WithEvents btnSortCorrect   As MSForms.CommandButton
+Private WithEvents btnSortVariants  As MSForms.CommandButton
+Private WithEvents btnSortDefault   As MSForms.CommandButton
 
 Private fraRules        As MSForms.Frame
 Private WithEvents txtPageRange As MSForms.TextBox
-Private lstBrands       As MSForms.ListBox
-Private txtBrandCorrect As MSForms.TextBox
-Private WithEvents txtBrandIncorrect As MSForms.TextBox
+Private lstCustomRules  As MSForms.ListBox
+Private txtRuleCorrect  As MSForms.TextBox
+Private WithEvents txtRuleVariants As MSForms.TextBox
 Private chkAddComments  As MSForms.CheckBox
 Private chkTrackedChanges As MSForms.CheckBox
 Private cboSpelling     As MSForms.ComboBox
@@ -59,41 +63,43 @@ Private cboTermQuotes   As MSForms.ComboBox
 Private cboSpaceStyle   As MSForms.ComboBox
 Private lblStatus       As MSForms.Label
 
-' Unified custom rules list (replaces separate whitelist)
-Private lstWhitelist    As MSForms.ListBox   ' retained as alias for unified list
-Private WithEvents btnAddWhitelist    As MSForms.CommandButton
-Private WithEvents btnRemoveWhitelist As MSForms.CommandButton
-Private WithEvents btnSaveWhitelist   As MSForms.CommandButton
-Private WithEvents btnLoadWhitelist   As MSForms.CommandButton
-Private txtWhitelistTerm As MSForms.TextBox  ' retained for unified input
-
 Private lastResults     As Collection
 Private targetDoc       As Document
-Private editingBrandIndex As Long      ' -1 = not editing; >= 0 = list index being edited
-Private placeholderActive As Boolean   ' True if brand placeholder text is showing
-Private pageRangePlaceholderActive As Boolean  ' True if page range placeholder is showing
+Private editingRuleIndex As Long     ' -1 = not editing; >= 0 = list index being edited
+Private variantsPlaceholderActive As Boolean
+Private pageRangePlaceholderActive As Boolean
+
+' Custom rules data: parallel arrays for the single source of truth
+Private crEnabled()     As Boolean   ' Whether rule is active at runtime
+Private crCorrect()     As String    ' Correct form
+Private crVariants()    As String    ' Comma-separated incorrect variants
+Private crCount         As Long      ' Number of custom rules
+Private crSortMode      As Long      ' 0=insertion, 1=correct, 2=variants
+Private crSortOrder()   As Long      ' Indices into cr* arrays for display
 
 ' ============================================================
 '  FORM INITIALISATION -- creates all controls at runtime
 ' ============================================================
 Private Sub UserForm_Initialize()
-    editingBrandIndex = -1
-    placeholderActive = False
+    editingRuleIndex = -1
+    variantsPlaceholderActive = False
     pageRangePlaceholderActive = False
+    crCount = 0
+    crSortMode = 0
 
     Dim lbl As MSForms.Label
     Dim yPos As Single
 
     ' -- Overall form padding ----------------------------------
     Const PAD As Single = 10
-    Const FULL_W As Single = 680     ' narrower, more compact form
-    Const BTN_W As Single = 78
-    Const BTN_H As Single = 22
+    Const FULL_W As Single = 680
+    Const BTN_W As Single = 72
+    Const BTN_H As Single = 20
     Const TXT_H As Single = 20
     Const CHK_H As Single = 16
     Const LBL_H As Single = 14
-    Const SEC_GAP As Single = 6      ' gap between sections
-    Const ITEM_GAP As Single = 2     ' gap within sections
+    Const SEC_GAP As Single = 6
+    Const ITEM_GAP As Single = 2
 
     ' -- Build rule data first (need count for layout) ---------
     Set ruleConfig = PleadingsEngine.InitRuleConfig()
@@ -155,17 +161,21 @@ Private Sub UserForm_Initialize()
     yPos = yPos + fraRules.Height + SEC_GAP
 
     ' ==========================================================
-    '  ROW 3: Left column (Page Range + Brand Rules)
+    '  ROW 3: Left column (Page Range + Custom Rules)
     '         Right column (Options)
     ' ==========================================================
     Dim colLeft As Single
     Dim colRight As Single
     Dim leftW As Single
+    Dim rightW As Single
     colLeft = PAD
-    leftW = FULL_W * 0.52
+    leftW = FULL_W * 0.56
     colRight = PAD + leftW + SEC_GAP
+    rightW = FULL_W - leftW - SEC_GAP
     Dim row3Top As Single
     row3Top = yPos
+    Dim cboW As Single
+    cboW = rightW - 92
 
     ' ---- LEFT COLUMN: Page Range ----
     Set lbl = Me.Controls.Add("Forms.Label.1", "lblPageHeader")
@@ -191,56 +201,100 @@ Private Sub UserForm_Initialize()
 
     yPos = yPos + TXT_H + SEC_GAP
 
-    ' ---- LEFT COLUMN: Custom Rules ----
-    Set lbl = Me.Controls.Add("Forms.Label.1", "lblBrandHeader")
+    ' ---- LEFT COLUMN: Custom Rules (unified section) ----
+    Set lbl = Me.Controls.Add("Forms.Label.1", "lblCustomRulesHeader")
     With lbl
         .Caption = "Custom Rules"
-        .Left = colLeft: .Top = yPos: .Width = 120: .Height = LBL_H
+        .Left = colLeft: .Top = yPos: .Width = 80: .Height = LBL_H
         .Font.Size = 9: .Font.Bold = True
     End With
+
+    ' Sort buttons inline with header
+    Dim sortX As Single
+    sortX = colLeft + 84
+    Set btnSortDefault = Me.Controls.Add("Forms.CommandButton.1", "btnSortDefault")
+    With btnSortDefault
+        .Caption = "#"
+        .Left = sortX: .Top = yPos - 1: .Width = 20: .Height = 16
+        .Font.Size = 7
+    End With
+    Set btnSortCorrect = Me.Controls.Add("Forms.CommandButton.1", "btnSortCorrect")
+    With btnSortCorrect
+        .Caption = "A-Z"
+        .Left = sortX + 22: .Top = yPos - 1: .Width = 28: .Height = 16
+        .Font.Size = 7
+    End With
+    Set btnSortVariants = Me.Controls.Add("Forms.CommandButton.1", "btnSortVariants")
+    With btnSortVariants
+        .Caption = "Var"
+        .Left = sortX + 52: .Top = yPos - 1: .Width = 28: .Height = 16
+        .Font.Size = 7
+    End With
+
     yPos = yPos + LBL_H + ITEM_GAP
 
-    Dim brandListW As Single
-    brandListW = leftW - BTN_W - ITEM_GAP - 4
+    ' Custom rules listbox (multi-column table-like display)
+    Dim ruleListW As Single
+    ruleListW = leftW - BTN_W - ITEM_GAP - 4
 
-    Set lstBrands = Me.Controls.Add("Forms.ListBox.1", "lstBrands")
-    With lstBrands
+    Set lstCustomRules = Me.Controls.Add("Forms.ListBox.1", "lstCustomRules")
+    With lstCustomRules
         .Left = colLeft: .Top = yPos
-        .Width = brandListW: .Height = 56
+        .Width = ruleListW: .Height = 72
         .Font.Size = 7.5
+        .Font.Name = "Consolas"
+        .ColumnCount = 4
+        .ColumnWidths = "18;18;" & CStr(CLng(ruleListW * 0.35)) & ";" & CStr(CLng(ruleListW * 0.45))
+        .BorderStyle = fmBorderStyleNone
+        .SpecialEffect = fmSpecialEffectFlat
     End With
 
-    ' Brand action buttons (right of list, stacked)
+    ' Action buttons (right of list, stacked)
     Dim btnX As Single
-    btnX = colLeft + brandListW + ITEM_GAP
-    Dim brandBtnY As Single
-    brandBtnY = yPos
+    btnX = colLeft + ruleListW + ITEM_GAP
+    Dim ruleBtnY As Single
+    ruleBtnY = yPos
 
-    Set btnAddBrand = Me.Controls.Add("Forms.CommandButton.1", "btnAddBrand")
-    With btnAddBrand
+    Set btnAddRule = Me.Controls.Add("Forms.CommandButton.1", "btnAddRule")
+    With btnAddRule
         .Caption = "Add"
-        .Left = btnX: .Top = brandBtnY: .Width = BTN_W: .Height = BTN_H
+        .Left = btnX: .Top = ruleBtnY: .Width = BTN_W: .Height = BTN_H
         .Font.Size = 7.5
     End With
-    brandBtnY = brandBtnY + BTN_H + 1
+    ruleBtnY = ruleBtnY + BTN_H + 1
 
-    Set btnRemoveBrand = Me.Controls.Add("Forms.CommandButton.1", "btnRemoveBrand")
-    With btnRemoveBrand
-        .Caption = "Remove"
-        .Left = btnX: .Top = brandBtnY: .Width = BTN_W / 2 - 1: .Height = BTN_H
-        .Font.Size = 7
-    End With
-
-    Set btnEditBrand = Me.Controls.Add("Forms.CommandButton.1", "btnEditBrand")
-    With btnEditBrand
+    Set btnEditRule = Me.Controls.Add("Forms.CommandButton.1", "btnEditRule")
+    With btnEditRule
         .Caption = "Edit"
-        .Left = btnX + BTN_W / 2 + 1: .Top = brandBtnY: .Width = BTN_W / 2 - 1: .Height = BTN_H
+        .Left = btnX: .Top = ruleBtnY: .Width = BTN_W / 2 - 1: .Height = BTN_H
         .Font.Size = 7
     End With
 
-    yPos = yPos + lstBrands.Height + ITEM_GAP
+    Set btnRemoveRule = Me.Controls.Add("Forms.CommandButton.1", "btnRemoveRule")
+    With btnRemoveRule
+        .Caption = "Remove"
+        .Left = btnX + BTN_W / 2 + 1: .Top = ruleBtnY: .Width = BTN_W / 2 - 1: .Height = BTN_H
+        .Font.Size = 7
+    End With
+    ruleBtnY = ruleBtnY + BTN_H + 1
 
-    ' Brand input row: Correct + Incorrect + Save/Load
+    Set btnSaveRules = Me.Controls.Add("Forms.CommandButton.1", "btnSaveRules")
+    With btnSaveRules
+        .Caption = "Save"
+        .Left = btnX: .Top = ruleBtnY: .Width = BTN_W / 2 - 1: .Height = BTN_H
+        .Font.Size = 7
+    End With
+
+    Set btnLoadRules = Me.Controls.Add("Forms.CommandButton.1", "btnLoadRules")
+    With btnLoadRules
+        .Caption = "Load"
+        .Left = btnX + BTN_W / 2 + 1: .Top = ruleBtnY: .Width = BTN_W / 2 - 1: .Height = BTN_H
+        .Font.Size = 7
+    End With
+
+    yPos = yPos + lstCustomRules.Height + ITEM_GAP
+
+    ' Input row: Correct + Incorrect Variants
     Set lbl = Me.Controls.Add("Forms.Label.1", "lblCorrectForm")
     With lbl
         .Caption = "Correct:"
@@ -248,8 +302,8 @@ Private Sub UserForm_Initialize()
         .Font.Size = 7.5
     End With
 
-    Set txtBrandCorrect = Me.Controls.Add("Forms.TextBox.1", "txtBrandCorrect")
-    With txtBrandCorrect
+    Set txtRuleCorrect = Me.Controls.Add("Forms.TextBox.1", "txtRuleCorrect")
+    With txtRuleCorrect
         .Left = colLeft + 42: .Top = yPos: .Width = 90: .Height = TXT_H
         .Font.Size = 7.5
     End With
@@ -261,30 +315,12 @@ Private Sub UserForm_Initialize()
         .Font.Size = 7.5
     End With
 
-    Set txtBrandIncorrect = Me.Controls.Add("Forms.TextBox.1", "txtBrandIncorrect")
-    With txtBrandIncorrect
-        .Left = colLeft + 178: .Top = yPos: .Width = 100: .Height = TXT_H
+    Set txtRuleVariants = Me.Controls.Add("Forms.TextBox.1", "txtRuleVariants")
+    With txtRuleVariants
+        .Left = colLeft + 178: .Top = yPos: .Width = ruleListW - 178 + colLeft: .Height = TXT_H
         .Font.Size = 7.5
     End With
-    ShowBrandPlaceholder
-
-    ' Save/Load buttons inline after inputs
-    Dim slX As Single
-    slX = colLeft + 282
-
-    Set btnSaveBrands = Me.Controls.Add("Forms.CommandButton.1", "btnSaveBrands")
-    With btnSaveBrands
-        .Caption = "Save"
-        .Left = slX: .Top = yPos: .Width = 36: .Height = TXT_H
-        .Font.Size = 7
-    End With
-
-    Set btnLoadBrands = Me.Controls.Add("Forms.CommandButton.1", "btnLoadBrands")
-    With btnLoadBrands
-        .Caption = "Load"
-        .Left = slX + 38: .Top = yPos: .Width = 36: .Height = TXT_H
-        .Font.Size = 7
-    End With
+    ShowVariantsPlaceholder
 
     Dim leftBottomY As Single
     leftBottomY = yPos + TXT_H
@@ -292,10 +328,6 @@ Private Sub UserForm_Initialize()
     ' ---- RIGHT COLUMN: Options (starting from row3Top) ----
     Dim optY As Single
     optY = row3Top
-    Dim optW As Single
-    optW = FULL_W - leftW - SEC_GAP  ' available width for right column
-    Dim cboW As Single
-    cboW = optW - 92   ' dropdown width after label
 
     Set lbl = Me.Controls.Add("Forms.Label.1", "lblOptionsHeader")
     With lbl
@@ -308,7 +340,7 @@ Private Sub UserForm_Initialize()
     Set chkAddComments = Me.Controls.Add("Forms.CheckBox.1", "chkAddComments")
     With chkAddComments
         .Caption = "Add comments"
-        .Left = colRight: .Top = optY: .Width = 140: .Height = CHK_H
+        .Left = colRight: .Top = optY: .Width = rightW: .Height = CHK_H
         .Value = True
         .Font.Size = 7.5
     End With
@@ -317,20 +349,19 @@ Private Sub UserForm_Initialize()
     Set chkTrackedChanges = Me.Controls.Add("Forms.CheckBox.1", "chkTrackedChanges")
     With chkTrackedChanges
         .Caption = "Tracked changes"
-        .Left = colRight: .Top = optY: .Width = 140: .Height = CHK_H
+        .Left = colRight: .Top = optY: .Width = rightW: .Height = CHK_H
         .Value = True
         .Font.Size = 7.5
     End With
     optY = optY + CHK_H + ITEM_GAP
 
-    ' Spelling mode (dropdown)
+    ' Spelling mode
     Set lbl = Me.Controls.Add("Forms.Label.1", "lblSpellingMode")
     With lbl
         .Caption = "Spelling:"
         .Left = colRight: .Top = optY + 2: .Width = 88: .Height = LBL_H
         .Font.Size = 7.5
     End With
-
     Set cboSpelling = Me.Controls.Add("Forms.ComboBox.1", "cboSpelling")
     With cboSpelling
         .Left = colRight + 90: .Top = optY: .Width = cboW: .Height = TXT_H
@@ -342,14 +373,13 @@ Private Sub UserForm_Initialize()
     End With
     optY = optY + TXT_H + ITEM_GAP
 
-    ' Primary quotation marks (dropdown)
+    ' Primary quotation marks
     Set lbl = Me.Controls.Add("Forms.Label.1", "lblQuoteNesting")
     With lbl
         .Caption = "Primary quotation marks:"
         .Left = colRight: .Top = optY + 2: .Width = 88: .Height = LBL_H
         .Font.Size = 7
     End With
-
     Set cboQuoteNesting = Me.Controls.Add("Forms.ComboBox.1", "cboQuoteNesting")
     With cboQuoteNesting
         .Left = colRight + 90: .Top = optY: .Width = cboW: .Height = TXT_H
@@ -361,14 +391,13 @@ Private Sub UserForm_Initialize()
     End With
     optY = optY + TXT_H + ITEM_GAP
 
-    ' Smart quotes (dropdown)
+    ' Smart quotes
     Set lbl = Me.Controls.Add("Forms.Label.1", "lblSmartQuotes")
     With lbl
         .Caption = "Smart quotes:"
         .Left = colRight: .Top = optY + 2: .Width = 88: .Height = LBL_H
         .Font.Size = 7.5
     End With
-
     Set cboSmartQuotes = Me.Controls.Add("Forms.ComboBox.1", "cboSmartQuotes")
     With cboSmartQuotes
         .Left = colRight + 90: .Top = optY: .Width = cboW: .Height = TXT_H
@@ -380,14 +409,13 @@ Private Sub UserForm_Initialize()
     End With
     optY = optY + TXT_H + ITEM_GAP
 
-    ' Date format (dropdown with example text)
+    ' Date format
     Set lbl = Me.Controls.Add("Forms.Label.1", "lblDateFormat")
     With lbl
         .Caption = "Date format:"
         .Left = colRight: .Top = optY + 2: .Width = 88: .Height = LBL_H
         .Font.Size = 7.5
     End With
-
     Set cboDateFormat = Me.Controls.Add("Forms.ComboBox.1", "cboDateFormat")
     With cboDateFormat
         .Left = colRight + 90: .Top = optY: .Width = cboW + 46: .Height = TXT_H
@@ -399,14 +427,13 @@ Private Sub UserForm_Initialize()
     End With
     optY = optY + TXT_H + ITEM_GAP
 
-    ' Non-English Terms (dropdown)
+    ' Non-English Terms
     Set lbl = Me.Controls.Add("Forms.Label.1", "lblNonEngTerms")
     With lbl
         .Caption = "Non-English Terms:"
         .Left = colRight: .Top = optY + 2: .Width = 88: .Height = LBL_H
         .Font.Size = 7.5
     End With
-
     Set cboNonEngTerms = Me.Controls.Add("Forms.ComboBox.1", "cboNonEngTerms")
     With cboNonEngTerms
         .Left = colRight + 90: .Top = optY: .Width = cboW: .Height = TXT_H
@@ -418,14 +445,13 @@ Private Sub UserForm_Initialize()
     End With
     optY = optY + TXT_H + ITEM_GAP
 
-    ' After full stop spacing (dropdown)
+    ' After full stop
     Set lbl = Me.Controls.Add("Forms.Label.1", "lblSpaceStyle")
     With lbl
         .Caption = "After full stop:"
         .Left = colRight: .Top = optY + 2: .Width = 88: .Height = LBL_H
         .Font.Size = 7.5
     End With
-
     Set cboSpaceStyle = Me.Controls.Add("Forms.ComboBox.1", "cboSpaceStyle")
     With cboSpaceStyle
         .Left = colRight + 90: .Top = optY: .Width = cboW: .Height = TXT_H
@@ -437,14 +463,13 @@ Private Sub UserForm_Initialize()
     End With
     optY = optY + TXT_H + ITEM_GAP
 
-    ' Defined terms (format + quotes dropdowns)
+    ' Defined terms (format + quotes)
     Set lbl = Me.Controls.Add("Forms.Label.1", "lblDefinedTerms")
     With lbl
         .Caption = "Def. terms:"
         .Left = colRight: .Top = optY + 2: .Width = 56: .Height = LBL_H
         .Font.Size = 7.5
     End With
-
     Set cboTermFormat = Me.Controls.Add("Forms.ComboBox.1", "cboTermFormat")
     With cboTermFormat
         .Left = colRight + 56: .Top = optY: .Width = 70: .Height = TXT_H
@@ -464,7 +489,6 @@ Private Sub UserForm_Initialize()
         .Left = colRight + 128: .Top = optY + 2: .Width = 10: .Height = LBL_H
         .Font.Size = 7.5
     End With
-
     Set cboTermQuotes = Me.Controls.Add("Forms.ComboBox.1", "cboTermQuotes")
     With cboTermQuotes
         .Left = colRight + 140: .Top = optY: .Width = 80: .Height = TXT_H
@@ -520,8 +544,8 @@ Private Sub UserForm_Initialize()
         .Font.Size = 8
     End With
 
-    ' -- Load custom rules list ------------------------------------
-    RefreshBrandList
+    ' -- Load custom rules from engine -------------------------
+    LoadCustomRulesFromEngine
 
     ' -- Final form size based on layout ---
     Dim neededH As Single
@@ -544,14 +568,11 @@ Private Sub BuildRuleCheckboxList(nRules As Long)
     Dim displayLabel As String
     Dim i As Long
 
-    ' Multi-column layout: 4 columns across the wide frame
     Const COLS As Long = 4
     Const ROW_H As Single = 18
     Const COL_PAD As Single = 6
 
-    ' Guard against InsideWidth returning zero or implausibly small values
-    ' on some Word hosts during early initialisation
-    Const MIN_USABLE_W As Single = 120   ' absolute floor (30 pts per column)
+    Const MIN_USABLE_W As Single = 120
     Dim usableW As Single
     On Error Resume Next
     usableW = fraRules.InsideWidth
@@ -596,6 +617,199 @@ Private Sub BuildRuleCheckboxList(nRules As Long)
 End Sub
 
 ' ============================================================
+'  CUSTOM RULES DATA MODEL
+'  Single source of truth: crEnabled(), crCorrect(), crVariants()
+' ============================================================
+Private Sub InitCustomRulesArrays(ByVal capacity As Long)
+    If capacity < 1 Then capacity = 1
+    ReDim crEnabled(0 To capacity - 1)
+    ReDim crCorrect(0 To capacity - 1)
+    ReDim crVariants(0 To capacity - 1)
+    ReDim crSortOrder(0 To capacity - 1)
+    crCount = 0
+End Sub
+
+Private Sub AddCustomRule(ByVal correct As String, ByVal variants As String, ByVal enabled As Boolean)
+    If crCount = 0 Then
+        InitCustomRulesArrays 16
+    End If
+    ' Grow arrays if needed
+    If crCount > UBound(crCorrect) Then
+        ReDim Preserve crEnabled(0 To crCount * 2)
+        ReDim Preserve crCorrect(0 To crCount * 2)
+        ReDim Preserve crVariants(0 To crCount * 2)
+        ReDim Preserve crSortOrder(0 To crCount * 2)
+    End If
+    crCorrect(crCount) = correct
+    crVariants(crCount) = variants
+    crEnabled(crCount) = enabled
+    crCount = crCount + 1
+    RebuildSortOrder
+End Sub
+
+Private Sub RemoveCustomRule(ByVal idx As Long)
+    If idx < 0 Or idx >= crCount Then Exit Sub
+    Dim j As Long
+    For j = idx To crCount - 2
+        crCorrect(j) = crCorrect(j + 1)
+        crVariants(j) = crVariants(j + 1)
+        crEnabled(j) = crEnabled(j + 1)
+    Next j
+    crCount = crCount - 1
+    RebuildSortOrder
+End Sub
+
+Private Sub UpdateCustomRule(ByVal idx As Long, ByVal correct As String, ByVal variants As String)
+    If idx < 0 Or idx >= crCount Then Exit Sub
+    crCorrect(idx) = correct
+    crVariants(idx) = variants
+    RebuildSortOrder
+End Sub
+
+Private Sub ToggleCustomRuleEnabled(ByVal idx As Long)
+    If idx < 0 Or idx >= crCount Then Exit Sub
+    crEnabled(idx) = Not crEnabled(idx)
+End Sub
+
+Private Sub RebuildSortOrder()
+    If crCount = 0 Then
+        ReDim crSortOrder(0 To 0)
+        Exit Sub
+    End If
+    ReDim crSortOrder(0 To crCount - 1)
+    Dim i As Long
+    For i = 0 To crCount - 1
+        crSortOrder(i) = i
+    Next i
+    If crSortMode = 1 Then
+        SortOrderByField 1  ' sort by correct
+    ElseIf crSortMode = 2 Then
+        SortOrderByField 2  ' sort by variants
+    End If
+End Sub
+
+Private Sub SortOrderByField(ByVal field As Long)
+    ' Simple insertion sort on crSortOrder by the chosen field
+    Dim i As Long, j As Long, tmp As Long
+    Dim valI As String, valJ As String
+    For i = 1 To crCount - 1
+        tmp = crSortOrder(i)
+        If field = 1 Then
+            valI = LCase$(crCorrect(tmp))
+        Else
+            valI = LCase$(crVariants(tmp))
+        End If
+        j = i - 1
+        Do While j >= 0
+            If field = 1 Then
+                valJ = LCase$(crCorrect(crSortOrder(j)))
+            Else
+                valJ = LCase$(crVariants(crSortOrder(j)))
+            End If
+            If valJ <= valI Then Exit Do
+            crSortOrder(j + 1) = crSortOrder(j)
+            j = j - 1
+        Loop
+        crSortOrder(j + 1) = tmp
+    Next i
+End Sub
+
+' Map a display-list index to a data-array index
+Private Function DisplayToDataIndex(ByVal displayIdx As Long) As Long
+    If displayIdx < 0 Or displayIdx >= crCount Then
+        DisplayToDataIndex = -1
+    Else
+        DisplayToDataIndex = crSortOrder(displayIdx)
+    End If
+End Function
+
+' ============================================================
+'  LOAD CUSTOM RULES FROM ENGINE (Rules_Brands module)
+' ============================================================
+Private Sub LoadCustomRulesFromEngine()
+    InitCustomRulesArrays 16
+    On Error Resume Next
+    Dim brands As Object
+    Set brands = Application.Run("Rules_Brands.GetBrandRules")
+    If Err.Number <> 0 Then
+        Err.Clear
+        On Error GoTo 0
+        RefreshCustomRulesList
+        Exit Sub
+    End If
+    On Error GoTo 0
+    If brands Is Nothing Then
+        RefreshCustomRulesList
+        Exit Sub
+    End If
+    Dim bKey As Variant
+    For Each bKey In brands.keys
+        AddCustomRule CStr(bKey), CStr(brands(bKey)), True
+    Next bKey
+    RefreshCustomRulesList
+End Sub
+
+' ============================================================
+'  SYNC CUSTOM RULES BACK TO ENGINE (before run)
+' ============================================================
+Private Sub SyncCustomRulesToEngine()
+    ' Clear existing brand rules and rebuild from our data model
+    On Error Resume Next
+    Dim oldBrands As Object
+    Set oldBrands = Application.Run("Rules_Brands.GetBrandRules")
+    If Err.Number <> 0 Then
+        Err.Clear
+        On Error GoTo 0
+        Exit Sub
+    End If
+    On Error GoTo 0
+
+    ' Remove all existing rules
+    If Not oldBrands Is Nothing Then
+        Dim oldKeys As Variant
+        oldKeys = oldBrands.keys
+        Dim m As Long
+        For m = UBound(oldKeys) To LBound(oldKeys) Step -1
+            On Error Resume Next
+            Application.Run "Rules_Brands.RemoveBrandRule", CStr(oldKeys(m))
+            If Err.Number <> 0 Then Err.Clear
+            On Error GoTo 0
+        Next m
+    End If
+
+    ' Add back only enabled rules
+    Dim n As Long
+    For n = 0 To crCount - 1
+        If crEnabled(n) Then
+            On Error Resume Next
+            Application.Run "Rules_Brands.AddBrandRule", crCorrect(n), crVariants(n)
+            If Err.Number <> 0 Then Err.Clear
+            On Error GoTo 0
+        End If
+    Next n
+End Sub
+
+' ============================================================
+'  REFRESH CUSTOM RULES LISTBOX
+' ============================================================
+Private Sub RefreshCustomRulesList()
+    lstCustomRules.Clear
+    If crCount = 0 Then Exit Sub
+    Dim i As Long
+    Dim di As Long
+    Dim enabledMark As String
+    For i = 0 To crCount - 1
+        di = crSortOrder(i)
+        If crEnabled(di) Then enabledMark = ChrW$(9745) Else enabledMark = ChrW$(9744)
+        lstCustomRules.AddItem ""
+        lstCustomRules.List(i, 0) = enabledMark
+        lstCustomRules.List(i, 1) = CStr(di + 1)
+        lstCustomRules.List(i, 2) = crCorrect(di)
+        lstCustomRules.List(i, 3) = crVariants(di)
+    Next i
+End Sub
+
+' ============================================================
 '  RUN BUTTON
 ' ============================================================
 Private Sub btnRun_Click()
@@ -613,6 +827,9 @@ Private Sub btnRun_Click()
             ruleConfig(rName) = CBool(ruleCheckboxes(i).Value)
         End If
     Next i
+
+    ' Sync custom rules to engine (only enabled rules)
+    SyncCustomRulesToEngine
 
     ' Set page range from flexible input (ignore placeholder text)
     PleadingsEngine.SetPageRangeFromString GetPageRangeText()
@@ -642,14 +859,12 @@ Private Sub btnRun_Click()
         PleadingsEngine.SetDateFormatPref "UK"
     End If
 
-    ' Set non-English terms preference
     If cboNonEngTerms.ListIndex = 1 Then
         PleadingsEngine.SetNonEngTermPref "REGULAR"
     Else
         PleadingsEngine.SetNonEngTermPref "ITALICS"
     End If
 
-    ' Set defined term detection preferences
     Dim termFmt As String
     Select Case cboTermFormat.ListIndex
         Case 0: termFmt = "BOLD"
@@ -667,7 +882,6 @@ Private Sub btnRun_Click()
     End If
     PleadingsEngine.SetTermQuotePref termQt
 
-    ' Set space style preference
     If cboSpaceStyle.ListIndex = 1 Then
         PleadingsEngine.SetSpaceStylePref "TWO"
     Else
@@ -771,12 +985,10 @@ Private Sub btnExport_Click()
     End If
     On Error GoTo 0
 
-    ' Fallback to temp directory if no valid path yet
     If Len(reportPath) = 0 Then
         reportPath = GetTempReportPath(sep)
     End If
 
-    ' Ensure parent directory exists before writing
     Dim reportDir As String
     reportDir = GetParentDirectory(reportPath)
     If Len(reportDir) > 0 Then
@@ -787,10 +999,9 @@ Private Sub btnExport_Click()
     Me.Repaint
     DoEvents
 
-    Dim summary As String
-    summary = PleadingsEngine.GenerateReport(lastResults, reportPath, targetDoc)
+    Dim reportSummary As String
+    reportSummary = PleadingsEngine.GenerateReport(lastResults, reportPath, targetDoc)
 
-    ' Auto-save debug log alongside report when DEBUG_MODE is True
     Dim logPath As String
     Dim logSaved As Boolean
     logSaved = False
@@ -803,7 +1014,6 @@ Private Sub btnExport_Click()
     End If
     On Error GoTo 0
 
-    ' Build informative export message
     Dim errCount As Long
     errCount = PleadingsEngine.GetRuleErrorCount()
 
@@ -820,7 +1030,7 @@ Private Sub btnExport_Click()
         msg = msg & vbCrLf & vbCrLf & errCount & " rule(s) failed during the run."
     End If
 
-    msg = msg & vbCrLf & vbCrLf & summary
+    msg = msg & vbCrLf & vbCrLf & reportSummary
 
     lblStatus.Caption = "Report saved."
     MsgBox msg, vbInformation, "Pleadings Checker -- Report"
@@ -849,175 +1059,358 @@ Private Sub btnDeselectAll_Click()
 End Sub
 
 ' ============================================================
-'  CUSTOM RULES MANAGEMENT
+'  CUSTOM RULES: ADD
 ' ============================================================
-Private Sub RefreshBrandList()
-    lstBrands.Clear
-    On Error Resume Next
-    Dim brands As Object
-    Set brands = Application.Run("Rules_Brands.GetBrandRules")
-    If Err.Number <> 0 Then
-        Err.Clear
-        On Error GoTo 0
-        Exit Sub
-    End If
-    On Error GoTo 0
-    If brands Is Nothing Then Exit Sub
-    Dim key As Variant
-    For Each key In brands.keys
-        lstBrands.AddItem CStr(key) & " -> " & CStr(brands(key))
-    Next key
-End Sub
-
-Private Sub btnAddBrand_Click()
+Private Sub btnAddRule_Click()
     Dim correctForm As String
-    Dim incorrectVariants As String
-    correctForm = Trim(txtBrandCorrect.Text)
-    incorrectVariants = GetBrandIncorrectText()
+    Dim incorrectVars As String
+    correctForm = Trim$(txtRuleCorrect.Text)
+    incorrectVars = GetVariantsText()
 
-    If correctForm = "" Or incorrectVariants = "" Then
-        MsgBox "Enter both the correct form and at least one incorrect variant.", _
-               vbExclamation, "Custom Rules"
+    If Len(correctForm) = 0 Then
+        MsgBox "Enter the correct form.", vbExclamation, "Custom Rules"
+        txtRuleCorrect.SetFocus
         Exit Sub
     End If
 
-    ' Normalise comma-separated variants: trim and remove blanks
-    incorrectVariants = NormaliseBrandVariants(incorrectVariants)
-    If Len(incorrectVariants) = 0 Then
+    If Len(incorrectVars) = 0 Then
         MsgBox "Enter at least one incorrect variant.", vbExclamation, "Custom Rules"
+        txtRuleVariants.SetFocus
         Exit Sub
     End If
 
-    If editingBrandIndex >= 0 Then
-        ' Remove old rule first, then add updated
-        Dim oldEntry As String
-        oldEntry = lstBrands.List(editingBrandIndex)
-        Dim oldCorrect As String
-        oldCorrect = Left(oldEntry, InStr(oldEntry, " -> ") - 1)
-        On Error Resume Next
-        Application.Run "Rules_Brands.RemoveBrandRule", oldCorrect
+    ' Normalise variants
+    incorrectVars = NormaliseVariants(incorrectVars)
+    If Len(incorrectVars) = 0 Then
+        MsgBox "Enter at least one incorrect variant.", vbExclamation, "Custom Rules"
+        txtRuleVariants.SetFocus
+        Exit Sub
+    End If
+
+    If editingRuleIndex >= 0 Then
+        ' Update existing rule
+        Dim dataIdx As Long
+        dataIdx = DisplayToDataIndex(editingRuleIndex)
+        If dataIdx >= 0 Then
+            UpdateCustomRule dataIdx, correctForm, incorrectVars
+        End If
+        editingRuleIndex = -1
+        btnAddRule.Caption = "Add"
+    Else
+        ' Add new rule (enabled by default)
+        AddCustomRule correctForm, incorrectVars, True
+    End If
+
+    txtRuleCorrect.Text = ""
+    ClearVariants
+    ShowVariantsPlaceholder
+    RefreshCustomRulesList
+End Sub
+
+' ============================================================
+'  CUSTOM RULES: REMOVE
+' ============================================================
+Private Sub btnRemoveRule_Click()
+    If lstCustomRules.ListIndex < 0 Then
+        MsgBox "Select a rule to remove.", vbExclamation, "Custom Rules"
+        Exit Sub
+    End If
+
+    Dim dataIdx As Long
+    dataIdx = DisplayToDataIndex(lstCustomRules.ListIndex)
+    If dataIdx >= 0 Then
+        RemoveCustomRule dataIdx
+    End If
+
+    ' Cancel any edit in progress
+    If editingRuleIndex >= 0 Then
+        editingRuleIndex = -1
+        btnAddRule.Caption = "Add"
+        txtRuleCorrect.Text = ""
+        ClearVariants
+        ShowVariantsPlaceholder
+    End If
+
+    RefreshCustomRulesList
+End Sub
+
+' ============================================================
+'  CUSTOM RULES: EDIT
+' ============================================================
+Private Sub btnEditRule_Click()
+    If lstCustomRules.ListIndex < 0 Then
+        MsgBox "Select a rule to edit.", vbInformation, "Custom Rules"
+        Exit Sub
+    End If
+
+    Dim dataIdx As Long
+    dataIdx = DisplayToDataIndex(lstCustomRules.ListIndex)
+    If dataIdx < 0 Then Exit Sub
+
+    editingRuleIndex = lstCustomRules.ListIndex
+    txtRuleCorrect.Text = crCorrect(dataIdx)
+    HideVariantsPlaceholder
+    txtRuleVariants.Text = crVariants(dataIdx)
+    btnAddRule.Caption = "Save Edit"
+End Sub
+
+' ============================================================
+'  CUSTOM RULES: TOGGLE ENABLED (double-click on list)
+' ============================================================
+' Note: MSForms.ListBox does not have a DblClick WithEvents in
+' the same way. We use a workaround: user selects row and we
+' provide a toggle via the checkbox column click.
+' Since we cannot intercept individual column clicks in a
+' standard MSForms.ListBox, we toggle enabled state when the
+' user double-clicks (handled by the list control's built-in
+' DblClick event if available, or we add a Toggle button).
+' For simplicity, we repurpose the # column header button.
+
+' ============================================================
+'  CUSTOM RULES: SORT BUTTONS
+' ============================================================
+Private Sub btnSortDefault_Click()
+    crSortMode = 0
+    RebuildSortOrder
+    RefreshCustomRulesList
+End Sub
+
+Private Sub btnSortCorrect_Click()
+    crSortMode = 1
+    RebuildSortOrder
+    RefreshCustomRulesList
+End Sub
+
+Private Sub btnSortVariants_Click()
+    crSortMode = 2
+    RebuildSortOrder
+    RefreshCustomRulesList
+End Sub
+
+' ============================================================
+'  CUSTOM RULES: SAVE
+' ============================================================
+Private Sub btnSaveRules_Click()
+    Dim rulesFile As String
+    rulesFile = GetCustomRulesPath()
+
+    Dim rulesDir As String
+    rulesDir = GetParentDirectory(rulesFile)
+    If Len(rulesDir) > 0 Then
+        EnsureDirectoryExists rulesDir
+    End If
+
+    ' Save all rules (enabled and disabled) with enabled flag
+    Dim fileNum As Integer
+    fileNum = FreeFile
+    On Error GoTo SaveFail
+    Open rulesFile For Output As #fileNum
+    Dim s As Long
+    For s = 0 To crCount - 1
+        Dim prefix As String
+        If crEnabled(s) Then prefix = "+" Else prefix = "-"
+        Print #fileNum, prefix & crCorrect(s) & "=" & crVariants(s)
+    Next s
+    Close #fileNum
+
+    MsgBox "Custom rules saved to:" & vbCrLf & rulesFile, vbInformation, "Custom Rules"
+    Exit Sub
+
+SaveFail:
+    On Error Resume Next
+    Close #fileNum
+    MsgBox "Failed to save custom rules to:" & vbCrLf & rulesFile & vbCrLf & _
+           "Error: " & Err.Description, vbExclamation, "Custom Rules"
+    Err.Clear
+    On Error GoTo 0
+End Sub
+
+' ============================================================
+'  CUSTOM RULES: LOAD
+' ============================================================
+Private Sub btnLoadRules_Click()
+    Dim fd As Object
+    On Error Resume Next
+    Set fd = Application.FileDialog(3)  ' msoFileDialogFilePicker
+    If Err.Number <> 0 Then
         Err.Clear
         On Error GoTo 0
-        editingBrandIndex = -1
-        btnAddBrand.Caption = "Add"
+        Dim fallbackPath As String
+        fallbackPath = GetCustomRulesPath()
+        If Dir(fallbackPath) = "" Then
+            MsgBox "No saved custom rules found at:" & vbCrLf & fallbackPath, _
+                   vbExclamation, "Custom Rules"
+            Exit Sub
+        End If
+        LoadCustomRulesFromFile fallbackPath
+        Exit Sub
     End If
+    On Error GoTo 0
 
+    With fd
+        .Title = "Load Custom Rules"
+        .AllowMultiSelect = False
+        On Error Resume Next
+        .Filters.Clear
+        .Filters.Add "Text Files", "*.txt"
+        .Filters.Add "All Files", "*.*"
+        If Err.Number <> 0 Then Err.Clear
+        On Error GoTo 0
+
+        If .Show = -1 Then
+            LoadCustomRulesFromFile CStr(.SelectedItems(1))
+        End If
+    End With
+End Sub
+
+Private Sub LoadCustomRulesFromFile(ByVal filePath As String)
+    Dim fileNum As Integer
+    Dim lineText As String
+    Dim eqPos As Long
+    Dim correct As String
+    Dim variants As String
+    Dim enabled As Boolean
+
+    InitCustomRulesArrays 16
+
+    fileNum = FreeFile
+    On Error GoTo LoadFail
+    Open filePath For Input As #fileNum
+
+    Do While Not EOF(fileNum)
+        Line Input #fileNum, lineText
+        lineText = Trim$(lineText)
+        If Len(lineText) = 0 Then GoTo NextLoadLine
+        If Left$(lineText, 1) = "#" Then GoTo NextLoadLine
+
+        ' Parse enabled flag: + or - prefix
+        enabled = True
+        If Left$(lineText, 1) = "+" Then
+            lineText = Mid$(lineText, 2)
+        ElseIf Left$(lineText, 1) = "-" Then
+            enabled = False
+            lineText = Mid$(lineText, 2)
+        End If
+
+        eqPos = InStr(lineText, "=")
+        If eqPos > 1 Then
+            correct = Trim$(Left$(lineText, eqPos - 1))
+            variants = Trim$(Mid$(lineText, eqPos + 1))
+            If Len(correct) > 0 And Len(variants) > 0 Then
+                AddCustomRule correct, variants, enabled
+            End If
+        End If
+
+NextLoadLine:
+    Loop
+
+    Close #fileNum
+    RefreshCustomRulesList
+
+    ' Also sync enabled rules to engine
+    SyncCustomRulesToEngine
+
+    MsgBox "Custom rules loaded from:" & vbCrLf & filePath, vbInformation, "Custom Rules"
+    Exit Sub
+
+LoadFail:
     On Error Resume Next
-    Application.Run "Rules_Brands.AddBrandRule", correctForm, incorrectVariants
+    Close #fileNum
+    MsgBox "Could not read custom rules from:" & vbCrLf & filePath & vbCrLf & _
+           "Error: " & Err.Description, vbExclamation, "Custom Rules"
+    Err.Clear
+    On Error GoTo 0
+    ' Fall back to engine defaults if nothing loaded
+    If crCount = 0 Then LoadCustomRulesFromEngine
+End Sub
+
+' -- Helper: cross-platform custom rules file path --
+Private Function GetCustomRulesPath() As String
+    On Error Resume Next
+    GetCustomRulesPath = Application.Run("Rules_Brands.GetDefaultBrandRulesPath")
     If Err.Number <> 0 Then
-        MsgBox "Brand rules module not loaded.", vbExclamation, "Custom Rules"
         Err.Clear
+        On Error GoTo 0
+        Dim sep As String
+        sep = Application.PathSeparator
+        #If Mac Then
+            GetCustomRulesPath = Environ("HOME") & sep & "Library" & sep & _
+                                "Application Support" & sep & "PleadingsChecker" & sep & "brand_rules.txt"
+        #Else
+            GetCustomRulesPath = Environ("APPDATA") & sep & "PleadingsChecker" & sep & "brand_rules.txt"
+        #End If
+        Exit Function
     End If
     On Error GoTo 0
+End Function
 
-    txtBrandCorrect.Text = ""
-    ClearBrandIncorrect
-    ShowBrandPlaceholder
-    RefreshBrandList
-End Sub
-
-Private Sub btnRemoveBrand_Click()
-    If lstBrands.ListIndex < 0 Then
-        MsgBox "Select a brand rule to remove.", vbExclamation, "Custom Rules"
-        Exit Sub
-    End If
-
-    Dim entry As String
-    entry = lstBrands.List(lstBrands.ListIndex)
-    Dim correctForm As String
-    correctForm = Left(entry, InStr(entry, " -> ") - 1)
-
-    On Error Resume Next
-    Application.Run "Rules_Brands.RemoveBrandRule", correctForm
-    If Err.Number <> 0 Then Err.Clear
-    On Error GoTo 0
-
-    RefreshBrandList
-End Sub
-
-Private Sub btnEditBrand_Click()
-    If lstBrands.ListIndex < 0 Then
-        MsgBox "Please select a rule to edit.", vbInformation, "Custom Rules"
-        Exit Sub
-    End If
-
-    Dim entry As String
-    entry = lstBrands.List(lstBrands.ListIndex)
-    Dim arrowPos As Long
-    arrowPos = InStr(entry, " -> ")
-    If arrowPos = 0 Then Exit Sub
-
-    editingBrandIndex = lstBrands.ListIndex
-    txtBrandCorrect.Text = Left(entry, arrowPos - 1)
-    HideBrandPlaceholder
-    txtBrandIncorrect.Text = Mid(entry, arrowPos + 4)
-    btnAddBrand.Caption = "Save Edit"
-End Sub
-
-' -- Placeholder helpers for txtBrandIncorrect --
-Private Sub ShowBrandPlaceholder()
-    If txtBrandIncorrect Is Nothing Then Exit Sub
-    If Len(Trim(txtBrandIncorrect.Text)) = 0 Or placeholderActive Then
-        txtBrandIncorrect.Text = "e.g. colour, color, colours"
-        txtBrandIncorrect.ForeColor = &HC0C0C0  ' light grey
-        placeholderActive = True
+' ============================================================
+'  VARIANTS TEXTBOX PLACEHOLDER HELPERS
+' ============================================================
+Private Sub ShowVariantsPlaceholder()
+    If txtRuleVariants Is Nothing Then Exit Sub
+    If Len(Trim$(txtRuleVariants.Text)) = 0 Or variantsPlaceholderActive Then
+        txtRuleVariants.Text = "e.g. colour, color, colours"
+        txtRuleVariants.ForeColor = &HC0C0C0  ' light grey
+        variantsPlaceholderActive = True
     End If
 End Sub
 
-Private Sub HideBrandPlaceholder()
-    If placeholderActive Then
-        txtBrandIncorrect.Text = ""
-        txtBrandIncorrect.ForeColor = &H0  ' black
-        placeholderActive = False
+Private Sub HideVariantsPlaceholder()
+    If variantsPlaceholderActive Then
+        txtRuleVariants.Text = ""
+        txtRuleVariants.ForeColor = &H0  ' black
+        variantsPlaceholderActive = False
     End If
 End Sub
 
-' Return the actual text, ignoring placeholder
-Private Function GetBrandIncorrectText() As String
-    If placeholderActive Then
-        GetBrandIncorrectText = ""
+Private Function GetVariantsText() As String
+    If variantsPlaceholderActive Then
+        GetVariantsText = ""
     Else
-        GetBrandIncorrectText = Trim(txtBrandIncorrect.Text)
+        GetVariantsText = Trim$(txtRuleVariants.Text)
     End If
 End Function
 
-Private Sub ClearBrandIncorrect()
-    txtBrandIncorrect.Text = ""
-    txtBrandIncorrect.ForeColor = &H0
-    placeholderActive = False
+Private Sub ClearVariants()
+    txtRuleVariants.Text = ""
+    txtRuleVariants.ForeColor = &H0
+    variantsPlaceholderActive = False
+End Sub
+
+Private Sub txtRuleVariants_Enter()
+    HideVariantsPlaceholder
+End Sub
+
+Private Sub txtRuleVariants_Exit(ByVal Cancel As MSForms.ReturnBoolean)
+    If Len(Trim$(txtRuleVariants.Text)) = 0 Then
+        ShowVariantsPlaceholder
+    End If
 End Sub
 
 ' Normalise comma-separated variants: trim each, remove blanks
-Private Function NormaliseBrandVariants(ByVal raw As String) As String
+Private Function NormaliseVariants(ByVal raw As String) As String
     Dim parts() As String
     parts = Split(raw, ",")
     Dim result As String
     Dim p As Long
     For p = LBound(parts) To UBound(parts)
         Dim item As String
-        item = Trim(parts(p))
+        item = Trim$(parts(p))
         If Len(item) > 0 Then
             If Len(result) > 0 Then result = result & ", "
             result = result & item
         End If
     Next p
-    NormaliseBrandVariants = result
+    NormaliseVariants = result
 End Function
 
-Private Sub txtBrandIncorrect_Enter()
-    HideBrandPlaceholder
-End Sub
-
-Private Sub txtBrandIncorrect_Exit(ByVal Cancel As MSForms.ReturnBoolean)
-    If Len(Trim(txtBrandIncorrect.Text)) = 0 Then
-        ShowBrandPlaceholder
-    End If
-End Sub
-
-' -- Placeholder helpers for txtPageRange --
+' ============================================================
+'  PAGE RANGE PLACEHOLDER HELPERS
+' ============================================================
 Private Sub ShowPageRangePlaceholder()
     If txtPageRange Is Nothing Then Exit Sub
-    If Len(Trim(txtPageRange.Text)) = 0 Or pageRangePlaceholderActive Then
+    If Len(Trim$(txtPageRange.Text)) = 0 Or pageRangePlaceholderActive Then
         txtPageRange.Text = "e.g. 1,3,5-8,9:30"
         txtPageRange.ForeColor = &HC0C0C0  ' light grey
         pageRangePlaceholderActive = True
@@ -1036,7 +1429,7 @@ Private Function GetPageRangeText() As String
     If pageRangePlaceholderActive Then
         GetPageRangeText = ""
     Else
-        GetPageRangeText = Trim(txtPageRange.Text)
+        GetPageRangeText = Trim$(txtPageRange.Text)
     End If
 End Function
 
@@ -1045,291 +1438,10 @@ Private Sub txtPageRange_Enter()
 End Sub
 
 Private Sub txtPageRange_Exit(ByVal Cancel As MSForms.ReturnBoolean)
-    If Len(Trim(txtPageRange.Text)) = 0 Then
+    If Len(Trim$(txtPageRange.Text)) = 0 Then
         ShowPageRangePlaceholder
     End If
 End Sub
-
-Private Sub btnSaveBrands_Click()
-    Dim brandFile As String
-    brandFile = GetBrandRulesPath()
-
-    ' Ensure directory exists (recursive, handles nested paths)
-    Dim brandDir As String
-    brandDir = GetParentDirectory(brandFile)
-    If Len(brandDir) > 0 Then
-        EnsureDirectoryExists brandDir
-    End If
-
-    Dim saveResult As Boolean
-    On Error Resume Next
-    saveResult = Application.Run("Rules_Brands.SaveBrandRules", brandFile)
-    If Err.Number <> 0 Then
-        MsgBox "Brand rules module not loaded." & vbCrLf & _
-               "Error: " & Err.Description, vbExclamation, "Custom Rules"
-        Err.Clear
-        On Error GoTo 0
-        Exit Sub
-    End If
-    On Error GoTo 0
-
-    If saveResult Then
-        MsgBox "Brand rules saved to:" & vbCrLf & brandFile, vbInformation, "Custom Rules"
-    Else
-        MsgBox "Failed to save brand rules to:" & vbCrLf & brandFile & vbCrLf & _
-               "Check the file path is writable.", vbExclamation, "Custom Rules"
-    End If
-End Sub
-
-Private Sub btnLoadBrands_Click()
-    ' Open a file picker instead of assuming the default path exists
-    Dim fd As Object
-    On Error Resume Next
-    Set fd = Application.FileDialog(3)  ' msoFileDialogFilePicker = 3
-    If Err.Number <> 0 Then
-        ' FileDialog not available -- fall back to default path
-        Err.Clear
-        On Error GoTo 0
-        Dim fallbackPath As String
-        fallbackPath = GetBrandRulesPath()
-        If Dir(fallbackPath) = "" Then
-            MsgBox "No saved brand rules found at:" & vbCrLf & fallbackPath, _
-                   vbExclamation, "Custom Rules"
-            Exit Sub
-        End If
-        LoadBrandRulesFromPath fallbackPath
-        Exit Sub
-    End If
-    On Error GoTo 0
-
-    With fd
-        .Title = "Load Brand Rules"
-        .AllowMultiSelect = False
-        On Error Resume Next
-        .Filters.Clear
-        .Filters.Add "Text Files", "*.txt"
-        .Filters.Add "All Files", "*.*"
-        If Err.Number <> 0 Then Err.Clear
-        On Error GoTo 0
-
-        If .Show = -1 Then
-            LoadBrandRulesFromPath CStr(.SelectedItems(1))
-        End If
-    End With
-End Sub
-
-Private Sub LoadBrandRulesFromPath(ByVal filePath As String)
-    Dim loadResult As Boolean
-    On Error Resume Next
-    loadResult = Application.Run("Rules_Brands.LoadBrandRules", filePath)
-    If Err.Number <> 0 Then
-        MsgBox "Brand rules module not loaded." & vbCrLf & _
-               "Error: " & Err.Description, vbExclamation, "Custom Rules"
-        Err.Clear
-        On Error GoTo 0
-        Exit Sub
-    End If
-    On Error GoTo 0
-
-    RefreshBrandList
-    If loadResult Then
-        MsgBox "Brand rules loaded from:" & vbCrLf & filePath, vbInformation, "Custom Rules"
-    Else
-        MsgBox "Brand rules file could not be read:" & vbCrLf & filePath, _
-               vbExclamation, "Custom Rules"
-    End If
-End Sub
-
-' -- Helper: cross-platform brand rules file path --
-' Delegates to Rules_Brands.GetDefaultBrandRulesPath (single source of truth).
-' Falls back to a local construction if the module is not imported.
-Private Function GetBrandRulesPath() As String
-    On Error Resume Next
-    GetBrandRulesPath = Application.Run("Rules_Brands.GetDefaultBrandRulesPath")
-    If Err.Number <> 0 Then
-        Debug.Print "GetBrandRulesPath: Rules_Brands not loaded (Err " & Err.Number & "); using inline fallback"
-        Err.Clear
-        On Error GoTo 0
-        ' Fallback: build the path locally (kept in sync with Rules_Brands.GetDefaultBrandRulesPath)
-        Dim sep As String
-        sep = Application.PathSeparator
-        #If Mac Then
-            GetBrandRulesPath = Environ("HOME") & sep & "Library" & sep & _
-                                "Application Support" & sep & "PleadingsChecker" & sep & "brand_rules.txt"
-        #Else
-            GetBrandRulesPath = Environ("APPDATA") & sep & "PleadingsChecker" & sep & "brand_rules.txt"
-        #End If
-        Exit Function
-    End If
-    On Error GoTo 0
-End Function
-
-' ============================================================
-'  CUSTOM TERM WHITELIST MANAGEMENT
-' ============================================================
-Private Sub RefreshWhitelistList()
-    If lstWhitelist Is Nothing Then Exit Sub
-    lstWhitelist.Clear
-    On Error Resume Next
-    Dim terms As Object
-    Set terms = Application.Run("Rules_Terms.GetWhitelistTerms")
-    If Err.Number <> 0 Then
-        Err.Clear
-        On Error GoTo 0
-        Exit Sub
-    End If
-    On Error GoTo 0
-    If terms Is Nothing Then Exit Sub
-    Dim key As Variant
-    For Each key In terms.keys
-        lstWhitelist.AddItem CStr(key)
-    Next key
-End Sub
-
-Private Sub btnAddWhitelist_Click()
-    If txtWhitelistTerm Is Nothing Then Exit Sub
-    Dim term As String
-    term = Trim(txtWhitelistTerm.Text)
-    If Len(term) = 0 Then
-        MsgBox "Enter a term to add.", vbExclamation, "Custom Term Whitelist"
-        Exit Sub
-    End If
-
-    On Error Resume Next
-    Application.Run "Rules_Terms.AddWhitelistTerm", term
-    If Err.Number <> 0 Then
-        MsgBox "Whitelist module not loaded.", vbExclamation, "Custom Term Whitelist"
-        Err.Clear
-    End If
-    On Error GoTo 0
-
-    txtWhitelistTerm.Text = ""
-    RefreshWhitelistList
-End Sub
-
-Private Sub btnRemoveWhitelist_Click()
-    If lstWhitelist Is Nothing Then Exit Sub
-    If lstWhitelist.ListIndex < 0 Then
-        MsgBox "Select a term to remove.", vbExclamation, "Custom Term Whitelist"
-        Exit Sub
-    End If
-
-    Dim term As String
-    term = lstWhitelist.List(lstWhitelist.ListIndex)
-
-    On Error Resume Next
-    Application.Run "Rules_Terms.RemoveWhitelistTerm", term
-    If Err.Number <> 0 Then Err.Clear
-    On Error GoTo 0
-
-    RefreshWhitelistList
-End Sub
-
-Private Sub btnSaveWhitelist_Click()
-    ' Whitelist now merged into Custom Rules; save via brand rules
-    Dim wlFile As String
-    wlFile = GetWhitelistPath()
-
-    Dim wlDir As String
-    wlDir = GetParentDirectory(wlFile)
-    If Len(wlDir) > 0 Then
-        EnsureDirectoryExists wlDir
-    End If
-
-    Dim saveResult As Boolean
-    On Error Resume Next
-    saveResult = Application.Run("Rules_Terms.SaveWhitelistTerms", wlFile)
-    If Err.Number <> 0 Then
-        MsgBox "Whitelist module not loaded." & vbCrLf & _
-               "Error: " & Err.Description, vbExclamation, "Custom Term Whitelist"
-        Err.Clear
-        On Error GoTo 0
-        Exit Sub
-    End If
-    On Error GoTo 0
-
-    If saveResult Then
-        MsgBox "Whitelist saved to:" & vbCrLf & wlFile, vbInformation, "Custom Term Whitelist"
-    Else
-        MsgBox "Failed to save whitelist to:" & vbCrLf & wlFile, vbExclamation, "Custom Term Whitelist"
-    End If
-End Sub
-
-Private Sub btnLoadWhitelist_Click()
-    Dim fd As Object
-    On Error Resume Next
-    Set fd = Application.FileDialog(3)
-    If Err.Number <> 0 Then
-        Err.Clear
-        On Error GoTo 0
-        Dim fallbackPath As String
-        fallbackPath = GetWhitelistPath()
-        If Dir(fallbackPath) = "" Then
-            MsgBox "No saved whitelist found at:" & vbCrLf & fallbackPath, _
-                   vbExclamation, "Custom Term Whitelist"
-            Exit Sub
-        End If
-        LoadWhitelistFromPath fallbackPath
-        Exit Sub
-    End If
-    On Error GoTo 0
-
-    With fd
-        .Title = "Load Custom Term Whitelist"
-        .AllowMultiSelect = False
-        On Error Resume Next
-        .Filters.Clear
-        .Filters.Add "Text Files", "*.txt"
-        .Filters.Add "All Files", "*.*"
-        If Err.Number <> 0 Then Err.Clear
-        On Error GoTo 0
-
-        If .Show = -1 Then
-            LoadWhitelistFromPath CStr(.SelectedItems(1))
-        End If
-    End With
-End Sub
-
-Private Sub LoadWhitelistFromPath(ByVal filePath As String)
-    Dim loadResult As Boolean
-    On Error Resume Next
-    loadResult = Application.Run("Rules_Terms.LoadWhitelistTerms", filePath)
-    If Err.Number <> 0 Then
-        MsgBox "Whitelist module not loaded." & vbCrLf & _
-               "Error: " & Err.Description, vbExclamation, "Custom Term Whitelist"
-        Err.Clear
-        On Error GoTo 0
-        Exit Sub
-    End If
-    On Error GoTo 0
-
-    RefreshWhitelistList
-    If loadResult Then
-        MsgBox "Whitelist loaded from:" & vbCrLf & filePath, vbInformation, "Custom Term Whitelist"
-    Else
-        MsgBox "Whitelist file could not be read:" & vbCrLf & filePath, _
-               vbExclamation, "Custom Term Whitelist"
-    End If
-End Sub
-
-Private Function GetWhitelistPath() As String
-    On Error Resume Next
-    GetWhitelistPath = Application.Run("Rules_Terms.GetDefaultWhitelistPath")
-    If Err.Number <> 0 Then
-        Err.Clear
-        On Error GoTo 0
-        Dim sep As String
-        sep = Application.PathSeparator
-        #If Mac Then
-            GetWhitelistPath = Environ("HOME") & sep & "Library" & sep & _
-                                "Application Support" & sep & "PleadingsChecker" & sep & "whitelist.txt"
-        #Else
-            GetWhitelistPath = Environ("APPDATA") & sep & "PleadingsChecker" & sep & "whitelist.txt"
-        #End If
-        Exit Function
-    End If
-    On Error GoTo 0
-End Function
 
 ' ============================================================
 '  CLOSE BUTTON
