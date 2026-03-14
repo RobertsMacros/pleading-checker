@@ -41,9 +41,11 @@ Private WithEvents btnRemoveRule    As MSForms.CommandButton
 Private WithEvents btnEditRule      As MSForms.CommandButton
 Private WithEvents btnSaveRules     As MSForms.CommandButton
 Private WithEvents btnLoadRules     As MSForms.CommandButton
-Private WithEvents btnSortCorrect   As MSForms.CommandButton
-Private WithEvents btnSortVariants  As MSForms.CommandButton
-Private WithEvents btnSortDefault   As MSForms.CommandButton
+
+' Header click handlers for column sorting (clsHeaderClick class)
+Private mHdrNum      As clsHeaderClick
+Private mHdrCorrect  As clsHeaderClick
+Private mHdrVariants As clsHeaderClick
 
 Private fraRules        As MSForms.Frame
 Private WithEvents txtPageRange As MSForms.TextBox
@@ -73,10 +75,11 @@ Private Const VARIANTS_PLACEHOLDER As String = "e.g. colour, color, colours"
 Private mVariantsShowingPlaceholder As Boolean
 
 ' Custom rules data: parallel arrays for the single source of truth
-Private crEnabled()     As Boolean   ' Whether rule is active at runtime
 Private crCorrect()     As String    ' Correct form
 Private crVariants()    As String    ' Comma-separated incorrect variants
+Private crInsertSeq()   As Long      ' Insertion-order sequence number
 Private crCount         As Long      ' Number of custom rules
+Private crNextSeq       As Long      ' Next sequence number to assign
 Private crSortMode      As Long      ' 0=insertion, 1=correct, 2=variants
 Private crSortOrder()   As Long      ' Indices into cr* arrays for display
 
@@ -214,82 +217,61 @@ Private Sub UserForm_Initialize()
         .Font.Size = 9: .Font.Bold = True
     End With
 
-    ' Sort buttons inline with header
-    Dim sortX As Single
-    sortX = colLeft + 84
-    Set btnSortDefault = Me.Controls.Add("Forms.CommandButton.1", "btnSortDefault")
-    With btnSortDefault
-        .Caption = "#"
-        .Left = sortX: .Top = yPos - 1: .Width = 20: .Height = 16
-        .Font.Size = 7
-    End With
-    Set btnSortCorrect = Me.Controls.Add("Forms.CommandButton.1", "btnSortCorrect")
-    With btnSortCorrect
-        .Caption = "A-Z"
-        .Left = sortX + 22: .Top = yPos - 1: .Width = 28: .Height = 16
-        .Font.Size = 7
-    End With
-    Set btnSortVariants = Me.Controls.Add("Forms.CommandButton.1", "btnSortVariants")
-    With btnSortVariants
-        .Caption = "Var"
-        .Left = sortX + 52: .Top = yPos - 1: .Width = 28: .Height = 16
-        .Font.Size = 7
-    End With
-
     yPos = yPos + LBL_H + ITEM_GAP
 
-    ' Custom rules table: column header row + listbox
+    ' Custom rules table: column header row + listbox (3 columns)
     Dim ruleListW As Single
     ruleListW = leftW - BTN_W - ITEM_GAP - 4
-    Dim colWEnabled As Single: colWEnabled = 18
-    Dim colWNum As Single:     colWNum = 18
-    Dim colWCorrect As Single: colWCorrect = CLng(ruleListW * 0.35)
-    Dim colWVariants As Single: colWVariants = ruleListW - colWEnabled - colWNum - colWCorrect
+    Dim colWNum As Single:     colWNum = 24
+    Dim colWCorrect As Single: colWCorrect = CLng((ruleListW - colWNum) * 0.4)
+    Dim colWVariants As Single: colWVariants = ruleListW - colWNum - colWCorrect
     Dim hdrH As Single:        hdrH = 14
 
-    ' Column header labels with colored backgrounds
+    ' Clickable column header labels (wired via clsHeaderClick)
     Dim lblH As MSForms.Label
-    Set lblH = Me.Controls.Add("Forms.Label.1", "lblHdrEnabled")
-    With lblH
-        .Caption = ChrW$(9745)
-        .Left = colLeft: .Top = yPos: .Width = colWEnabled: .Height = hdrH
-        .Font.Size = 7: .TextAlign = fmTextAlignCenter
-        .BackColor = RGB(230, 230, 230): .BackStyle = fmBackStyleOpaque
-    End With
     Set lblH = Me.Controls.Add("Forms.Label.1", "lblHdrNum")
     With lblH
-        .Caption = "#"
-        .Left = colLeft + colWEnabled: .Top = yPos: .Width = colWNum: .Height = hdrH
+        .Caption = " #"
+        .Left = colLeft: .Top = yPos: .Width = colWNum: .Height = hdrH
         .Font.Size = 7: .Font.Bold = True: .TextAlign = fmTextAlignCenter
         .BackColor = RGB(230, 230, 230): .BackStyle = fmBackStyleOpaque
     End With
+    Set mHdrNum = New clsHeaderClick
+    mHdrNum.Init Me, lblH, 0
+
     Set lblH = Me.Controls.Add("Forms.Label.1", "lblHdrCorrect")
     With lblH
         .Caption = " Correct"
-        .Left = colLeft + colWEnabled + colWNum: .Top = yPos
+        .Left = colLeft + colWNum: .Top = yPos
         .Width = colWCorrect: .Height = hdrH
         .Font.Size = 7: .Font.Bold = True
         .BackColor = RGB(198, 239, 206): .BackStyle = fmBackStyleOpaque
     End With
+    Set mHdrCorrect = New clsHeaderClick
+    mHdrCorrect.Init Me, lblH, 1
+
     Set lblH = Me.Controls.Add("Forms.Label.1", "lblHdrVariants")
     With lblH
         .Caption = " Incorrect Variants"
-        .Left = colLeft + colWEnabled + colWNum + colWCorrect: .Top = yPos
+        .Left = colLeft + colWNum + colWCorrect: .Top = yPos
         .Width = colWVariants: .Height = hdrH
         .Font.Size = 7: .Font.Bold = True
         .BackColor = RGB(255, 199, 206): .BackStyle = fmBackStyleOpaque
     End With
+    Set mHdrVariants = New clsHeaderClick
+    mHdrVariants.Init Me, lblH, 2
+
     yPos = yPos + hdrH
 
-    ' Custom rules listbox (multi-column table-like display)
+    ' Custom rules listbox (3-column table-like display)
     Set lstCustomRules = Me.Controls.Add("Forms.ListBox.1", "lstCustomRules")
     With lstCustomRules
         .Left = colLeft: .Top = yPos
         .Width = ruleListW: .Height = 62
         .Font.Size = 7.5
         .Font.Name = "Consolas"
-        .ColumnCount = 4
-        .ColumnWidths = CStr(CLng(colWEnabled)) & ";" & CStr(CLng(colWNum)) & ";" & _
+        .ColumnCount = 3
+        .ColumnWidths = CStr(CLng(colWNum)) & ";" & _
                         CStr(CLng(colWCorrect)) & ";" & CStr(CLng(colWVariants))
         .BorderStyle = fmBorderStyleNone
         .SpecialEffect = fmSpecialEffectFlat
@@ -668,31 +650,39 @@ End Sub
 
 ' ============================================================
 '  CUSTOM RULES DATA MODEL
-'  Single source of truth: crEnabled(), crCorrect(), crVariants()
+'  Single source of truth: crCorrect(), crVariants(), crInsertSeq()
 ' ============================================================
 Private Sub InitCustomRulesArrays(ByVal capacity As Long)
     If capacity < 1 Then capacity = 1
-    ReDim crEnabled(0 To capacity - 1)
     ReDim crCorrect(0 To capacity - 1)
     ReDim crVariants(0 To capacity - 1)
+    ReDim crInsertSeq(0 To capacity - 1)
     ReDim crSortOrder(0 To capacity - 1)
     crCount = 0
+    crNextSeq = 1
 End Sub
 
-Private Sub AddCustomRule(ByVal correct As String, ByVal variants As String, ByVal enabled As Boolean)
+Private Sub AddCustomRule(ByVal correct As String, ByVal variants As String, _
+                          Optional ByVal seq As Long = -1)
     If crCount = 0 Then
         InitCustomRulesArrays 16
     End If
     ' Grow arrays if needed
     If crCount > UBound(crCorrect) Then
-        ReDim Preserve crEnabled(0 To crCount * 2)
         ReDim Preserve crCorrect(0 To crCount * 2)
         ReDim Preserve crVariants(0 To crCount * 2)
+        ReDim Preserve crInsertSeq(0 To crCount * 2)
         ReDim Preserve crSortOrder(0 To crCount * 2)
     End If
     crCorrect(crCount) = correct
     crVariants(crCount) = variants
-    crEnabled(crCount) = enabled
+    If seq > 0 Then
+        crInsertSeq(crCount) = seq
+        If seq >= crNextSeq Then crNextSeq = seq + 1
+    Else
+        crInsertSeq(crCount) = crNextSeq
+        crNextSeq = crNextSeq + 1
+    End If
     crCount = crCount + 1
     RebuildSortOrder
 End Sub
@@ -703,7 +693,7 @@ Private Sub RemoveCustomRule(ByVal idx As Long)
     For j = idx To crCount - 2
         crCorrect(j) = crCorrect(j + 1)
         crVariants(j) = crVariants(j + 1)
-        crEnabled(j) = crEnabled(j + 1)
+        crInsertSeq(j) = crInsertSeq(j + 1)
     Next j
     crCount = crCount - 1
     RebuildSortOrder
@@ -716,11 +706,6 @@ Private Sub UpdateCustomRule(ByVal idx As Long, ByVal correct As String, ByVal v
     RebuildSortOrder
 End Sub
 
-Private Sub ToggleCustomRuleEnabled(ByVal idx As Long)
-    If idx < 0 Or idx >= crCount Then Exit Sub
-    crEnabled(idx) = Not crEnabled(idx)
-End Sub
-
 Private Sub RebuildSortOrder()
     If crCount = 0 Then
         ReDim crSortOrder(0 To 0)
@@ -731,32 +716,27 @@ Private Sub RebuildSortOrder()
     For i = 0 To crCount - 1
         crSortOrder(i) = i
     Next i
-    If crSortMode = 1 Then
-        SortOrderByField 1  ' sort by correct
-    ElseIf crSortMode = 2 Then
-        SortOrderByField 2  ' sort by variants
-    End If
+    SortOrderByField crSortMode
 End Sub
 
 Private Sub SortOrderByField(ByVal field As Long)
-    ' Simple insertion sort on crSortOrder by the chosen field
+    ' Insertion sort on crSortOrder by chosen field
+    ' 0 = insertion sequence, 1 = correct, 2 = variants
+    If crCount < 2 Then Exit Sub
     Dim i As Long, j As Long, tmp As Long
-    Dim valI As String, valJ As String
+    Dim shouldStop As Boolean
     For i = 1 To crCount - 1
         tmp = crSortOrder(i)
-        If field = 1 Then
-            valI = LCase$(crCorrect(tmp))
-        Else
-            valI = LCase$(crVariants(tmp))
-        End If
         j = i - 1
         Do While j >= 0
-            If field = 1 Then
-                valJ = LCase$(crCorrect(crSortOrder(j)))
+            If field = 0 Then
+                shouldStop = (crInsertSeq(crSortOrder(j)) <= crInsertSeq(tmp))
+            ElseIf field = 1 Then
+                shouldStop = (LCase$(crCorrect(crSortOrder(j))) <= LCase$(crCorrect(tmp)))
             Else
-                valJ = LCase$(crVariants(crSortOrder(j)))
+                shouldStop = (LCase$(crVariants(crSortOrder(j))) <= LCase$(crVariants(tmp)))
             End If
-            If valJ <= valI Then Exit Do
+            If shouldStop Then Exit Do
             crSortOrder(j + 1) = crSortOrder(j)
             j = j - 1
         Loop
@@ -794,7 +774,7 @@ Private Sub LoadCustomRulesFromEngine()
     End If
     Dim rKey As Variant
     For Each rKey In engineRules.keys
-        AddCustomRule CStr(rKey), CStr(engineRules(rKey)), True
+        AddCustomRule CStr(rKey), CStr(engineRules(rKey))
     Next rKey
     RefreshCustomRulesList
 End Sub
@@ -827,15 +807,13 @@ Private Sub SyncCustomRulesToEngine()
         Next m
     End If
 
-    ' Add back only enabled custom rules
+    ' Add all custom rules to engine
     Dim n As Long
     For n = 0 To crCount - 1
-        If crEnabled(n) Then
-            On Error Resume Next
-            Application.Run "Rules_Brands.AddBrandRule", crCorrect(n), crVariants(n)
-            If Err.Number <> 0 Then Err.Clear
-            On Error GoTo 0
-        End If
+        On Error Resume Next
+        Application.Run "Rules_Brands.AddBrandRule", crCorrect(n), crVariants(n)
+        If Err.Number <> 0 Then Err.Clear
+        On Error GoTo 0
     Next n
 End Sub
 
@@ -847,15 +825,12 @@ Private Sub RefreshCustomRulesList()
     If crCount = 0 Then Exit Sub
     Dim i As Long
     Dim di As Long
-    Dim enabledMark As String
     For i = 0 To crCount - 1
         di = crSortOrder(i)
-        If crEnabled(di) Then enabledMark = ChrW$(9745) Else enabledMark = ChrW$(9744)
         lstCustomRules.AddItem ""
-        lstCustomRules.List(i, 0) = enabledMark
-        lstCustomRules.List(i, 1) = CStr(di + 1)
-        lstCustomRules.List(i, 2) = crCorrect(di)
-        lstCustomRules.List(i, 3) = crVariants(di)
+        lstCustomRules.List(i, 0) = CStr(crInsertSeq(di))
+        lstCustomRules.List(i, 1) = crCorrect(di)
+        lstCustomRules.List(i, 2) = crVariants(di)
     Next i
 End Sub
 
@@ -1148,7 +1123,7 @@ Private Sub btnAddRule_Click()
         btnAddRule.Caption = "Add"
     Else
         ' Add new rule (enabled by default)
-        AddCustomRule correctForm, incorrectVars, True
+        AddCustomRule correctForm, incorrectVars
     End If
 
     txtRuleCorrect.Text = ""
@@ -1205,34 +1180,10 @@ Private Sub btnEditRule_Click()
 End Sub
 
 ' ============================================================
-'  CUSTOM RULES: TOGGLE ENABLED (double-click on list)
+'  CUSTOM RULES: HEADER-CLICK SORT (via clsHeaderClick class)
 ' ============================================================
-' Note: MSForms.ListBox does not have a DblClick WithEvents in
-' the same way. We use a workaround: user selects row and we
-' provide a toggle via the checkbox column click.
-' Since we cannot intercept individual column clicks in a
-' standard MSForms.ListBox, we toggle enabled state when the
-' user double-clicks (handled by the list control's built-in
-' DblClick event if available, or we add a Toggle button).
-' For simplicity, we repurpose the # column header button.
-
-' ============================================================
-'  CUSTOM RULES: SORT BUTTONS
-' ============================================================
-Private Sub btnSortDefault_Click()
-    crSortMode = 0
-    RebuildSortOrder
-    RefreshCustomRulesList
-End Sub
-
-Private Sub btnSortCorrect_Click()
-    crSortMode = 1
-    RebuildSortOrder
-    RefreshCustomRulesList
-End Sub
-
-Private Sub btnSortVariants_Click()
-    crSortMode = 2
+Public Sub HandleHeaderSort(ByVal sortField As Long)
+    crSortMode = sortField
     RebuildSortOrder
     RefreshCustomRulesList
 End Sub
@@ -1250,16 +1201,15 @@ Private Sub btnSaveRules_Click()
         EnsureDirectoryExists rulesDir
     End If
 
-    ' Save all rules (enabled and disabled) with enabled flag
+    ' Save all rules as tab-delimited: seq<TAB>correct<TAB>variants
     Dim fileNum As Integer
     fileNum = FreeFile
     On Error GoTo SaveFail
     Open rulesFile For Output As #fileNum
+    Print #fileNum, "# Custom Rules (tab-delimited: seq, correct, variants)"
     Dim s As Long
     For s = 0 To crCount - 1
-        Dim prefix As String
-        If crEnabled(s) Then prefix = "+" Else prefix = "-"
-        Print #fileNum, prefix & crCorrect(s) & "=" & crVariants(s)
+        Print #fileNum, CStr(crInsertSeq(s)) & vbTab & crCorrect(s) & vbTab & crVariants(s)
     Next s
     Close #fileNum
 
@@ -1270,7 +1220,7 @@ SaveFail:
     On Error Resume Next
     Close #fileNum
     MsgBox "Failed to save custom rules to:" & vbCrLf & rulesFile & vbCrLf & _
-           "Error: " & Err.Description, vbExclamation, "Custom Rules"
+           "Error " & Err.Number & ": " & Err.Description, vbExclamation, "Custom Rules"
     Err.Clear
     On Error GoTo 0
 End Sub
@@ -1316,10 +1266,10 @@ End Sub
 Private Sub LoadCustomRulesFromFile(ByVal filePath As String)
     Dim fileNum As Integer
     Dim lineText As String
-    Dim eqPos As Long
     Dim correct As String
     Dim variants As String
-    Dim enabled As Boolean
+    Dim seq As Long
+    Dim parts() As String
 
     InitCustomRulesArrays 16
 
@@ -1333,21 +1283,40 @@ Private Sub LoadCustomRulesFromFile(ByVal filePath As String)
         If Len(lineText) = 0 Then GoTo NextLoadLine
         If Left$(lineText, 1) = "#" Then GoTo NextLoadLine
 
-        ' Parse enabled flag: + or - prefix
-        enabled = True
-        If Left$(lineText, 1) = "+" Then
-            lineText = Mid$(lineText, 2)
-        ElseIf Left$(lineText, 1) = "-" Then
-            enabled = False
+        ' Strip legacy +/- prefix if present
+        If Left$(lineText, 1) = "+" Or Left$(lineText, 1) = "-" Then
             lineText = Mid$(lineText, 2)
         End If
 
-        eqPos = InStr(lineText, "=")
-        If eqPos > 1 Then
-            correct = Trim$(Left$(lineText, eqPos - 1))
-            variants = Trim$(Mid$(lineText, eqPos + 1))
-            If Len(correct) > 0 And Len(variants) > 0 Then
-                AddCustomRule correct, variants, enabled
+        ' Try tab-delimited: seq<TAB>correct<TAB>variants
+        If InStr(lineText, vbTab) > 0 Then
+            parts = Split(lineText, vbTab)
+            If UBound(parts) >= 2 Then
+                seq = 0
+                On Error Resume Next
+                seq = CLng(parts(0))
+                If Err.Number <> 0 Then seq = 0: Err.Clear
+                On Error GoTo LoadFail
+                correct = Trim$(parts(1))
+                variants = Trim$(parts(2))
+                If Len(correct) > 0 And Len(variants) > 0 Then
+                    If seq > 0 Then
+                        AddCustomRule correct, variants, seq
+                    Else
+                        AddCustomRule correct, variants
+                    End If
+                End If
+            End If
+        Else
+            ' Legacy fallback: correct=variants
+            Dim eqPos As Long
+            eqPos = InStr(lineText, "=")
+            If eqPos > 1 Then
+                correct = Trim$(Left$(lineText, eqPos - 1))
+                variants = Trim$(Mid$(lineText, eqPos + 1))
+                If Len(correct) > 0 And Len(variants) > 0 Then
+                    AddCustomRule correct, variants
+                End If
             End If
         End If
 
@@ -1356,8 +1325,6 @@ NextLoadLine:
 
     Close #fileNum
     RefreshCustomRulesList
-
-    ' Also sync enabled rules to engine
     SyncCustomRulesToEngine
 
     MsgBox "Custom rules loaded from:" & vbCrLf & filePath, vbInformation, "Custom Rules"
@@ -1367,31 +1334,22 @@ LoadFail:
     On Error Resume Next
     Close #fileNum
     MsgBox "Could not read custom rules from:" & vbCrLf & filePath & vbCrLf & _
-           "Error: " & Err.Description, vbExclamation, "Custom Rules"
+           "Error " & Err.Number & ": " & Err.Description, vbExclamation, "Custom Rules"
     Err.Clear
     On Error GoTo 0
-    ' Fall back to engine defaults if nothing loaded
     If crCount = 0 Then LoadCustomRulesFromEngine
 End Sub
 
 ' -- Helper: cross-platform custom rules file path --
 Private Function GetCustomRulesPath() As String
-    On Error Resume Next
-    GetCustomRulesPath = Application.Run("Rules_Brands.GetDefaultBrandRulesPath")
-    If Err.Number <> 0 Then
-        Err.Clear
-        On Error GoTo 0
-        Dim sep As String
-        sep = Application.PathSeparator
-        #If Mac Then
-            GetCustomRulesPath = Environ("HOME") & sep & "Library" & sep & _
-                                "Application Support" & sep & "PleadingsChecker" & sep & "custom_rules.txt"
-        #Else
-            GetCustomRulesPath = Environ("APPDATA") & sep & "PleadingsChecker" & sep & "custom_rules.txt"
-        #End If
-        Exit Function
-    End If
-    On Error GoTo 0
+    Dim sep As String
+    sep = Application.PathSeparator
+    #If Mac Then
+        GetCustomRulesPath = Environ("HOME") & sep & "Library" & sep & _
+                            "Application Support" & sep & "PleadingsChecker" & sep & "custom_rules.txt"
+    #Else
+        GetCustomRulesPath = Environ("APPDATA") & sep & "PleadingsChecker" & sep & "custom_rules.txt"
+    #End If
 End Function
 
 ' ============================================================
