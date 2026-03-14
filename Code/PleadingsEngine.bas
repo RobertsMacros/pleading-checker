@@ -1481,10 +1481,28 @@ Private Function BuildCommentText(ByVal finding As Object) As String
     Dim txt As String
     txt = GetIssueProp(finding, "Issue")
 
-    ' Suppress "Suggestion:" tail for repeated-word findings
     Dim rn As String
     rn = LCase$(GetIssueProp(finding, "RuleName"))
+
+    ' Repeated word: clean to "Repeated word 'X'" only
     If rn = "repeated_words" Then
+        ' Strip " -- review context" and any trailing suggestion
+        Dim dashPos As Long
+        dashPos = InStr(1, txt, " -- ")
+        If dashPos > 0 Then txt = Left$(txt, dashPos - 1)
+        BuildCommentText = txt
+        Exit Function
+    End If
+
+    ' Spacing rules: first sentence only, no suggestion tail
+    If rn = "space_before_punct" Or rn = "double_spaces" Or _
+       rn = "missing_space_after_dot" Then
+        ' Truncate after first sentence-ending period
+        Dim dotEnd As Long
+        dotEnd = InStr(1, txt, ".")
+        If dotEnd > 0 And dotEnd < Len(txt) Then
+            txt = Left$(txt, dotEnd)
+        End If
         BuildCommentText = txt
         Exit Function
     End If
@@ -2025,8 +2043,14 @@ Public Sub SetPageRange(startPage As Long, endPage As Long)
     Next pg
 End Sub
 
+' ============================================================
+'  PAGE-RANGE PARSING (Word-safe)
+'  Supports:  5 | 3-7 | 3:7 | 1,3,5 | 1,3-5,8 | 5, 7-8, 9:30
+'  Normalises en dash, em dash, minus sign to hyphen.
+'  Colons also treated as range separators.
+'  Parsed once per run -- not inside rule loops.
+' ============================================================
 Public Sub SetPageRangeFromString(ByVal spec As String)
-    ' Parse flexible page range specification
     spec = Trim(spec)
     pageRangeString = spec  ' Preserve original for report metadata
     If Len(spec) = 0 Then
@@ -2034,49 +2058,24 @@ Public Sub SetPageRangeFromString(ByVal spec As String)
         Exit Sub
     End If
 
+    ' Normalise input
+    spec = NormalizePageRangeInput(spec)
+    If Len(spec) = 0 Then
+        Set pageRangeSet = Nothing
+        Exit Sub
+    End If
+
+    ' Parse into page-number array
+    Dim pages() As Long
+    pages = ParsePageList(spec)
+
+    ' Build dictionary from array
     Set pageRangeSet = CreateObject("Scripting.Dictionary")
-
-    ' Normalise separators: en-dash (8211) and colon to hyphen
-    spec = Replace(spec, ChrW(8211), "-")
-    spec = Replace(spec, ":", "-")
-
-    ' Split on comma
-    Dim parts() As String
-    parts = Split(spec, ",")
-
     Dim i As Long
-    For i = LBound(parts) To UBound(parts)
-        Dim part As String
-        part = Trim(parts(i))
-        If Len(part) = 0 Then GoTo NextPart
-
-        Dim dashPos As Long
-        dashPos = InStr(1, part, "-")
-
-        If dashPos > 0 Then
-            ' Range: "3-7"
-            Dim rangeStart As Long
-            Dim rangeEnd As Long
-            Dim leftPart As String
-            Dim rightPart As String
-            leftPart = Trim(Left$(part, dashPos - 1))
-            rightPart = Trim(Mid$(part, dashPos + 1))
-
-            If IsNumeric(leftPart) And IsNumeric(rightPart) Then
-                rangeStart = CLng(leftPart)
-                rangeEnd = CLng(rightPart)
-                Dim pg As Long
-                For pg = rangeStart To rangeEnd
-                    pageRangeSet(pg) = True
-                Next pg
-            End If
-        Else
-            ' Single page: "5"
-            If IsNumeric(part) Then
-                pageRangeSet(CLng(part)) = True
-            End If
+    For i = LBound(pages) To UBound(pages)
+        If pages(i) > 0 Then
+            pageRangeSet(pages(i)) = True
         End If
-NextPart:
     Next i
 
     ' If nothing valid was parsed, clear the set
@@ -2084,6 +2083,133 @@ NextPart:
         Set pageRangeSet = Nothing
     End If
 End Sub
+
+' ============================================================
+'  Normalise a page-range string for safe VBA parsing.
+'  Strips control characters, collapses whitespace, normalises
+'  en dash / em dash / minus sign to ASCII hyphen.
+' ============================================================
+Public Function NormalizePageRangeInput(ByVal s As String) As String
+    s = CStr(s)
+    s = Replace$(s, vbCr, "")
+    s = Replace$(s, vbLf, "")
+    s = Replace$(s, vbTab, "")
+    s = Replace$(s, Chr$(160), " ")         ' non-breaking space
+    s = Replace$(s, ChrW$(8211), "-")       ' en dash
+    s = Replace$(s, ChrW$(8212), "-")       ' em dash
+    s = Replace$(s, ChrW$(8722), "-")       ' minus sign
+    s = Trim$(s)
+    Do While InStr(s, "  ") > 0
+        s = Replace$(s, "  ", " ")
+    Loop
+    Do While InStr(s, ",,") > 0
+        s = Replace$(s, ",,", ",")
+    Loop
+    NormalizePageRangeInput = s
+End Function
+
+' ============================================================
+'  Parse a normalised page-range string into an array of page
+'  numbers.  Supports comma-separated tokens where each token
+'  is either a single number or a range separated by hyphen or
+'  colon (inclusive).  Returns a 0-based Long array; element 0
+'  is 0 when input is empty/invalid.
+' ============================================================
+Public Function ParsePageList(ByVal inputText As String) As Long()
+    Dim parts() As String
+    Dim subParts() As String
+    Dim token As String
+    Dim tmpList As Collection
+    Dim arr() As Long
+    Dim i As Long
+    Dim p As Long
+    Dim startPage As Long
+    Dim endPage As Long
+    Dim sepPos As Long
+    Set tmpList = New Collection
+
+    inputText = NormalizePageRangeInput(inputText)
+    If Len(inputText) = 0 Then GoTo EmptyExit
+
+    parts = Split(inputText, ",")
+    For i = LBound(parts) To UBound(parts)
+        token = Trim$(parts(i))
+        If Len(token) = 0 Then GoTo NextPageToken
+
+        ' Support both hyphen and colon as range separators
+        sepPos = InStr(1, token, "-", vbBinaryCompare)
+        If sepPos = 0 Then sepPos = InStr(1, token, ":", vbBinaryCompare)
+
+        If sepPos > 0 Then
+            ' Reject double separators inside a single token
+            If InStr(sepPos + 1, token, "-", vbBinaryCompare) > 0 _
+               Or InStr(sepPos + 1, token, ":", vbBinaryCompare) > 0 Then
+                GoTo NextPageToken
+            End If
+
+            If Mid$(token, sepPos, 1) = "-" Then
+                subParts = Split(token, "-")
+            Else
+                subParts = Split(token, ":")
+            End If
+
+            If UBound(subParts) = 1 Then
+                If IsNumeric(Trim$(subParts(0))) And IsNumeric(Trim$(subParts(1))) Then
+                    startPage = CLng(Trim$(subParts(0)))
+                    endPage = CLng(Trim$(subParts(1)))
+                    If startPage > 0 And endPage > 0 Then
+                        If endPage < startPage Then
+                            p = startPage
+                            startPage = endPage
+                            endPage = p
+                        End If
+                        For p = startPage To endPage
+                            tmpList.Add p
+                        Next p
+                    End If
+                End If
+            End If
+        Else
+            ' Single page number
+            If IsNumeric(token) Then
+                p = CLng(token)
+                If p > 0 Then tmpList.Add p
+            End If
+        End If
+NextPageToken:
+    Next i
+
+    If tmpList.Count = 0 Then GoTo EmptyExit
+
+    ReDim arr(0 To tmpList.Count - 1)
+    For i = 1 To tmpList.Count
+        arr(i - 1) = CLng(tmpList(i))
+    Next i
+    ParsePageList = arr
+    Exit Function
+
+EmptyExit:
+    ReDim arr(0 To 0)
+    arr(0) = 0
+    ParsePageList = arr
+End Function
+
+' ============================================================
+'  Check whether a page number is in a parsed page-number array.
+'  Used by modules that need per-item page checks.
+' ============================================================
+Public Function IsPageSelected(ByVal pageNum As Long, ByRef selectedPages() As Long) As Boolean
+    Dim i As Long
+    If pageNum <= 0 Then Exit Function
+    On Error GoTo SafeExit
+    For i = LBound(selectedPages) To UBound(selectedPages)
+        If selectedPages(i) = pageNum Then
+            IsPageSelected = True
+            Exit Function
+        End If
+    Next i
+SafeExit:
+End Function
 
 Public Function GetPageRangeString() As String
     GetPageRangeString = pageRangeString

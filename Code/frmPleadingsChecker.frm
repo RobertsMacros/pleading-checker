@@ -59,13 +59,13 @@ Private cboTermQuotes   As MSForms.ComboBox
 Private cboSpaceStyle   As MSForms.ComboBox
 Private lblStatus       As MSForms.Label
 
-' Custom Term Whitelist UI controls
-Private lstWhitelist    As MSForms.ListBox
+' Unified custom rules list (replaces separate whitelist)
+Private lstWhitelist    As MSForms.ListBox   ' retained as alias for unified list
 Private WithEvents btnAddWhitelist    As MSForms.CommandButton
 Private WithEvents btnRemoveWhitelist As MSForms.CommandButton
 Private WithEvents btnSaveWhitelist   As MSForms.CommandButton
 Private WithEvents btnLoadWhitelist   As MSForms.CommandButton
-Private txtWhitelistTerm As MSForms.TextBox
+Private txtWhitelistTerm As MSForms.TextBox  ' retained for unified input
 
 Private lastResults     As Collection
 Private targetDoc       As Document
@@ -286,78 +286,6 @@ Private Sub UserForm_Initialize()
         .Font.Size = 7
     End With
 
-    yPos = yPos + TXT_H + SEC_GAP
-
-    ' ---- LEFT COLUMN: Custom Term Whitelist ----
-    Set lbl = Me.Controls.Add("Forms.Label.1", "lblWhitelistHeader")
-    With lbl
-        .Caption = "Custom Term Whitelist"
-        .Left = colLeft: .Top = yPos: .Width = 160: .Height = LBL_H
-        .Font.Size = 9: .Font.Bold = True
-    End With
-    yPos = yPos + LBL_H + ITEM_GAP
-
-    Dim wlListW As Single
-    wlListW = leftW - BTN_W - ITEM_GAP - 4
-
-    Set lstWhitelist = Me.Controls.Add("Forms.ListBox.1", "lstWhitelist")
-    With lstWhitelist
-        .Left = colLeft: .Top = yPos
-        .Width = wlListW: .Height = 48
-        .Font.Size = 7.5
-    End With
-
-    ' Whitelist action buttons (right of list, stacked)
-    Dim wlBtnX As Single
-    wlBtnX = colLeft + wlListW + ITEM_GAP
-    Dim wlBtnY As Single
-    wlBtnY = yPos
-
-    Set btnAddWhitelist = Me.Controls.Add("Forms.CommandButton.1", "btnAddWhitelist")
-    With btnAddWhitelist
-        .Caption = "Add"
-        .Left = wlBtnX: .Top = wlBtnY: .Width = BTN_W: .Height = BTN_H
-        .Font.Size = 7.5
-    End With
-    wlBtnY = wlBtnY + BTN_H + 1
-
-    Set btnRemoveWhitelist = Me.Controls.Add("Forms.CommandButton.1", "btnRemoveWhitelist")
-    With btnRemoveWhitelist
-        .Caption = "Remove"
-        .Left = wlBtnX: .Top = wlBtnY: .Width = BTN_W: .Height = BTN_H
-        .Font.Size = 7
-    End With
-
-    yPos = yPos + lstWhitelist.Height + ITEM_GAP
-
-    ' Whitelist input row: term + Save/Load
-    Set lbl = Me.Controls.Add("Forms.Label.1", "lblWhitelistTerm")
-    With lbl
-        .Caption = "Term:"
-        .Left = colLeft: .Top = yPos + 2: .Width = 32: .Height = LBL_H
-        .Font.Size = 7.5
-    End With
-
-    Set txtWhitelistTerm = Me.Controls.Add("Forms.TextBox.1", "txtWhitelistTerm")
-    With txtWhitelistTerm
-        .Left = colLeft + 32: .Top = yPos: .Width = leftW - 112: .Height = TXT_H
-        .Font.Size = 7.5
-    End With
-
-    Set btnSaveWhitelist = Me.Controls.Add("Forms.CommandButton.1", "btnSaveWhitelist")
-    With btnSaveWhitelist
-        .Caption = "Save"
-        .Left = colLeft + leftW - 76: .Top = yPos: .Width = 36: .Height = TXT_H
-        .Font.Size = 7
-    End With
-
-    Set btnLoadWhitelist = Me.Controls.Add("Forms.CommandButton.1", "btnLoadWhitelist")
-    With btnLoadWhitelist
-        .Caption = "Load"
-        .Left = colLeft + leftW - 38: .Top = yPos: .Width = 36: .Height = TXT_H
-        .Font.Size = 7
-    End With
-
     Dim leftBottomY As Single
     leftBottomY = yPos + TXT_H
 
@@ -464,8 +392,8 @@ Private Sub UserForm_Initialize()
     With cboDateFormat
         .Left = colRight + 90: .Top = optY: .Width = cboW + 46: .Height = TXT_H
         .Style = fmStyleDropDownList
-        .AddItem "UK (e.g. 14 March 2026)"
-        .AddItem "US (e.g. March 14, 2026)"
+        .AddItem "UK (e.g. 14 March 2026 / 14/03/2026)"
+        .AddItem "US (e.g. March 14, 2026 / 03/14/2026)"
         .ListIndex = 0
         .Font.Size = 7.5
     End With
@@ -592,9 +520,8 @@ Private Sub UserForm_Initialize()
         .Font.Size = 8
     End With
 
-    ' -- Load brand list and whitelist ---------------------------
+    ' -- Load custom rules list ------------------------------------
     RefreshBrandList
-    RefreshWhitelistList
 
     ' -- Final form size based on layout ---
     Dim neededH As Single
@@ -1031,7 +958,7 @@ End Sub
 Private Sub ShowBrandPlaceholder()
     If txtBrandIncorrect Is Nothing Then Exit Sub
     If Len(Trim(txtBrandIncorrect.Text)) = 0 Or placeholderActive Then
-        txtBrandIncorrect.Text = "e.g. colour, colur, coulour"
+        txtBrandIncorrect.Text = "e.g. colour, color, colours"
         txtBrandIncorrect.ForeColor = &HC0C0C0  ' light grey
         placeholderActive = True
     End If
@@ -1091,7 +1018,7 @@ End Sub
 Private Sub ShowPageRangePlaceholder()
     If txtPageRange Is Nothing Then Exit Sub
     If Len(Trim(txtPageRange.Text)) = 0 Or pageRangePlaceholderActive Then
-        txtPageRange.Text = "e.g. 1,3,5-8"
+        txtPageRange.Text = "e.g. 1,3,5-8,9:30"
         txtPageRange.ForeColor = &HC0C0C0  ' light grey
         pageRangePlaceholderActive = True
     End If
@@ -1241,6 +1168,7 @@ End Function
 '  CUSTOM TERM WHITELIST MANAGEMENT
 ' ============================================================
 Private Sub RefreshWhitelistList()
+    If lstWhitelist Is Nothing Then Exit Sub
     lstWhitelist.Clear
     On Error Resume Next
     Dim terms As Object
@@ -1259,6 +1187,7 @@ Private Sub RefreshWhitelistList()
 End Sub
 
 Private Sub btnAddWhitelist_Click()
+    If txtWhitelistTerm Is Nothing Then Exit Sub
     Dim term As String
     term = Trim(txtWhitelistTerm.Text)
     If Len(term) = 0 Then
@@ -1279,6 +1208,7 @@ Private Sub btnAddWhitelist_Click()
 End Sub
 
 Private Sub btnRemoveWhitelist_Click()
+    If lstWhitelist Is Nothing Then Exit Sub
     If lstWhitelist.ListIndex < 0 Then
         MsgBox "Select a term to remove.", vbExclamation, "Custom Term Whitelist"
         Exit Sub
@@ -1296,6 +1226,7 @@ Private Sub btnRemoveWhitelist_Click()
 End Sub
 
 Private Sub btnSaveWhitelist_Click()
+    ' Whitelist now merged into Custom Rules; save via brand rules
     Dim wlFile As String
     wlFile = GetWhitelistPath()
 

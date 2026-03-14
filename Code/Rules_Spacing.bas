@@ -87,16 +87,17 @@ Public Function Check_DoubleSpaces(doc As Document) As Collection
             mStart = md.FirstIndex   ' 0-based
 
             If spaceStyle = "TWO" And mStart > 0 Then
-                ' In two-space mode, double space is correct after sentence-end full stop
+                ' In two-space mode, exactly 2 spaces after sentence-end full stop = correct.
+                ' 3+ spaces after full stop still flagged (excess beyond the allowed 2).
                 Dim charBefore As String
                 charBefore = Mid(paraText, mStart, 1)   ' char at 0-based mStart-1
-                If charBefore = "." Then
+                If charBefore = "." And md.Length = 2 Then
                     Dim dotPos As Long
                     dotPos = mStart - 1   ' 0-based index of the full stop
                     Dim wb As String
                     wb = GetWordBeforePos(paraText, dotPos)
                     If Not IsLikelyAbbreviation(paraText, dotPos, wb) Then
-                        GoTo NextDoubleMatch   ' sentence-end + 2 spaces = correct
+                        GoTo NextDoubleMatch   ' sentence-end + exactly 2 spaces = correct
                     End If
                 End If
             End If

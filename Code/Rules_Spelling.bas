@@ -206,7 +206,19 @@ Private Sub SearchRangeForSpellingIssues(searchRange As Range, _
                 issueText = issueText & " (in quoted text -- review manually)"
             End If
 
-            Set finding = CreateIssueDict(RULE_NAME, locStr, issueText, suggestion, rng.Start, rng.End, severity)
+            ' Mark as auto-fix safe when severity is "error" and we have a concrete replacement
+            Dim spAutoFix As Boolean
+            Dim spReplacement As String
+            spAutoFix = False
+            spReplacement = ""
+            If severity = "error" And Len(suggestion) > 0 Then
+                spAutoFix = True
+                spReplacement = suggestion
+            End If
+
+            Set finding = CreateIssueDict(RULE_NAME, locStr, issueText, suggestion, _
+                rng.Start, rng.End, severity, spAutoFix, spReplacement, _
+                foundText, "exact_text", "high")
             issues.Add finding
 
 ContinueSearch:

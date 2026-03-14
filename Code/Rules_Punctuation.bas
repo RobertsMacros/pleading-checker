@@ -523,6 +523,45 @@ Public Function Check_BracketIntegrity(doc As Document) As Collection
     Dim paraText As String
     Dim paraStart As Long
 
+    ' -- Cheap global pre-check: count all brackets in the document.
+    '    If all three types balance globally, skip the expensive
+    '    per-paragraph traversal entirely.
+    Dim gPO As Long, gPC As Long
+    Dim gSO As Long, gSC As Long
+    Dim gCO As Long, gCC As Long
+    Dim gBytes() As Byte, gLen As Long, gIdx As Long, gCode As Long
+
+    On Error Resume Next
+    Dim fullText As String
+    fullText = doc.Content.Text
+    If Err.Number <> 0 Then
+        Err.Clear
+        fullText = ""
+    End If
+    On Error GoTo 0
+
+    If Len(fullText) > 0 Then
+        gBytes = fullText
+        gLen = UBound(gBytes) - 1
+        For gIdx = 0 To gLen Step 2
+            gCode = gBytes(gIdx) Or (CLng(gBytes(gIdx + 1)) * 256&)
+            Select Case gCode
+                Case 40: gPO = gPO + 1
+                Case 41: gPC = gPC + 1
+                Case 91: gSO = gSO + 1
+                Case 93: gSC = gSC + 1
+                Case 123: gCO = gCO + 1
+                Case 125: gCC = gCC + 1
+            End Select
+        Next gIdx
+
+        ' If all brackets balance globally, no per-paragraph issues possible
+        If gPO = gPC And gSO = gSC And gCO = gCC Then
+            Set Check_BracketIntegrity = issues
+            Exit Function
+        End If
+    End If
+
     ' Counters per bracket type (reset per paragraph)
     Dim parenOpen As Long, parenClose As Long
     Dim sqOpen As Long, sqClose As Long
@@ -543,6 +582,10 @@ Public Function Check_BracketIntegrity(doc As Document) As Collection
             GoTo NxtPara
         End If
         On Error GoTo 0
+
+        ' Page-range filter: skip paragraphs outside selected pages
+        If EngineIsPastPageFilter(paraStart) Then Exit For
+        If Not EngineIsInPageRange(para.Range) Then GoTo NxtPara
 
         If LenB(paraText) = 0 Then GoTo NxtPara
 
