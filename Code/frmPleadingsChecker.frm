@@ -927,10 +927,16 @@ Private Sub btnRun_Click()
         PleadingsEngine.SetSpaceStylePref "ONE"
     End If
 
-    ' Run checks
-    lblStatus.Caption = "Running checks..."
+    ' Reset cancel flag and bind Escape key to cancel
+    PleadingsEngine.ResetCancelRun
+    Application.OnKey "{ESC}", "PleadingsEngine.RequestCancelRun"
+
+    ' Run checks with cancellation support
+    lblStatus.Caption = "Running checks... (press Esc to cancel)"
     Me.Repaint
     DoEvents
+
+    On Error GoTo RunCancelled
 
     Set lastResults = PleadingsEngine.RunAllPleadingsRules(targetDoc, ruleConfig)
 
@@ -974,7 +980,7 @@ Private Sub btnRun_Click()
                vbYesNo + vbQuestion, "Pleadings Checker")
 
         If reply = vbYes Then
-            lblStatus.Caption = "Applying suggestions..."
+            lblStatus.Caption = "Applying suggestions... (press Esc to cancel)"
             Me.Repaint
             DoEvents
 
@@ -991,6 +997,21 @@ Private Sub btnRun_Click()
         Else
             lblStatus.Caption = lastResults.Count & " issue(s) found. Use Export Report for details."
         End If
+    End If
+
+    ' Unbind Escape key
+    Application.OnKey "{ESC}"
+    Exit Sub
+
+RunCancelled:
+    Application.OnKey "{ESC}"
+    If Err.Number = vbObjectError + 513 Then
+        lblStatus.Caption = "Run cancelled."
+        MsgBox "Run cancelled.", vbInformation, "Pleadings Checker"
+    Else
+        lblStatus.Caption = "Error: " & Err.Description
+        MsgBox "An error occurred:" & vbCrLf & vbCrLf & Err.Description, _
+               vbExclamation, "Pleadings Checker"
     End If
 End Sub
 

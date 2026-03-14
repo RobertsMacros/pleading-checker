@@ -37,6 +37,10 @@ Option Explicit
 
 ' -- Module-level state --
 Private ruleConfig      As Object
+
+' -- Cooperative cancellation --
+Public gCancelRun       As Boolean
+Private Const ERR_RUN_CANCELLED As Long = vbObjectError + 513
 Private pageRangeSet    As Object   ' Dictionary of page numbers (Long -> True)
 Private whitelistDict   As Object
 Private spellingMode    As String   ' "UK" or "US"
@@ -67,6 +71,26 @@ Private totalStartTime  As Single
 Private paraStartPos()  As Long
 Private paraStartCount  As Long
 Private paraCacheValid  As Boolean
+
+' ============================================================
+'  COOPERATIVE CANCELLATION HELPERS
+' ============================================================
+Public Sub ResetCancelRun()
+    gCancelRun = False
+End Sub
+
+Public Sub RequestCancelRun()
+    gCancelRun = True
+End Sub
+
+Public Function CancelRunRequested() As Boolean
+    CancelRunRequested = gCancelRun
+End Function
+
+Private Sub CheckCancellation()
+    DoEvents
+    If gCancelRun Then Err.Raise ERR_RUN_CANCELLED, "PleadingsEngine", "Run cancelled"
+End Sub
 
 ' ============================================================
 '  ENTRY POINT
@@ -633,7 +657,7 @@ Public Function RunAllPleadingsRules(doc As Document, _
             TryRunRule("Rules_Terms.Check_CustomTermWhitelist", doc)
         PerfTimerEnd "custom_term_whitelist"
     End If
-    DoEvents
+    CheckCancellation
 
     ' -- Spellchecker (spelling + licence/license + check/cheque) --
     If IsRuleEnabled(config, "spellchecker") Then
@@ -647,7 +671,7 @@ Public Function RunAllPleadingsRules(doc As Document, _
         PerfTimerEnd "spellchecker"
     End If
 
-    DoEvents
+    CheckCancellation
     ' -- Text scanning rules --
     If IsRuleEnabled(config, "repeated_words") Then
         PerfTimerStart "repeated_words"
@@ -663,7 +687,7 @@ Public Function RunAllPleadingsRules(doc As Document, _
         PerfTimerEnd "spell_out_under_ten"
     End If
 
-    DoEvents
+    CheckCancellation
     ' -- Spacing rules --
     If IsRuleEnabled(config, "double_spaces") Then
         PerfTimerStart "double_spaces"
@@ -672,7 +696,7 @@ Public Function RunAllPleadingsRules(doc As Document, _
         PerfTimerEnd "double_spaces"
     End If
 
-    DoEvents
+    CheckCancellation
     ' -- Number format rules --
     If IsRuleEnabled(config, "date_time_format") Then
         PerfTimerStart "date_time_format"
@@ -688,7 +712,7 @@ Public Function RunAllPleadingsRules(doc As Document, _
         PerfTimerEnd "currency_number_format"
     End If
 
-    DoEvents
+    CheckCancellation
     ' -- Punctuation rules (single combined bucket) --
     If IsRuleEnabled(config, "punctuation") Then
         PerfTimerStart "punctuation"
@@ -709,7 +733,7 @@ Public Function RunAllPleadingsRules(doc As Document, _
         PerfTimerEnd "punctuation"
     End If
 
-    DoEvents
+    CheckCancellation
     ' -- Footnote rules (combined: integrity, not-endnotes, Hart's rules) --
     If IsRuleEnabled(config, "footnote_rules") Then
         PerfTimerStart "footnote_rules"
@@ -726,7 +750,7 @@ Public Function RunAllPleadingsRules(doc As Document, _
         PerfTimerEnd "footnote_rules"
     End If
 
-    DoEvents
+    CheckCancellation
     ' -- Brand names --
     If IsRuleEnabled(config, "brand_name_enforcement") Then
         PerfTimerStart "brand_name_enforcement"
@@ -735,7 +759,7 @@ Public Function RunAllPleadingsRules(doc As Document, _
         PerfTimerEnd "brand_name_enforcement"
     End If
 
-    DoEvents
+    CheckCancellation
     ' -- Legal term rules --
     If IsRuleEnabled(config, "mandated_legal_term_forms") Then
         PerfTimerStart "mandated_legal_term_forms"
@@ -751,7 +775,7 @@ Public Function RunAllPleadingsRules(doc As Document, _
         PerfTimerEnd "always_capitalise_terms"
     End If
 
-    DoEvents
+    CheckCancellation
     ' -- Non-English term rules (italics) --
     If IsRuleEnabled(config, "non_english_terms") Then
         PerfTimerStart "non_english_terms"
@@ -763,11 +787,21 @@ Public Function RunAllPleadingsRules(doc As Document, _
     End If
 
 RunnerCleanup:
+    ' -- Check if we got here via cancellation --
+    Dim wasCancelled As Boolean
+    wasCancelled = (Err.Number = ERR_RUN_CANCELLED)
+    If wasCancelled Then Err.Clear
+
     ' -- Restore application state (always runs) ----------------
     On Error Resume Next
     Application.ScreenUpdating = wasScreenUpdating
     Application.StatusBar = False   ' restore default status bar
     On Error GoTo 0
+
+    ' -- Re-raise cancellation so caller can handle it --
+    If wasCancelled Then
+        Err.Raise ERR_RUN_CANCELLED, "PleadingsEngine", "Run cancelled"
+    End If
 
     ' -- Filter out issues inside block quotes / quoted text -----
     On Error Resume Next
@@ -1183,6 +1217,7 @@ Public Sub ApplyHighlights(doc As Document, _
     Dim hlRS As Long, hlRE As Long
 
     For i = 1 To issues.Count
+        If i Mod 20 = 0 Then CheckCancellation
         Set finding = issues(i)
 
         ' Anchor validation gate
@@ -1231,11 +1266,15 @@ NextHighlightIssue:
     Next i
 
 HighlightCleanup:
+    Dim hlCancelled As Boolean
+    hlCancelled = (Err.Number = ERR_RUN_CANCELLED)
+    If hlCancelled Then Err.Clear
     On Error Resume Next
     Application.ScreenUpdating = wasScreenUpdating
     Application.StatusBar = False
     On Error GoTo 0
     TraceExit "ApplyHighlights"
+    If hlCancelled Then Err.Raise ERR_RUN_CANCELLED, "PleadingsEngine", "Run cancelled"
 End Sub
 
 ' ============================================================
@@ -1293,6 +1332,7 @@ Public Sub ApplySuggestionsAsTrackedChanges(doc As Document, _
     ' Process from end of document backwards so tracked-change
     ' insertions / deletions do not shift positions of later issues
     For i = issues.Count To 1 Step -1
+        If i Mod 20 = 0 Then CheckCancellation
         Set finding = issues(i)
 
         ' Read range/autofix into typed locals
@@ -1459,6 +1499,9 @@ NextApplyIssue:
     Next i
 
 TrackedCleanup:
+    Dim tcCancelled As Boolean
+    tcCancelled = (Err.Number = ERR_RUN_CANCELLED)
+    If tcCancelled Then Err.Clear
     ' Single cleanup path: always restore document and application state.
     On Error Resume Next
     doc.TrackRevisions = wasTrackingChanges
@@ -1472,6 +1515,7 @@ TrackedCleanup:
                 " comment_only=" & cntCommentOnly & " skipped_anchor=" & cntSkippedAnchor & _
                 " skipped_unsafe=" & cntSkippedUnsafe
     TraceExit "ApplyTrackedChanges"
+    If tcCancelled Then Err.Raise ERR_RUN_CANCELLED, "PleadingsEngine", "Run cancelled"
 End Sub
 
 ' ============================================================
