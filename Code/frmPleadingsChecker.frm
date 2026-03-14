@@ -19,8 +19,8 @@ Attribute VB_Exposed = False
 ' ALL controls are created dynamically in UserForm_Initialize
 ' so that no .frx binary file is needed.
 '
-' Custom Rules: unified model. Each rule has Enabled, Correct,
-' and Incorrect Variants. Persistence via Rules_Brands module.
+' Custom Rules: unified model. Each rule has Correct and
+' Incorrect Variants. Persistence via custom_rules.txt.
 ' ============================================================
 Option Explicit
 
@@ -81,6 +81,7 @@ Private crInsertSeq()   As Long      ' Insertion-order sequence number
 Private crCount         As Long      ' Number of custom rules
 Private crNextSeq       As Long      ' Next sequence number to assign
 Private crSortMode      As Long      ' 0=insertion, 1=correct, 2=variants
+Private crSortAscending As Boolean   ' True=ascending, False=descending
 Private crSortOrder()   As Long      ' Indices into cr* arrays for display
 
 ' ============================================================
@@ -92,6 +93,7 @@ Private Sub UserForm_Initialize()
     mPageRangeShowingPlaceholder = False
     crCount = 0
     crSortMode = 0
+    crSortAscending = True
 
     Dim lbl As MSForms.Label
     Dim yPos As Single
@@ -717,6 +719,18 @@ Private Sub RebuildSortOrder()
         crSortOrder(i) = i
     Next i
     SortOrderByField crSortMode
+    If Not crSortAscending Then ReverseSortOrder
+End Sub
+
+Private Sub ReverseSortOrder()
+    Dim lo As Long, hi As Long, tmp As Long
+    lo = 0: hi = crCount - 1
+    Do While lo < hi
+        tmp = crSortOrder(lo)
+        crSortOrder(lo) = crSortOrder(hi)
+        crSortOrder(hi) = tmp
+        lo = lo + 1: hi = hi - 1
+    Loop
 End Sub
 
 Private Sub SortOrderByField(ByVal field As Long)
@@ -853,7 +867,7 @@ Private Sub btnRun_Click()
         End If
     Next i
 
-    ' Sync custom rules to engine (only enabled rules)
+    ' Sync custom rules to engine
     SyncCustomRulesToEngine
 
     ' Set page range from flexible input (ignore placeholder text)
@@ -1122,7 +1136,7 @@ Private Sub btnAddRule_Click()
         editingRuleIndex = -1
         btnAddRule.Caption = "Add"
     Else
-        ' Add new rule (enabled by default)
+        ' Add new rule
         AddCustomRule correctForm, incorrectVars
     End If
 
@@ -1183,7 +1197,13 @@ End Sub
 '  CUSTOM RULES: HEADER-CLICK SORT (via clsHeaderClick class)
 ' ============================================================
 Public Sub HandleHeaderSort(ByVal sortField As Long)
-    crSortMode = sortField
+    If crSortMode = sortField Then
+        ' Same header clicked again: reverse direction
+        crSortAscending = Not crSortAscending
+    Else
+        crSortMode = sortField
+        crSortAscending = True
+    End If
     RebuildSortOrder
     RefreshCustomRulesList
 End Sub
@@ -1367,8 +1387,15 @@ End Sub
 Private Function GetVariantsText() As String
     If mVariantsShowingPlaceholder Then
         GetVariantsText = vbNullString
+        Exit Function
+    End If
+    Dim raw As String
+    raw = Trim$(txtRuleVariants.Text)
+    ' Safety net: treat placeholder text as empty even if flag desynced
+    If raw = VARIANTS_PLACEHOLDER Then
+        GetVariantsText = vbNullString
     Else
-        GetVariantsText = Trim$(txtRuleVariants.Text)
+        GetVariantsText = raw
     End If
 End Function
 
@@ -1427,8 +1454,15 @@ End Sub
 Public Function GetPageRangeInput() As String
     If mPageRangeShowingPlaceholder Then
         GetPageRangeInput = vbNullString
+        Exit Function
+    End If
+    Dim raw As String
+    raw = Trim$(txtPageRange.Text)
+    ' Safety net: treat placeholder text as empty even if flag desynced
+    If raw = PAGE_RANGE_PLACEHOLDER Then
+        GetPageRangeInput = vbNullString
     Else
-        GetPageRangeInput = Trim$(txtPageRange.Text)
+        GetPageRangeInput = raw
     End If
 End Function
 
