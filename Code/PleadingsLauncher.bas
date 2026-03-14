@@ -96,8 +96,11 @@ Private Sub RunChecks()
         errInfo = vbCrLf & errCount & " rule(s) failed to run."
     End If
 
+    Dim issueSummary As String
+    issueSummary = Application.Run("PleadingsEngine.GetIssueSummary", issues)
+
     Dim applyChoice As Long
-    applyChoice = MsgBox(issues.Count & " issue(s) found." & errInfo & vbCrLf & vbCrLf & _
+    applyChoice = MsgBox(issueSummary & errInfo & vbCrLf & vbCrLf & _
                          "Apply to document?" & vbCrLf & _
                          "Yes = Apply as tracked changes" & vbCrLf & _
                          "No = Highlight + comments only" & vbCrLf & _

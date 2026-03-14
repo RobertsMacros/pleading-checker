@@ -38,6 +38,7 @@ Private WithEvents btnSelectAll     As MSForms.CommandButton
 Private WithEvents btnDeselectAll   As MSForms.CommandButton
 Private WithEvents btnAddBrand      As MSForms.CommandButton
 Private WithEvents btnRemoveBrand   As MSForms.CommandButton
+Private WithEvents btnEditBrand     As MSForms.CommandButton
 Private WithEvents btnSaveBrands    As MSForms.CommandButton
 Private WithEvents btnLoadBrands    As MSForms.CommandButton
 
@@ -45,7 +46,7 @@ Private fraRules        As MSForms.Frame
 Private txtPageRange    As MSForms.TextBox
 Private lstBrands       As MSForms.ListBox
 Private txtBrandCorrect As MSForms.TextBox
-Private txtBrandIncorrect As MSForms.TextBox
+Private WithEvents txtBrandIncorrect As MSForms.TextBox
 Private chkAddComments  As MSForms.CheckBox
 Private chkTrackedChanges As MSForms.CheckBox
 Private optSpellingUK   As MSForms.OptionButton
@@ -63,11 +64,16 @@ Private lblStatus       As MSForms.Label
 
 Private lastResults     As Collection
 Private targetDoc       As Document
+Private editingBrandIndex As Long      ' -1 = not editing; >= 0 = list index being edited
+Private placeholderActive As Boolean   ' True if placeholder text is showing
 
 ' ============================================================
 '  FORM INITIALISATION -- creates all controls at runtime
 ' ============================================================
 Private Sub UserForm_Initialize()
+    editingBrandIndex = -1
+    placeholderActive = False
+
     Dim lbl As MSForms.Label
     Dim yPos As Single
 
@@ -381,7 +387,13 @@ Private Sub UserForm_Initialize()
     Set btnRemoveBrand = Me.Controls.Add("Forms.CommandButton.1", "btnRemoveBrand")
     With btnRemoveBrand
         .Caption = "Remove"
-        .Left = btnX: .Top = brandBtnY: .Width = BTN_W: .Height = BTN_H
+        .Left = btnX: .Top = brandBtnY: .Width = BTN_W / 2 - 1: .Height = BTN_H
+    End With
+
+    Set btnEditBrand = Me.Controls.Add("Forms.CommandButton.1", "btnEditBrand")
+    With btnEditBrand
+        .Caption = "Edit"
+        .Left = btnX + BTN_W / 2 + 1: .Top = brandBtnY: .Width = BTN_W / 2 - 1: .Height = BTN_H
     End With
 
     ' Save/Load beside Add/Remove
@@ -419,14 +431,15 @@ Private Sub UserForm_Initialize()
 
     Set lbl = Me.Controls.Add("Forms.Label.1", "lblIncorrectVars")
     With lbl
-        .Caption = "Incorrect Variants:"
-        .Left = PAD + 240: .Top = yPos + 3: .Width = 108: .Height = LBL_H
+        .Caption = "Incorrect variants (comma-separated):"
+        .Left = PAD + 240: .Top = yPos + 3: .Width = 160: .Height = LBL_H
     End With
 
     Set txtBrandIncorrect = Me.Controls.Add("Forms.TextBox.1", "txtBrandIncorrect")
     With txtBrandIncorrect
-        .Left = PAD + 348: .Top = yPos: .Width = 180: .Height = TXT_H
+        .Left = PAD + 400: .Top = yPos: .Width = 130: .Height = TXT_H
     End With
+    ShowBrandPlaceholder
 
     yPos = yPos + TXT_H + SEC_GAP
 
@@ -663,12 +676,9 @@ Private Sub btnRun_Click()
             errMsg = vbCrLf & errCount & " rule(s) failed to run:" & vbCrLf & _
                      PleadingsEngine.GetRuleErrorLog()
         End If
-        If Len(slowestRules) > 0 Then
-            errMsg = errMsg & vbCrLf & "Slowest: " & slowestRules
-        End If
 
         Dim reply As VbMsgBoxResult
-        reply = MsgBox(lastResults.Count & " issue(s) found." & errMsg & vbCrLf & vbCrLf & _
+        reply = MsgBox(summary & errMsg & vbCrLf & vbCrLf & _
                "Apply suggestions to the document?", _
                vbYesNo + vbQuestion, "Pleadings Checker")
 
@@ -825,12 +835,33 @@ Private Sub btnAddBrand_Click()
     Dim correctForm As String
     Dim incorrectVariants As String
     correctForm = Trim(txtBrandCorrect.Text)
-    incorrectVariants = Trim(txtBrandIncorrect.Text)
+    incorrectVariants = GetBrandIncorrectText()
 
     If correctForm = "" Or incorrectVariants = "" Then
-        MsgBox "Enter both the correct form and incorrect variants.", _
+        MsgBox "Enter both the correct form and at least one incorrect variant.", _
                vbExclamation, "Brand Rules"
         Exit Sub
+    End If
+
+    ' Normalise comma-separated variants: trim and remove blanks
+    incorrectVariants = NormaliseBrandVariants(incorrectVariants)
+    If Len(incorrectVariants) = 0 Then
+        MsgBox "Enter at least one incorrect variant.", vbExclamation, "Brand Rules"
+        Exit Sub
+    End If
+
+    If editingBrandIndex >= 0 Then
+        ' Remove old rule first, then add updated
+        Dim oldEntry As String
+        oldEntry = lstBrands.List(editingBrandIndex)
+        Dim oldCorrect As String
+        oldCorrect = Left(oldEntry, InStr(oldEntry, " -> ") - 1)
+        On Error Resume Next
+        Application.Run "Rules_Brands.RemoveBrandRule", oldCorrect
+        Err.Clear
+        On Error GoTo 0
+        editingBrandIndex = -1
+        btnAddBrand.Caption = "Add"
     End If
 
     On Error Resume Next
@@ -842,7 +873,8 @@ Private Sub btnAddBrand_Click()
     On Error GoTo 0
 
     txtBrandCorrect.Text = ""
-    txtBrandIncorrect.Text = ""
+    ClearBrandIncorrect
+    ShowBrandPlaceholder
     RefreshBrandList
 End Sub
 
@@ -863,6 +895,85 @@ Private Sub btnRemoveBrand_Click()
     On Error GoTo 0
 
     RefreshBrandList
+End Sub
+
+Private Sub btnEditBrand_Click()
+    If lstBrands.ListIndex < 0 Then
+        MsgBox "Please select a rule to edit.", vbInformation, "Brand Rules"
+        Exit Sub
+    End If
+
+    Dim entry As String
+    entry = lstBrands.List(lstBrands.ListIndex)
+    Dim arrowPos As Long
+    arrowPos = InStr(entry, " -> ")
+    If arrowPos = 0 Then Exit Sub
+
+    editingBrandIndex = lstBrands.ListIndex
+    txtBrandCorrect.Text = Left(entry, arrowPos - 1)
+    HideBrandPlaceholder
+    txtBrandIncorrect.Text = Mid(entry, arrowPos + 4)
+    btnAddBrand.Caption = "Save Edit"
+End Sub
+
+' -- Placeholder helpers for txtBrandIncorrect --
+Private Sub ShowBrandPlaceholder()
+    If txtBrandIncorrect Is Nothing Then Exit Sub
+    If Len(Trim(txtBrandIncorrect.Text)) = 0 Or placeholderActive Then
+        txtBrandIncorrect.Text = "e.g. colour, colur, coulour"
+        txtBrandIncorrect.ForeColor = &HC0C0C0  ' light grey
+        placeholderActive = True
+    End If
+End Sub
+
+Private Sub HideBrandPlaceholder()
+    If placeholderActive Then
+        txtBrandIncorrect.Text = ""
+        txtBrandIncorrect.ForeColor = &H0  ' black
+        placeholderActive = False
+    End If
+End Sub
+
+' Return the actual text, ignoring placeholder
+Private Function GetBrandIncorrectText() As String
+    If placeholderActive Then
+        GetBrandIncorrectText = ""
+    Else
+        GetBrandIncorrectText = Trim(txtBrandIncorrect.Text)
+    End If
+End Function
+
+Private Sub ClearBrandIncorrect()
+    txtBrandIncorrect.Text = ""
+    txtBrandIncorrect.ForeColor = &H0
+    placeholderActive = False
+End Sub
+
+' Normalise comma-separated variants: trim each, remove blanks
+Private Function NormaliseBrandVariants(ByVal raw As String) As String
+    Dim parts() As String
+    parts = Split(raw, ",")
+    Dim result As String
+    Dim p As Long
+    For p = LBound(parts) To UBound(parts)
+        Dim item As String
+        item = Trim(parts(p))
+        If Len(item) > 0 Then
+            If Len(result) > 0 Then result = result & ", "
+            result = result & item
+        End If
+    Next p
+    NormaliseBrandVariants = result
+End Function
+
+Private Sub txtBrandIncorrect_Enter()
+    HideBrandPlaceholder
+End Sub
+
+Private Sub txtBrandIncorrect_Exit(ByVal Cancel As MSForms.ReturnBoolean)
+    If Len(Trim(txtBrandIncorrect.Text)) = 0 Then
+        ShowBrandPlaceholder
+    End If
 End Sub
 
 Private Sub btnSaveBrands_Click()
@@ -897,18 +1008,46 @@ Private Sub btnSaveBrands_Click()
 End Sub
 
 Private Sub btnLoadBrands_Click()
-    Dim brandFile As String
-    brandFile = GetBrandRulesPath()
-
-    If Dir(brandFile) = "" Then
-        MsgBox "No saved brand rules found at:" & vbCrLf & brandFile, _
-               vbExclamation, "Brand Rules"
+    ' Open a file picker instead of assuming the default path exists
+    Dim fd As Object
+    On Error Resume Next
+    Set fd = Application.FileDialog(3)  ' msoFileDialogFilePicker = 3
+    If Err.Number <> 0 Then
+        ' FileDialog not available -- fall back to default path
+        Err.Clear
+        On Error GoTo 0
+        Dim fallbackPath As String
+        fallbackPath = GetBrandRulesPath()
+        If Dir(fallbackPath) = "" Then
+            MsgBox "No saved brand rules found at:" & vbCrLf & fallbackPath, _
+                   vbExclamation, "Brand Rules"
+            Exit Sub
+        End If
+        LoadBrandRulesFromPath fallbackPath
         Exit Sub
     End If
+    On Error GoTo 0
 
+    With fd
+        .Title = "Load Brand Rules"
+        .AllowMultiSelect = False
+        On Error Resume Next
+        .Filters.Clear
+        .Filters.Add "Text Files", "*.txt"
+        .Filters.Add "All Files", "*.*"
+        If Err.Number <> 0 Then Err.Clear
+        On Error GoTo 0
+
+        If .Show = -1 Then
+            LoadBrandRulesFromPath CStr(.SelectedItems(1))
+        End If
+    End With
+End Sub
+
+Private Sub LoadBrandRulesFromPath(ByVal filePath As String)
     Dim loadResult As Boolean
     On Error Resume Next
-    loadResult = Application.Run("Rules_Brands.LoadBrandRules", brandFile)
+    loadResult = Application.Run("Rules_Brands.LoadBrandRules", filePath)
     If Err.Number <> 0 Then
         MsgBox "Brand rules module not loaded." & vbCrLf & _
                "Error: " & Err.Description, vbExclamation, "Brand Rules"
@@ -920,9 +1059,9 @@ Private Sub btnLoadBrands_Click()
 
     RefreshBrandList
     If loadResult Then
-        MsgBox "Brand rules loaded.", vbInformation, "Brand Rules"
+        MsgBox "Brand rules loaded from:" & vbCrLf & filePath, vbInformation, "Brand Rules"
     Else
-        MsgBox "Brand rules file could not be read:" & vbCrLf & brandFile, _
+        MsgBox "Brand rules file could not be read:" & vbCrLf & filePath, _
                vbExclamation, "Brand Rules"
     End If
 End Sub

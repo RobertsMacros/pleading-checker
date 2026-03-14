@@ -15,6 +15,7 @@ Option Explicit
 Private Const RULE_NAME_SLASH As String = "slash_style"
 Private Const RULE_NAME_BRACKET As String = "bracket_integrity"
 Private Const RULE_NAME_DASH As String = "hyphens"
+Private Const RULE_NAME_TRIPLICATE As String = "triplicate_punctuation"
 
 ' ?==============================================================?
 ' ?  SLASH STYLE (Rule14)                                       ?
@@ -743,8 +744,6 @@ End Function
 ' ----------------------------------------------------------------
 '  PRIVATE: Create a dictionary-based finding (no class dependency)
 ' ----------------------------------------------------------------
-Private Const RULE_NAME_TRIPLICATE As String = "triplicate_punctuation"
-
 ' ============================================================
 '  TRIPLICATE PUNCTUATION
 '  Flags three or more consecutive identical punctuation marks:

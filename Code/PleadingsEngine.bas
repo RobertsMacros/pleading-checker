@@ -288,9 +288,7 @@ Public Function InitRuleConfig() As Object
     cfg.Add "repeated_words", True
     cfg.Add "custom_term_whitelist", True
     cfg.Add "date_time_format", True
-    cfg.Add "slash_style", True
-    cfg.Add "hyphens", True
-    cfg.Add "bracket_integrity", True
+    cfg.Add "punctuation", True
     cfg.Add "currency_number_format", True
     cfg.Add "footnote_rules", True
     cfg.Add "brand_name_enforcement", True
@@ -299,10 +297,6 @@ Public Function InitRuleConfig() As Object
     cfg.Add "non_english_terms", True
     cfg.Add "spell_out_under_ten", True
     cfg.Add "double_spaces", True
-    cfg.Add "double_commas", True
-    cfg.Add "space_before_punct", True
-    cfg.Add "missing_space_after_dot", True
-    cfg.Add "triplicate_punctuation", True
 
     Set InitRuleConfig = cfg
 End Function
@@ -647,28 +641,6 @@ Public Function RunAllPleadingsRules(doc As Document, _
         PerfTimerEnd "double_spaces"
     End If
 
-    If IsRuleEnabled(config, "double_commas") Then
-        PerfTimerStart "double_commas"
-        AddIssuesToCollection allIssues, _
-            TryRunRule("Rules_Spacing.Check_DoubleCommas", doc)
-        PerfTimerEnd "double_commas"
-    End If
-
-    If IsRuleEnabled(config, "space_before_punct") Then
-        PerfTimerStart "space_before_punct"
-        AddIssuesToCollection allIssues, _
-            TryRunRule("Rules_Spacing.Check_SpaceBeforePunct", doc)
-        PerfTimerEnd "space_before_punct"
-    End If
-
-    If IsRuleEnabled(config, "missing_space_after_dot") Then
-        PerfTimerStart "missing_space_after_dot"
-        AddIssuesToCollection allIssues, _
-            TryRunRule("Rules_Spacing.Check_MissingSpaceAfterDot", doc)
-        PerfTimerEnd "missing_space_after_dot"
-    End If
-
-
     DoEvents
     ' -- Number format rules --
     If IsRuleEnabled(config, "date_time_format") Then
@@ -686,33 +658,24 @@ Public Function RunAllPleadingsRules(doc As Document, _
     End If
 
     DoEvents
-    ' -- Punctuation rules --
-    If IsRuleEnabled(config, "slash_style") Then
-        PerfTimerStart "slash_style"
+    ' -- Punctuation rules (single combined bucket) --
+    If IsRuleEnabled(config, "punctuation") Then
+        PerfTimerStart "punctuation"
         AddIssuesToCollection allIssues, _
             TryRunRule("Rules_Punctuation.Check_SlashStyle", doc)
-        PerfTimerEnd "slash_style"
-    End If
-
-    If IsRuleEnabled(config, "bracket_integrity") Then
-        PerfTimerStart "bracket_integrity"
         AddIssuesToCollection allIssues, _
             TryRunRule("Rules_Punctuation.Check_BracketIntegrity", doc)
-        PerfTimerEnd "bracket_integrity"
-    End If
-
-    If IsRuleEnabled(config, "hyphens") Then
-        PerfTimerStart "hyphens"
         AddIssuesToCollection allIssues, _
             TryRunRule("Rules_Punctuation.Check_DashUsage", doc)
-        PerfTimerEnd "hyphens"
-    End If
-
-    If IsRuleEnabled(config, "triplicate_punctuation") Then
-        PerfTimerStart "triplicate_punctuation"
         AddIssuesToCollection allIssues, _
             TryRunRule("Rules_Punctuation.Check_TriplicatePunctuation", doc)
-        PerfTimerEnd "triplicate_punctuation"
+        AddIssuesToCollection allIssues, _
+            TryRunRule("Rules_Spacing.Check_DoubleCommas", doc)
+        AddIssuesToCollection allIssues, _
+            TryRunRule("Rules_Spacing.Check_SpaceBeforePunct", doc)
+        AddIssuesToCollection allIssues, _
+            TryRunRule("Rules_Spacing.Check_MissingSpaceAfterDot", doc)
+        PerfTimerEnd "punctuation"
     End If
 
     DoEvents
@@ -1217,8 +1180,11 @@ Public Sub ApplyHighlights(doc As Document, _
                     Err.Clear
                 End If
                 If addComments Then
-                    TryAddComment doc, rng, BuildCommentText(finding), cmtRef, _
-                        "ApplyHighlights", "comment i=" & i
+                    If ShouldCreateCommentForRule( _
+                            CStr(GetIssueProp(finding, "RuleName")), finding) Then
+                        TryAddComment doc, rng, BuildCommentText(finding), cmtRef, _
+                            "ApplyHighlights", "comment i=" & i
+                    End If
                 End If
             Else
                 DebugLogError "ApplyHighlights", "doc.Range i=" & i & _
@@ -1334,7 +1300,8 @@ Public Sub ApplySuggestionsAsTrackedChanges(doc As Document, _
                         ' No machine-safe replacement -- skip amendment, add comment
                         TraceStep "ApplyTrackedChanges", "NO ReplacementText for i=" & i & _
                                   " rule=" & CStr(GetIssueProp(finding, "RuleName")) & "; comment-only"
-                        If addComments Then
+                        If addComments And ShouldCreateCommentForRule( _
+                                CStr(GetIssueProp(finding, "RuleName")), finding) Then
                             TryAddComment doc, rng, BuildCommentText(finding), cmtRef, _
                                 "ApplyTrackedChanges", "no-replacement-comment i=" & i
                         End If
@@ -1391,7 +1358,8 @@ Public Sub ApplySuggestionsAsTrackedChanges(doc As Document, _
                         cntSkippedUnsafe = cntSkippedUnsafe + 1
                         TraceStep "ApplyTrackedChanges", "SKIPPED amendment i=" & i & _
                                   " orig=""" & Left$(origText, 30) & """ sug=""" & Left$(sugText, 30) & """"
-                        If addComments Then
+                        If addComments And ShouldCreateCommentForRule( _
+                                CStr(GetIssueProp(finding, "RuleName")), finding) Then
                             TryAddComment doc, rng, BuildCommentText(finding), cmtRef, _
                                 "ApplyTrackedChanges", "skip-comment i=" & i
                         End If
@@ -1404,7 +1372,8 @@ Public Sub ApplySuggestionsAsTrackedChanges(doc As Document, _
                         TraceStep "ApplyTrackedChanges", "SKIPPED UNSAFE REPLACEMENT (U+FFFD) i=" & i
                         Debug.Print "UNICODE_SAFETY: replacement text contains U+FFFD for rule=" & _
                                     CStr(GetIssueProp(finding, "RuleName"))
-                        If addComments Then
+                        If addComments And ShouldCreateCommentForRule( _
+                                CStr(GetIssueProp(finding, "RuleName")), finding) Then
                             TryAddComment doc, rng, BuildCommentText(finding), cmtRef, _
                                 "ApplyTrackedChanges", "unsafe-replacement-comment i=" & i
                         End If
@@ -1421,7 +1390,8 @@ Public Sub ApplySuggestionsAsTrackedChanges(doc As Document, _
                             cntSkippedUnsafe = cntSkippedUnsafe + 1
                             TraceStep "ApplyTrackedChanges", "SKIPPED STALE ANCHOR i=" & i & _
                                       " stored=""" & Left$(storedMatch, 30) & """ actual=""" & Left$(origText, 30) & """"
-                            If addComments Then
+                            If addComments And ShouldCreateCommentForRule( _
+                                    CStr(GetIssueProp(finding, "RuleName")), finding) Then
                                 TryAddComment doc, rng, BuildCommentText(finding), cmtRef, _
                                     "ApplyTrackedChanges", "stale-anchor-comment i=" & i
                             End If
@@ -1438,7 +1408,8 @@ Public Sub ApplySuggestionsAsTrackedChanges(doc As Document, _
                     cntApplied = cntApplied + 1
                 Else
                     cntCommentOnly = cntCommentOnly + 1
-                    If addComments Then
+                    If addComments And ShouldCreateCommentForRule( _
+                            CStr(GetIssueProp(finding, "RuleName")), finding) Then
                         TryAddComment doc, rng, BuildCommentText(finding), cmtRef, _
                             "ApplyTrackedChanges", "comment-only i=" & i
                     End If
@@ -1478,6 +1449,15 @@ End Sub
 Private Function BuildCommentText(ByVal finding As Object) As String
     Dim txt As String
     txt = GetIssueProp(finding, "Issue")
+
+    ' Suppress "Suggestion:" tail for repeated-word findings
+    Dim rn As String
+    rn = LCase$(GetIssueProp(finding, "RuleName"))
+    If rn = "repeated_words" Then
+        BuildCommentText = txt
+        Exit Function
+    End If
+
     Dim sug As String
     sug = GetIssueProp(finding, "Suggestion")
     ' Only append suggestion text if it's human-readable (not a literal replacement)
@@ -1626,40 +1606,76 @@ End Function
 '  HUMAN-READABLE ISSUE SUMMARY
 ' ============================================================
 Public Function GetIssueSummary(issues As Collection) As String
-    Dim countDict As Object
-    Set countDict = CreateObject("Scripting.Dictionary")
-    Dim finding As Object
-    Dim i As Long
-
-    For i = 1 To issues.Count
-        Set finding = issues(i)
-        If countDict.Exists(GetIssueProp(finding, "RuleName")) Then
-            countDict(GetIssueProp(finding, "RuleName")) = countDict(GetIssueProp(finding, "RuleName")) + 1
-        Else
-            countDict.Add GetIssueProp(finding, "RuleName"), 1
-        End If
-    Next i
-
-    Dim result As String
-    Dim keys As Variant
-    Dim k As Long
-
-    If countDict.Count = 0 Then
+    If issues.Count = 0 Then
         GetIssueSummary = "No issues found."
         Exit Function
     End If
 
-    keys = countDict.keys
-    For k = 0 To countDict.Count - 1
-        Dim cnt As Long
-        cnt = countDict(keys(k))
-        result = result & CStr(keys(k)) & ": " & cnt & " finding"
-        If cnt <> 1 Then result = result & "s"
-        result = result & vbCrLf
+    ' Aggregate counts by UI label (not raw internal rule name)
+    Dim uiCounts As Object
+    Set uiCounts = CreateObject("Scripting.Dictionary")
+    Dim finding As Object
+    Dim i As Long
+    Dim uiLbl As String
+
+    For i = 1 To issues.Count
+        Set finding = issues(i)
+        uiLbl = GetUILabel(CStr(GetIssueProp(finding, "RuleName")))
+        If uiCounts.Exists(uiLbl) Then
+            uiCounts(uiLbl) = uiCounts(uiLbl) + 1
+        Else
+            uiCounts.Add uiLbl, 1
+        End If
+    Next i
+
+    ' Sort by descending count using simple insertion sort
+    Dim n As Long
+    n = uiCounts.Count
+    Dim sortLabels() As String
+    Dim sortCounts() As Long
+    ReDim sortLabels(0 To n - 1)
+    ReDim sortCounts(0 To n - 1)
+    Dim keys As Variant
+    keys = uiCounts.keys
+    Dim k As Long
+    For k = 0 To n - 1
+        sortLabels(k) = CStr(keys(k))
+        sortCounts(k) = CLng(uiCounts(keys(k)))
     Next k
 
-    result = result & vbCrLf & "Total: " & issues.Count & " finding"
-    If issues.Count <> 1 Then result = result & "s"
+    Dim j As Long
+    Dim tmpLbl As String
+    Dim tmpCnt As Long
+    For i = 0 To n - 2
+        For j = i + 1 To n - 1
+            If sortCounts(j) > sortCounts(i) Then
+                tmpCnt = sortCounts(i): sortCounts(i) = sortCounts(j): sortCounts(j) = tmpCnt
+                tmpLbl = sortLabels(i): sortLabels(i) = sortLabels(j): sortLabels(j) = tmpLbl
+            End If
+        Next j
+    Next i
+
+    ' Build output
+    Dim result As String
+    result = "Found " & issues.Count & " issue(s)." & vbCrLf & vbCrLf
+    result = result & "By type:" & vbCrLf
+    Dim maxShow As Long
+    maxShow = 12
+    If n < maxShow Then maxShow = n
+    For k = 0 To maxShow - 1
+        result = result & "  - " & sortLabels(k) & ": " & sortCounts(k) & vbCrLf
+    Next k
+    If n > maxShow Then
+        result = result & "  + " & (n - maxShow) & " more" & vbCrLf
+    End If
+
+    ' Append slowest rules from profiler
+    Dim slowest As String
+    slowest = GetTopSlowestRules(3)
+    If Len(slowest) > 0 Then
+        result = result & vbCrLf & "Slowest: " & slowest
+    End If
+
     GetIssueSummary = result
 End Function
 
@@ -1671,26 +1687,108 @@ Public Function GetRuleDisplayNames() As Object
     Set d = CreateObject("Scripting.Dictionary")
 
     d.Add "spellchecker", "Spellchecker"
-    d.Add "repeated_words", "Repeated Word Detection"
+    d.Add "repeated_words", "Repeated Words"
     d.Add "custom_term_whitelist", "Custom Term Whitelist"
-    d.Add "date_time_format", "Date/Time Format Consistency"
-    d.Add "slash_style", "Slash Style Checker"
-    d.Add "hyphens", "Hyphens"
-    d.Add "bracket_integrity", "Bracket Integrity"
+    d.Add "date_time_format", "Date/Time Format"
+    d.Add "punctuation", "Punctuation"
     d.Add "currency_number_format", "Currency/Number Formatting"
     d.Add "footnote_rules", "Footnote Rules"
     d.Add "brand_name_enforcement", "Brand Name Enforcement"
-    d.Add "mandated_legal_term_forms", "Mandated Legal Term Forms"
+    d.Add "mandated_legal_term_forms", "Mandated Legal Terms"
     d.Add "always_capitalise_terms", "Always Capitalise Terms"
     d.Add "non_english_terms", "Non-English Terms"
     d.Add "spell_out_under_ten", "Spell Out Numbers Under 10"
     d.Add "double_spaces", "Double Spaces"
-    d.Add "double_commas", "Double Commas"
-    d.Add "space_before_punct", "Space Before Punctuation"
-    d.Add "missing_space_after_dot", "Missing Space After Full Stop"
-    d.Add "triplicate_punctuation", "Triplicate Punctuation"
 
     Set GetRuleDisplayNames = d
+End Function
+
+' ============================================================
+'  MAP INTERNAL RULE NAME TO USER-FACING LABEL
+'  Sub-rules that belong to a combined bucket are mapped to
+'  their parent UI label.  Unknown names are title-cased.
+' ============================================================
+Public Function GetUILabel(ByVal ruleName As String) As String
+    Dim rn As String
+    rn = LCase$(ruleName)
+
+    ' Punctuation sub-rules -> "Punctuation"
+    Select Case rn
+        Case "slash_style", "bracket_integrity", "hyphens", "dash_usage", _
+             "double_commas", "space_before_punct", "missing_space_after_dot", _
+             "triplicate_punctuation", "punctuation"
+            GetUILabel = "Punctuation"
+            Exit Function
+        Case "spellchecker", "spelling", "licence_license", "check_cheque"
+            GetUILabel = "Spellchecker"
+            Exit Function
+        Case "non_english_terms", "known_anglicised_terms_not_italic", _
+             "foreign_names_not_italic"
+            GetUILabel = "Non-English Terms"
+            Exit Function
+        Case "repeated_words"
+            GetUILabel = "Repeated Words"
+            Exit Function
+        Case "double_spaces"
+            GetUILabel = "Double Spaces"
+            Exit Function
+    End Select
+
+    ' Fall back to display names dictionary
+    Dim disp As Object
+    Set disp = GetRuleDisplayNames()
+    If disp.Exists(rn) Then
+        GetUILabel = CStr(disp(rn))
+    Else
+        ' Title-case the rule name (replace underscores with spaces)
+        Dim cleaned As String
+        cleaned = Replace(rn, "_", " ")
+        If Len(cleaned) > 0 Then
+            Mid$(cleaned, 1, 1) = UCase$(Left$(cleaned, 1))
+        End If
+        GetUILabel = cleaned
+    End If
+End Function
+
+' ============================================================
+'  COMMENT SUPPRESSION: returns True if a comment bubble should
+'  be created for this rule.  Returns False for trivial
+'  whitespace/spacing rules that should be tracked-change only.
+' ============================================================
+Public Function ShouldCreateCommentForRule(ByVal ruleName As String, _
+                                           Optional ByVal finding As Object = Nothing) As Boolean
+    Dim rn As String
+    rn = LCase$(ruleName)
+
+    Select Case rn
+        Case "double_spaces"
+            ShouldCreateCommentForRule = False
+            Exit Function
+        Case "missing_space_after_dot"
+            ShouldCreateCommentForRule = False
+            Exit Function
+        Case "trailing_spaces", "trailing_space"
+            ShouldCreateCommentForRule = False
+            Exit Function
+    End Select
+
+    ' Check issue text for spacing sub-types emitted under other rule names
+    If Not finding Is Nothing Then
+        On Error Resume Next
+        Dim issText As String
+        issText = ""
+        If TypeName(finding) = "Dictionary" Then
+            If finding.Exists("Issue") Then issText = LCase$(finding("Issue"))
+        End If
+        On Error GoTo 0
+        If InStr(issText, "missing second space") > 0 Or _
+           InStr(issText, "double space") > 0 Then
+            ShouldCreateCommentForRule = False
+            Exit Function
+        End If
+    End If
+
+    ShouldCreateCommentForRule = True
 End Function
 
 ' ============================================================
