@@ -8,13 +8,15 @@ Attribute VB_Name = "Rules_Punctuation"
 '     unmatched, and improperly nested brackets: (), [], {}.
 '
 ' Dependencies:
-'   - PleadingsEngine.bas (IsInPageRange, GetLocationString)
+'   - TextAnchoring.bas (IsInPageRange, GetLocationString,
+'     IsPastPageFilter, CreateIssueDict)
 ' ============================================================
 Option Explicit
 
 Private Const RULE_NAME_SLASH As String = "slash_style"
 Private Const RULE_NAME_BRACKET As String = "bracket_integrity"
-Private Const RULE_NAME_DASH As String = "dash_usage"
+Private Const RULE_NAME_DASH As String = "hyphens"
+Private Const RULE_NAME_TRIPLICATE As String = "triplicate_punctuation"
 
 ' ?==============================================================?
 ' ?  SLASH STYLE (Rule14)                                       ?
@@ -181,16 +183,16 @@ Private Sub FlagSpacedSlashes(doc As Document, ByRef issues As Collection)
         If rng.Start <= lastPos Then Exit Do   ' stall guard
         lastPos = rng.Start
 
-        If Not EngineIsInPageRange(rng) Then GoTo ContinueSpaced
+        If Not TextAnchoring.IsInPageRange(rng) Then GoTo ContinueSpaced
         If IsURLContext(rng, doc) Then GoTo ContinueSpaced
 
-        locStr = EngineGetLocationString(rng, doc)
+        locStr = TextAnchoring.GetLocationString(rng, doc)
         If Err.Number <> 0 Then
             locStr = "unknown location"
             Err.Clear
         End If
 
-        Set finding = CreateIssueDict(RULE_NAME_SLASH, locStr, "Spaced slash '" & rng.Text & "' differs from dominant tight style", "Remove spaces around slash for consistency", rng.Start, rng.End, "possible_error")
+        Set finding = TextAnchoring.CreateIssueDict(RULE_NAME_SLASH, locStr, "Spaced slash '" & rng.Text & "' differs from dominant tight style", "Remove spaces around slash for consistency", rng.Start, rng.End, "possible_error")
         issues.Add finding
 
 ContinueSpaced:
@@ -232,18 +234,18 @@ Private Sub FlagTightSlashes(doc As Document, ByRef issues As Collection)
         If rng.Start <= lastPos2 Then Exit Do   ' stall guard
         lastPos2 = rng.Start
 
-        If Not EngineIsInPageRange(rng) Then GoTo ContinueTight
+        If Not TextAnchoring.IsInPageRange(rng) Then GoTo ContinueTight
         If IsURLContext(rng, doc) Then GoTo ContinueTight
         If IsDateSlash(rng) Then GoTo ContinueTight
         If IsConventionalTightSlash(rng, doc) Then GoTo ContinueTight
 
-        locStr = EngineGetLocationString(rng, doc)
+        locStr = TextAnchoring.GetLocationString(rng, doc)
         If Err.Number <> 0 Then
             locStr = "unknown location"
             Err.Clear
         End If
 
-        Set finding = CreateIssueDict(RULE_NAME_SLASH, locStr, "Tight slash '" & rng.Text & "' differs from dominant spaced style", "Add spaces around slash for consistency", rng.Start, rng.End, "possible_error")
+        Set finding = TextAnchoring.CreateIssueDict(RULE_NAME_SLASH, locStr, "Tight slash '" & rng.Text & "' differs from dominant spaced style", "Add spaces around slash for consistency", rng.Start, rng.End, "possible_error")
         issues.Add finding
 
 ContinueTight:
@@ -287,7 +289,7 @@ Private Sub FlagBackslashes(doc As Document, ByRef issues As Collection)
         If rng.Start <= lastPos3 Then Exit Do   ' stall guard
         lastPos3 = rng.Start
 
-        If Not EngineIsInPageRange(rng) Then GoTo ContinueBackslash
+        If Not TextAnchoring.IsInPageRange(rng) Then GoTo ContinueBackslash
 
         ' Get surrounding context for skip checks
         Dim contextStart As Long
@@ -329,13 +331,13 @@ Private Sub FlagBackslashes(doc As Document, ByRef issues As Collection)
         End If
 
         ' Flag the backslash
-        locStr = EngineGetLocationString(rng, doc)
+        locStr = TextAnchoring.GetLocationString(rng, doc)
         If Err.Number <> 0 Then
             locStr = "unknown location"
             Err.Clear
         End If
 
-        Set finding = CreateIssueDict(RULE_NAME_SLASH, locStr, "Unexpected backslash -- did you mean forward slash?", "Replace '\' with '/'", rng.Start, rng.End, "possible_error")
+        Set finding = TextAnchoring.CreateIssueDict(RULE_NAME_SLASH, locStr, "Unexpected backslash -- did you mean forward slash?", "Replace '\' with '/'", rng.Start, rng.End, "possible_error")
         issues.Add finding
 
 ContinueBackslash:
@@ -522,6 +524,45 @@ Public Function Check_BracketIntegrity(doc As Document) As Collection
     Dim paraText As String
     Dim paraStart As Long
 
+    ' -- Cheap global pre-check: count all brackets in the document.
+    '    If all three types balance globally, skip the expensive
+    '    per-paragraph traversal entirely.
+    Dim gPO As Long, gPC As Long
+    Dim gSO As Long, gSC As Long
+    Dim gCO As Long, gCC As Long
+    Dim gBytes() As Byte, gLen As Long, gIdx As Long, gCode As Long
+
+    On Error Resume Next
+    Dim fullText As String
+    fullText = doc.Content.Text
+    If Err.Number <> 0 Then
+        Err.Clear
+        fullText = ""
+    End If
+    On Error GoTo 0
+
+    If Len(fullText) > 0 Then
+        gBytes = fullText
+        gLen = UBound(gBytes) - 1
+        For gIdx = 0 To gLen Step 2
+            gCode = gBytes(gIdx) Or (CLng(gBytes(gIdx + 1)) * 256&)
+            Select Case gCode
+                Case 40: gPO = gPO + 1
+                Case 41: gPC = gPC + 1
+                Case 91: gSO = gSO + 1
+                Case 93: gSC = gSC + 1
+                Case 123: gCO = gCO + 1
+                Case 125: gCC = gCC + 1
+            End Select
+        Next gIdx
+
+        ' If all brackets balance globally, no per-paragraph issues possible
+        If gPO = gPC And gSO = gSC And gCO = gCC Then
+            Set Check_BracketIntegrity = issues
+            Exit Function
+        End If
+    End If
+
     ' Counters per bracket type (reset per paragraph)
     Dim parenOpen As Long, parenClose As Long
     Dim sqOpen As Long, sqClose As Long
@@ -542,6 +583,10 @@ Public Function Check_BracketIntegrity(doc As Document) As Collection
             GoTo NxtPara
         End If
         On Error GoTo 0
+
+        ' Page-range filter: skip paragraphs outside selected pages
+        If TextAnchoring.IsPastPageFilter(paraStart) Then Exit For
+        If Not TextAnchoring.IsInPageRange(para.Range) Then GoTo NxtPara
 
         If LenB(paraText) = 0 Then GoTo NxtPara
 
@@ -677,12 +722,12 @@ Private Sub CreateBracketIssue(doc As Document, _
     End If
 
     ' Skip if outside page range
-    If Not EngineIsInPageRange(rng) Then
+    If Not TextAnchoring.IsInPageRange(rng) Then
         On Error GoTo 0
         Exit Sub
     End If
 
-    locStr = EngineGetLocationString(rng, doc)
+    locStr = TextAnchoring.GetLocationString(rng, doc)
     If Err.Number <> 0 Then
         locStr = "unknown location"
         Err.Clear
@@ -702,7 +747,7 @@ Private Sub CreateBracketIssue(doc As Document, _
             suggestion = "Review bracket pairing"
     End Select
 
-    Set finding = CreateIssueDict(RULE_NAME_BRACKET, locStr, issueText, suggestion, pos, pos + 1, "error")
+    Set finding = TextAnchoring.CreateIssueDict(RULE_NAME_BRACKET, locStr, issueText, suggestion, pos, pos + 1, "error")
     issues.Add finding
 End Sub
 
@@ -740,30 +785,71 @@ Private Function GetDashListPrefixLen(para As Paragraph, ByVal paraText As Strin
     On Error GoTo 0
 End Function
 
-' ----------------------------------------------------------------
-'  PRIVATE: Create a dictionary-based finding (no class dependency)
-' ----------------------------------------------------------------
-Private Function CreateIssueDict(ByVal ruleName_ As String, _
-                                 ByVal location_ As String, _
-                                 ByVal issue_ As String, _
-                                 ByVal suggestion_ As String, _
-                                 ByVal rangeStart_ As Long, _
-                                 ByVal rangeEnd_ As Long, _
-                                 Optional ByVal severity_ As String = "error", _
-                                 Optional ByVal autoFixSafe_ As Boolean = False, _
-                                 Optional ByVal replacementText_ As String = "") As Object
-    Dim d As Object
-    Set d = CreateObject("Scripting.Dictionary")
-    d("RuleName") = ruleName_
-    d("Location") = location_
-    d("Issue") = issue_
-    d("Suggestion") = suggestion_
-    d("RangeStart") = rangeStart_
-    d("RangeEnd") = rangeEnd_
-    d("Severity") = severity_
-    d("AutoFixSafe") = autoFixSafe_
-    If autoFixSafe_ Then d("ReplacementText") = replacementText_
-    Set CreateIssueDict = d
+' ============================================================
+'  TRIPLICATE PUNCTUATION
+'  Flags three or more consecutive identical punctuation marks:
+'    (((  )))  [[[  ]]]  """  '''  ,,,
+'  Deliberately excludes "..." (ellipsis).
+' ============================================================
+Public Function Check_TriplicatePunctuation(doc As Document) As Collection
+    Dim issues As New Collection
+    Dim para As Paragraph
+    Dim paraText As String
+    Dim finding As Object
+    Dim locStr As String
+    Dim i As Long
+    Dim ch As String
+    Dim runLen As Long
+
+    ' Characters to check (NOT including "." to avoid flagging ellipsis)
+    Dim targets As String
+    targets = "()[]""',"
+
+    On Error Resume Next
+    For Each para In doc.Paragraphs
+        paraText = para.Range.Text
+        If Err.Number <> 0 Then paraText = "": Err.Clear
+
+        If Len(paraText) < 3 Then GoTo NextTriPara
+
+        ' Check page range
+        If TextAnchoring.IsPastPageFilter(para.Range.Start) Then Exit For
+        If Not TextAnchoring.IsInPageRange(para.Range) Then GoTo NextTriPara
+
+        i = 1
+        Do While i <= Len(paraText) - 2
+            ch = Mid$(paraText, i, 1)
+            If InStr(targets, ch) > 0 Then
+                ' Count consecutive identical chars
+                runLen = 1
+                Do While i + runLen <= Len(paraText) And Mid$(paraText, i + runLen, 1) = ch
+                    runLen = runLen + 1
+                Loop
+                If runLen >= 3 Then
+                    locStr = TextAnchoring.GetLocationString(para.Range, doc)
+                    Dim matched As String
+                    matched = String$(runLen, ch)
+                    Set finding = TextAnchoring.CreateIssueDict( _
+                        RULE_NAME_TRIPLICATE, locStr, _
+                        "Triplicate punctuation: '" & matched & "'", _
+                        "Remove repeated punctuation", _
+                        para.Range.Start + i - 1, _
+                        para.Range.Start + i - 1 + runLen, _
+                        "error", False, "", matched)
+                    issues.Add finding
+                    i = i + runLen
+                Else
+                    i = i + runLen
+                End If
+            Else
+                i = i + 1
+            End If
+        Loop
+NextTriPara:
+    Next para
+    On Error GoTo 0
+
+    Set Check_TriplicatePunctuation = issues
 End Function
 
 
@@ -808,7 +894,8 @@ Public Function Check_DashUsage(doc As Document) As Collection
         Set paraRange = para.Range
         If Err.Number <> 0 Then Err.Clear: GoTo NextParaDash
 
-        If Not EngineIsInPageRange(paraRange) Then GoTo NextParaDash
+        If TextAnchoring.IsPastPageFilter(paraRange.Start) Then Exit For
+        If Not TextAnchoring.IsInPageRange(paraRange) Then GoTo NextParaDash
 
         paraText = paraRange.Text
         If Err.Number <> 0 Then Err.Clear: GoTo NextParaDash
@@ -845,10 +932,10 @@ Public Function Check_DashUsage(doc As Document) As Collection
                 locStr = "unknown location"
                 Err.Clear
             Else
-                locStr = EngineGetLocationString(hrRng, doc)
+                locStr = TextAnchoring.GetLocationString(hrRng, doc)
             End If
 
-            Set finding = CreateIssueDict(RULE_NAME_DASH, locStr, _
+            Set finding = TextAnchoring.CreateIssueDict(RULE_NAME_DASH, locStr, _
                 "Hyphen used in number range. Use an en-dash (" & enDash & ") for ranges.", _
                 "Replace hyphen with en-dash", hyphenPos, hrEnd, "error", True, enDash)
             issues.Add finding
@@ -871,10 +958,10 @@ Public Function Check_DashUsage(doc As Document) As Collection
                 locStr = "unknown location"
                 Err.Clear
             Else
-                locStr = EngineGetLocationString(dhRng, doc)
+                locStr = TextAnchoring.GetLocationString(dhRng, doc)
             End If
 
-            Set finding = CreateIssueDict(RULE_NAME_DASH, locStr, _
+            Set finding = TextAnchoring.CreateIssueDict(RULE_NAME_DASH, locStr, _
                 "Double-hyphen found. Use an em-dash (" & emDash & ") instead.", _
                 "Replace with em-dash", dhStart, dhEnd, "error", True, emDash)
             issues.Add finding
@@ -911,10 +998,10 @@ Public Function Check_DashUsage(doc As Document) As Collection
                         locStr = "unknown location"
                         Err.Clear
                     Else
-                        locStr = EngineGetLocationString(enRng, doc)
+                        locStr = TextAnchoring.GetLocationString(enRng, doc)
                     End If
 
-                    Set finding = CreateIssueDict(RULE_NAME_DASH, locStr, _
+                    Set finding = TextAnchoring.CreateIssueDict(RULE_NAME_DASH, locStr, _
                         "En-dash (" & enDash & ") used between words. Use a hyphen (-) for compound words.", _
                         "Replace en-dash with hyphen", enStart, enEnd, "error", True, "-")
                     issues.Add finding
@@ -954,10 +1041,10 @@ Public Function Check_DashUsage(doc As Document) As Collection
                         locStr = "unknown location"
                         Err.Clear
                     Else
-                        locStr = EngineGetLocationString(snRng, doc)
+                        locStr = TextAnchoring.GetLocationString(snRng, doc)
                     End If
 
-                    Set finding = CreateIssueDict(RULE_NAME_DASH, locStr, _
+                    Set finding = TextAnchoring.CreateIssueDict(RULE_NAME_DASH, locStr, _
                         "Spaced en-dash (" & enDash & ") found. Consider using an em-dash (" & emDash & ") for parenthetical interruptions.", _
                         emDash, snStart, snEnd, "warning", False)
                     issues.Add finding
@@ -975,30 +1062,348 @@ NextParaDash:
     Set Check_DashUsage = issues
 End Function
 
-' ----------------------------------------------------------------
-'  Late-bound wrapper: PleadingsEngine.IsInPageRange
-' ----------------------------------------------------------------
-Private Function EngineIsInPageRange(rng As Object) As Boolean
-    On Error Resume Next
-    EngineIsInPageRange = Application.Run("PleadingsEngine.IsInPageRange", rng)
-    If Err.Number <> 0 Then
-        Debug.Print "EngineIsInPageRange: fallback (Err " & Err.Number & ": " & Err.Description & ")"
-        EngineIsInPageRange = True
-        Err.Clear
-    End If
-    On Error GoTo 0
-End Function
+' ============================================================
+'  ProcessParagraph_TriplicatePunctuation
+'  Per-paragraph handler extracted from Check_TriplicatePunctuation.
+'  Scans paraText for runs of 3+ identical punctuation chars
+'  (excluding "." to avoid flagging ellipsis).
+' ============================================================
+Public Sub ProcessParagraph_TriplicatePunctuation(doc As Document, paraRange As Range, _
+        paraText As String, paraStart As Long, listPrefixLen As Long, _
+        ByRef issues As Collection)
+    Dim i As Long
+    Dim ch As String
+    Dim runLen As Long
+    Dim finding As Object
+    Dim locStr As String
 
-' ----------------------------------------------------------------
-'  Late-bound wrapper: PleadingsEngine.GetLocationString
-' ----------------------------------------------------------------
-Private Function EngineGetLocationString(rng As Object, doc As Document) As String
+    ' Characters to check (NOT including "." to avoid flagging ellipsis)
+    Dim targets As String
+    targets = "()[]""',"
+
+    If Len(paraText) < 3 Then Exit Sub
+
     On Error Resume Next
-    EngineGetLocationString = Application.Run("PleadingsEngine.GetLocationString", rng, doc)
-    If Err.Number <> 0 Then
-        Debug.Print "EngineGetLocationString: fallback (Err " & Err.Number & ": " & Err.Description & ")"
-        EngineGetLocationString = "unknown location"
-        Err.Clear
-    End If
+    i = 1
+    Do While i <= Len(paraText) - 2
+        ch = Mid$(paraText, i, 1)
+        If InStr(targets, ch) > 0 Then
+            ' Count consecutive identical chars
+            runLen = 1
+            Do While i + runLen <= Len(paraText) And Mid$(paraText, i + runLen, 1) = ch
+                runLen = runLen + 1
+            Loop
+            If runLen >= 3 Then
+                locStr = TextAnchoring.GetLocationString(paraRange, doc)
+                Dim matched As String
+                matched = String$(runLen, ch)
+                Set finding = TextAnchoring.CreateIssueDict( _
+                    RULE_NAME_TRIPLICATE, locStr, _
+                    "Triplicate punctuation: '" & matched & "'", _
+                    "Remove repeated punctuation", _
+                    paraStart + i - 1 - listPrefixLen, _
+                    paraStart + i - 1 - listPrefixLen + runLen, _
+                    "error", False, "", matched)
+                issues.Add finding
+            End If
+            i = i + runLen
+        Else
+            i = i + 1
+        End If
+    Loop
     On Error GoTo 0
-End Function
+End Sub
+
+' ============================================================
+'  ProcessParagraph_DashUsage
+'  Per-paragraph handler extracted from Check_DashUsage.
+'  Applies all dash checks (hyphen in number range, double
+'  hyphen, en-dash between words, spaced en-dash).
+' ============================================================
+Public Sub ProcessParagraph_DashUsage(doc As Document, paraRange As Range, _
+        paraText As String, paraStart As Long, listPrefixLen As Long, _
+        ByRef issues As Collection)
+    Dim finding As Object
+    Dim locStr As String
+
+    Dim reHyphenRange As Object
+    Set reHyphenRange = CreateObject("VBScript.RegExp")
+    reHyphenRange.Global = True
+    reHyphenRange.Pattern = "(\d)-(\d)"
+
+    Dim reDoubleHyphen As Object
+    Set reDoubleHyphen = CreateObject("VBScript.RegExp")
+    reDoubleHyphen.Global = True
+    reDoubleHyphen.Pattern = "--"
+
+    Dim enDash As String
+    enDash = ChrW(8211)
+    Dim emDash As String
+    emDash = ChrW(8212)
+
+    ' Strip para mark
+    If Len(paraText) > 0 Then
+        If Right$(paraText, 1) = vbCr Or Right$(paraText, 1) = Chr(13) Then
+            paraText = Left$(paraText, Len(paraText) - 1)
+        End If
+    End If
+    If Len(paraText) < 2 Then Exit Sub
+
+    On Error Resume Next
+
+    ' --- Check 1: Hyphen in number ranges (digit-digit) ---
+    Dim mHR As Object
+    Set mHR = reHyphenRange.Execute(paraText)
+    Dim hm As Object
+    For Each hm In mHR
+        Dim hrStart As Long
+        hrStart = paraStart + hm.FirstIndex - listPrefixLen
+        ' The hyphen is at offset +1 (after first digit in pattern)
+        Dim hyphenPos As Long
+        hyphenPos = hrStart + 1
+        Dim hrEnd As Long
+        hrEnd = hyphenPos + 1  ' just the hyphen
+
+        Err.Clear
+        Dim hrRng As Range
+        Set hrRng = doc.Range(hyphenPos, hrEnd)
+        If Err.Number <> 0 Then
+            locStr = "unknown location"
+            Err.Clear
+        Else
+            locStr = TextAnchoring.GetLocationString(hrRng, doc)
+        End If
+
+        Set finding = TextAnchoring.CreateIssueDict(RULE_NAME_DASH, locStr, _
+            "Hyphen used in number range. Use an en-dash (" & enDash & ") for ranges.", _
+            "Replace hyphen with en-dash", hyphenPos, hrEnd, "error", True, enDash)
+        issues.Add finding
+    Next hm
+
+    ' --- Check 2: Double-hyphen "--" should be em-dash ---
+    Dim mDH As Object
+    Set mDH = reDoubleHyphen.Execute(paraText)
+    Dim dhm As Object
+    For Each dhm In mDH
+        Dim dhStart As Long
+        dhStart = paraStart + dhm.FirstIndex - listPrefixLen
+        Dim dhEnd As Long
+        dhEnd = dhStart + 2
+
+        Err.Clear
+        Dim dhRng As Range
+        Set dhRng = doc.Range(dhStart, dhEnd)
+        If Err.Number <> 0 Then
+            locStr = "unknown location"
+            Err.Clear
+        Else
+            locStr = TextAnchoring.GetLocationString(dhRng, doc)
+        End If
+
+        Set finding = TextAnchoring.CreateIssueDict(RULE_NAME_DASH, locStr, _
+            "Double-hyphen found. Use an em-dash (" & emDash & ") instead.", _
+            "Replace with em-dash", dhStart, dhEnd, "error", True, emDash)
+        issues.Add finding
+    Next dhm
+
+    ' --- Check 3: En-dash between letters (compound word) ---
+    ' Pattern: letter + en-dash + letter (no spaces) = should be hyphen
+    Dim enPos As Long
+    enPos = InStr(1, paraText, enDash)
+    Do While enPos > 0
+        If enPos > 1 And enPos < Len(paraText) Then
+            Dim chBefore As String
+            Dim chAfter As String
+            chBefore = Mid$(paraText, enPos - 1, 1)
+            chAfter = Mid$(paraText, enPos + 1, 1)
+
+            Dim beforeIsLetter As Boolean
+            Dim afterIsLetter As Boolean
+            beforeIsLetter = (chBefore >= "A" And chBefore <= "Z") Or _
+                             (chBefore >= "a" And chBefore <= "z")
+            afterIsLetter = (chAfter >= "A" And chAfter <= "Z") Or _
+                            (chAfter >= "a" And chAfter <= "z")
+
+            If beforeIsLetter And afterIsLetter Then
+                Dim enStart As Long
+                enStart = paraStart + enPos - 1 - listPrefixLen
+                Dim enEnd As Long
+                enEnd = enStart + 1
+
+                Err.Clear
+                Dim enRng As Range
+                Set enRng = doc.Range(enStart, enEnd)
+                If Err.Number <> 0 Then
+                    locStr = "unknown location"
+                    Err.Clear
+                Else
+                    locStr = TextAnchoring.GetLocationString(enRng, doc)
+                End If
+
+                Set finding = TextAnchoring.CreateIssueDict(RULE_NAME_DASH, locStr, _
+                    "En-dash (" & enDash & ") used between words. Use a hyphen (-) for compound words.", _
+                    "Replace en-dash with hyphen", enStart, enEnd, "error", True, "-")
+                issues.Add finding
+            End If
+
+            ' Check 4: Spaced en-dash (" - ") -> should be em-dash (" -- ")
+            ' Exception: spaced en-dash between numbers is correct for ranges
+            Dim beforeIsSpace As Boolean
+            Dim afterIsSpace As Boolean
+            beforeIsSpace = (chBefore = " ")
+            afterIsSpace = (chAfter = " ")
+
+            If beforeIsSpace And afterIsSpace Then
+                ' Check if this is a number range (digit before space and digit after space)
+                Dim isNumberRange As Boolean
+                isNumberRange = False
+                If enPos > 2 And enPos + 1 < Len(paraText) Then
+                    Dim charBeforeSpace As String
+                    Dim charAfterSpace As String
+                    charBeforeSpace = Mid$(paraText, enPos - 2, 1)
+                    charAfterSpace = Mid$(paraText, enPos + 2, 1)
+                    If (charBeforeSpace >= "0" And charBeforeSpace <= "9") And _
+                       (charAfterSpace >= "0" And charAfterSpace <= "9") Then
+                        isNumberRange = True
+                    End If
+                End If
+                If Not isNumberRange Then
+                    Dim snStart As Long
+                    snStart = paraStart + enPos - 1 - listPrefixLen
+                    Dim snEnd As Long
+                    snEnd = snStart + 1
+
+                    Err.Clear
+                    Dim snRng As Range
+                    Set snRng = doc.Range(snStart, snEnd)
+                    If Err.Number <> 0 Then
+                        locStr = "unknown location"
+                        Err.Clear
+                    Else
+                        locStr = TextAnchoring.GetLocationString(snRng, doc)
+                    End If
+
+                    Set finding = TextAnchoring.CreateIssueDict(RULE_NAME_DASH, locStr, _
+                        "Spaced en-dash (" & enDash & ") found. Consider using an em-dash (" & emDash & ") for parenthetical interruptions.", _
+                        emDash, snStart, snEnd, "warning", False)
+                    issues.Add finding
+                End If
+            End If
+        End If
+
+        enPos = InStr(enPos + 1, paraText, enDash)
+    Loop
+    On Error GoTo 0
+End Sub
+
+' ============================================================
+'  ProcessParagraph_BracketIntegrity
+'  Per-paragraph handler extracted from Check_BracketIntegrity.
+'  Performs byte-array bracket counting and stack-based nesting
+'  check for a single paragraph.  The global pre-check (counting
+'  all brackets in doc.Content.Text) is NOT done here -- it
+'  belongs in the Check_BracketIntegrity function.
+' ============================================================
+Public Sub ProcessParagraph_BracketIntegrity(doc As Document, paraRange As Range, _
+        paraText As String, paraStart As Long, listPrefixLen As Long, _
+        ByRef issues As Collection)
+    If LenB(paraText) = 0 Then Exit Sub
+
+    ' Counters per bracket type
+    Dim parenOpen As Long, parenClose As Long
+    Dim sqOpen As Long, sqClose As Long
+    Dim curlyOpen As Long, curlyClose As Long
+
+    ' Position of first unmatched bracket (for issue location)
+    Dim firstParenPos As Long, firstSqPos As Long, firstCurlyPos As Long
+
+    parenOpen = 0: parenClose = 0
+    sqOpen = 0: sqClose = 0
+    curlyOpen = 0: curlyClose = 0
+    firstParenPos = -1: firstSqPos = -1: firstCurlyPos = -1
+
+    Dim b() As Byte, bMax As Long
+    Dim i As Long, code As Long, pos As Long
+
+    b = paraText
+    bMax = UBound(b) - 1
+
+    For i = 0 To bMax Step 2
+        code = b(i) Or (CLng(b(i + 1)) * 256&)
+        pos = paraStart + (i \ 2) - listPrefixLen
+
+        Select Case code
+            Case 40   ' (
+                parenOpen = parenOpen + 1
+                If firstParenPos < 0 Then firstParenPos = pos
+            Case 41   ' )
+                parenClose = parenClose + 1
+                If firstParenPos < 0 Then firstParenPos = pos
+            Case 91   ' [
+                sqOpen = sqOpen + 1
+                If firstSqPos < 0 Then firstSqPos = pos
+            Case 93   ' ]
+                sqClose = sqClose + 1
+                If firstSqPos < 0 Then firstSqPos = pos
+            Case 123  ' {
+                curlyOpen = curlyOpen + 1
+                If firstCurlyPos < 0 Then firstCurlyPos = pos
+            Case 125  ' }
+                curlyClose = curlyClose + 1
+                If firstCurlyPos < 0 Then firstCurlyPos = pos
+        End Select
+    Next i
+
+    ' Report once per bracket type if counts don't match
+    If parenOpen <> parenClose Then
+        CreateBracketIssue doc, issues, firstParenPos, "()", _
+            "Unbalanced parentheses: " & parenOpen & " opened, " & _
+            parenClose & " closed"
+    End If
+    If sqOpen <> sqClose Then
+        CreateBracketIssue doc, issues, firstSqPos, "[]", _
+            "Unbalanced square brackets: " & sqOpen & " opened, " & _
+            sqClose & " closed"
+    End If
+    If curlyOpen <> curlyClose Then
+        CreateBracketIssue doc, issues, firstCurlyPos, "{}", _
+            "Unbalanced curly braces: " & curlyOpen & " opened, " & _
+            curlyClose & " closed"
+    End If
+
+    ' -- Stack-based nesting check (only when counts balance) --
+    If parenOpen = parenClose And sqOpen = sqClose _
+       And curlyOpen = curlyClose _
+       And (parenOpen + sqOpen + curlyOpen) > 0 Then
+        Dim stk() As Long, stkTop As Long
+        stkTop = 0
+        ReDim stk(1 To parenOpen + sqOpen + curlyOpen)
+        Dim nestBad As Boolean, nestPos As Long
+        nestBad = False
+        For i = 0 To bMax Step 2
+            code = b(i) Or (CLng(b(i + 1)) * 256&)
+            Select Case code
+                Case 40, 91, 123  ' open bracket
+                    stkTop = stkTop + 1
+                    If stkTop > UBound(stk) Then ReDim Preserve stk(1 To stkTop + 4)
+                    stk(stkTop) = code
+                Case 41, 93, 125  ' close bracket
+                    If stkTop = 0 Then
+                        nestBad = True
+                        nestPos = paraStart + (i \ 2) - listPrefixLen
+                        Exit For
+                    End If
+                    If Not CodesMatch(stk(stkTop), code) Then
+                        nestBad = True
+                        nestPos = paraStart + (i \ 2) - listPrefixLen
+                        Exit For
+                    End If
+                    stkTop = stkTop - 1
+            End Select
+        Next i
+        If nestBad Then
+            CreateBracketIssue doc, issues, nestPos, "()", _
+                "Improperly nested brackets (e.g. overlapping pairs)"
+        End If
+    End If
+End Sub

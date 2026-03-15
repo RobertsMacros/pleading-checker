@@ -20,22 +20,15 @@ Attribute VB_Name = "Rules_Spelling"
 '     license = verb ("to license", "shall license")
 '     licensed, licensing = always -s- (verb derivatives)
 '
-' Rule 13 -- Colour Formatting:
-'   Detects non-standard font colours in the document body.
-'   Identifies the dominant text colour and flags any runs
-'   using a different colour (excluding hyperlinks and
-'   heading-styled paragraphs).
-'
 ' Dependencies:
 '   - PleadingsEngine.bas (IsInPageRange, IsWhitelistedTerm,
 '                          GetLocationString, GetSpellingMode)
 ' ============================================================
 Option Explicit
 
-Private Const RULE_NAME As String = "spelling"
-Private Const RULE_NAME_LICENCE As String = "licence_license"
-Private Const RULE_NAME_COLOUR As String = "colour_formatting"
-Private Const RULE_NAME_CHECK As String = "check_cheque"
+Private Const RULE_NAME As String = "spellchecker"
+Private Const RULE_NAME_LICENCE As String = "spellchecker"
+Private Const RULE_NAME_CHECK As String = "spellchecker"
 
 ' ============================================================
 '  MAIN ENTRY POINT
@@ -50,62 +43,73 @@ Public Function Check_Spelling(doc As Document) As Collection
     Dim spellingMode As String
     Dim direction As String
 
-    ' -- Build the US <-> UK mapping arrays ----------------
+    ' -- Build the US <-> UK mapping arrays (cached once per call) --
     BuildSpellingArrays usWords, ukWords
 
     ' -- Determine spelling mode -------------------------
-    spellingMode = EngineGetSpellingMode()
+    spellingMode = TextAnchoring.GetSpellingMode()
 
     If spellingMode = "US" Then
-        ' Search for UK words, suggest US replacements
         searchWords = ukWords
         targetWords = usWords
         direction = "US"
-
-        ' In US mode, no special legal exceptions
         exceptions = Split("program,practice", ",")
     Else
-        ' Default: "UK" -- search for US words, suggest UK replacements
         searchWords = usWords
         targetWords = ukWords
         direction = "UK"
-
-        ' "judgment" is standard in UK legal writing (not "judgement")
-        ' "practice" is the correct UK noun form (verb: "practise")
         exceptions = Split("program,judgment,practice", ",")
     End If
 
     ' -- Search main document body -----------------------
+    TextAnchoring.PerfTimerStart "spelling_body"
     SearchRangeForSpellingIssues doc.Content, doc, searchWords, targetWords, exceptions, direction, issues
+    TextAnchoring.PerfTimerEnd "spelling_body"
 
-    ' -- Search footnotes --------------------------------
+    ' -- Search footnotes via story range (single pass, not per-footnote) --
+    TextAnchoring.PerfTimerStart "spelling_footnotes"
     On Error Resume Next
-    Dim fn As Footnote
-    For Each fn In doc.Footnotes
-        Err.Clear
-        SearchRangeForSpellingIssues fn.Range, doc, searchWords, targetWords, exceptions, direction, issues
-        If Err.Number <> 0 Then Err.Clear
-    Next fn
+    If doc.Footnotes.Count > 0 Then
+        Dim fnStory As Range
+        Set fnStory = doc.StoryRanges(wdFootnotesStory)
+        If Err.Number = 0 And Not fnStory Is Nothing Then
+            Err.Clear
+            SearchRangeForSpellingIssues fnStory, doc, searchWords, targetWords, exceptions, direction, issues
+            If Err.Number <> 0 Then Err.Clear
+        Else
+            Err.Clear
+        End If
+    End If
     On Error GoTo 0
+    TextAnchoring.PerfTimerEnd "spelling_footnotes"
 
-    ' -- Search endnotes ---------------------------------
+    ' -- Search endnotes via story range (single pass) --
+    TextAnchoring.PerfTimerStart "spelling_endnotes"
     On Error Resume Next
-    Dim en As Endnote
-    For Each en In doc.Endnotes
-        Err.Clear
-        SearchRangeForSpellingIssues en.Range, doc, searchWords, targetWords, exceptions, direction, issues
-        If Err.Number <> 0 Then Err.Clear
-    Next en
+    If doc.Endnotes.Count > 0 Then
+        Dim enStory As Range
+        Set enStory = doc.StoryRanges(wdEndnotesStory)
+        If Err.Number = 0 And Not enStory Is Nothing Then
+            Err.Clear
+            SearchRangeForSpellingIssues enStory, doc, searchWords, targetWords, exceptions, direction, issues
+            If Err.Number <> 0 Then Err.Clear
+        Else
+            Err.Clear
+        End If
+    End If
     On Error GoTo 0
+    TextAnchoring.PerfTimerEnd "spelling_endnotes"
+
+    TextAnchoring.PerfCount "spelling_find_passes", CLng(UBound(searchWords) - LBound(searchWords) + 1)
 
     Set Check_Spelling = issues
 End Function
 
 ' ============================================================
-'  PRIVATE: Search a Range for spelling issues
-'  Iterates every search/target pair, uses Word's Find to
-'  locate whole-word, case-insensitive matches, then filters
-'  by page range and whitelist before creating issues.
+'  PRIVATE: Search a Range for spelling issues using a
+'  single-pass paragraph scan with dictionary lookup.
+'  Replaces the old O(N x pairs) Range.Find approach with
+'  O(N) tokenisation where N = total document text length.
 '
 '  direction = "UK" or "US" -- controls the finding text:
 '    "UK" -> "US spelling detected: '...'"
@@ -119,8 +123,6 @@ Private Sub SearchRangeForSpellingIssues(searchRange As Range, _
                                          ByVal direction As String, _
                                          ByRef issues As Collection)
     Dim i As Long
-    Dim rng As Range
-    Dim foundText As String
     Dim finding As Object
     Dim locStr As String
     Dim issueText As String
@@ -133,104 +135,190 @@ Private Sub SearchRangeForSpellingIssues(searchRange As Range, _
         sourceLabel = "UK"
     End If
 
+    ' -- Build dictionary: LCase(searchWord) -> index into arrays --
+    Dim lookupDict As Object
+    Set lookupDict = CreateObject("Scripting.Dictionary")
     For i = LBound(searchWords) To UBound(searchWords)
-
-        ' Reset a fresh range for each search term
-        On Error Resume Next
-        Set rng = searchRange.Duplicate
-        If Err.Number <> 0 Then
-            Err.Clear
-            On Error GoTo 0
-            GoTo NextWord
+        Dim lcWord As String
+        lcWord = LCase$(searchWords(i))
+        If Not lookupDict.Exists(lcWord) Then
+            lookupDict.Add lcWord, i
         End If
-        On Error GoTo 0
-
-        With rng.Find
-            .ClearFormatting
-            .Text = searchWords(i)
-            .MatchWholeWord = True
-            .MatchCase = False
-            .MatchWildcards = False
-            .Wrap = wdFindStop
-            .Forward = True
-        End With
-
-        ' Loop through all occurrences of this term
-        Do
-            On Error Resume Next
-            Dim found As Boolean
-            found = rng.Find.Execute
-            If Err.Number <> 0 Then
-                Err.Clear
-                On Error GoTo 0
-                Exit Do
-            End If
-            On Error GoTo 0
-
-            If Not found Then Exit Do
-
-            foundText = rng.Text
-
-            ' -- Skip exceptions -----------------------
-            If IsException(foundText, exceptions) Then
-                GoTo ContinueSearch
-            End If
-
-            ' -- Skip whitelisted terms ----------------
-            If EngineIsWhitelistedTerm(foundText) Then
-                GoTo ContinueSearch
-            End If
-
-            ' -- Skip if outside configured page range -
-            If Not EngineIsInPageRange(rng) Then
-                GoTo ContinueSearch
-            End If
-
-            ' -- Create the finding ----------------------
-            On Error Resume Next
-            locStr = EngineGetLocationString(rng, doc)
-            If Err.Number <> 0 Then
-                locStr = "unknown location"
-                Err.Clear
-            End If
-            On Error GoTo 0
-
-            issueText = sourceLabel & " spelling detected: '" & foundText & "'"
-
-            ' -- Downgrade italic / quoted text -------
-            Dim severity As String
-            Dim suggestion As String
-            severity = "error"
-            suggestion = targetWords(i)
-
-            If IsRangeItalic(rng) Then
-                severity = "possible_error"
-                suggestion = ""
-                issueText = issueText & " (in italic text -- review manually)"
-            ElseIf IsInsideQuotes(rng, doc) Then
-                severity = "possible_error"
-                suggestion = ""
-                issueText = issueText & " (in quoted text -- review manually)"
-            End If
-
-            Set finding = CreateIssueDict(RULE_NAME, locStr, issueText, suggestion, rng.Start, rng.End, severity)
-            issues.Add finding
-
-ContinueSearch:
-            ' Collapse range to end of current match to find next
-            On Error Resume Next
-            rng.Collapse wdCollapseEnd
-            If Err.Number <> 0 Then
-                Err.Clear
-                On Error GoTo 0
-                Exit Do
-            End If
-            On Error GoTo 0
-        Loop
-
-NextWord:
     Next i
+
+    ' -- Build exceptions dictionary for O(1) lookup --
+    Dim exceptDict As Object
+    Set exceptDict = CreateObject("Scripting.Dictionary")
+    For i = LBound(exceptions) To UBound(exceptions)
+        Dim lcExc As String
+        lcExc = LCase$(Trim$(exceptions(i)))
+        If Len(lcExc) > 0 And Not exceptDict.Exists(lcExc) Then
+            exceptDict.Add lcExc, True
+        End If
+    Next i
+
+    ' -- Iterate paragraphs in the search range --
+    Dim para As Paragraph
+    Dim paraText As String
+    Dim paraStart As Long
+    Dim tLen As Long
+    Dim scanPos As Long
+    Dim tokStart As Long
+    Dim sc As String
+    Dim rawToken As String
+    Dim cleanToken As String
+    Dim matchIdx As Long
+
+    On Error Resume Next
+    For Each para In searchRange.Paragraphs
+        Err.Clear
+        Dim paraRange As Range
+        Set paraRange = para.Range
+        If Err.Number <> 0 Then Err.Clear: GoTo NextSpellPara
+
+        paraStart = paraRange.Start
+
+        ' Page-range filter
+        If TextAnchoring.IsPastPageFilter(paraStart) Then Exit For
+        If Not TextAnchoring.IsInPageRange(paraRange) Then GoTo NextSpellPara
+
+        paraText = paraRange.Text
+        If Err.Number <> 0 Then Err.Clear: GoTo NextSpellPara
+        tLen = Len(paraText)
+        If tLen < 2 Then GoTo NextSpellPara
+
+        ' Calculate list prefix offset
+        Dim spListPrefixLen As Long
+        spListPrefixLen = TextAnchoring.GetListPrefixLen(para, paraText)
+
+        ' -- Tokenise by scanning character positions --
+        scanPos = 1
+        Do While scanPos <= tLen
+            sc = Mid$(paraText, scanPos, 1)
+            ' Skip non-word characters (whitespace, punctuation)
+            If Not IsWordCharSpelling(sc) Then
+                scanPos = scanPos + 1
+            Else
+                ' Found start of a token
+                tokStart = scanPos
+                Do While scanPos <= tLen
+                    sc = Mid$(paraText, scanPos, 1)
+                    If Not IsWordCharSpelling(sc) Then Exit Do
+                    scanPos = scanPos + 1
+                Loop
+                ' Extract token
+                rawToken = Mid$(paraText, tokStart, scanPos - tokStart)
+                cleanToken = LCase$(rawToken)
+
+                ' -- Look up in dictionary --
+                If lookupDict.Exists(cleanToken) Then
+                    matchIdx = CLng(lookupDict(cleanToken))
+
+                    ' -- Skip exceptions --
+                    If exceptDict.Exists(cleanToken) Then GoTo NextSpellToken
+
+                    ' -- Skip whitelisted terms --
+                    If TextAnchoring.IsWhitelistedTerm(rawToken) Then GoTo NextSpellToken
+
+                    ' -- Compute document position --
+                    Dim spRangeStart As Long, spRangeEnd As Long
+                    spRangeStart = paraStart + (tokStart - 1) - spListPrefixLen
+                    spRangeEnd = spRangeStart + Len(rawToken)
+
+                    ' Create a range for the match
+                    Dim matchRng As Range
+                    Err.Clear
+                    Set matchRng = doc.Range(spRangeStart, spRangeEnd)
+                    If Err.Number <> 0 Then Err.Clear: GoTo NextSpellToken
+
+                    ' Verify the document text matches (guard against list prefix offset issues)
+                    Dim actualText As String
+                    actualText = matchRng.Text
+                    If Err.Number <> 0 Then Err.Clear: GoTo NextSpellToken
+                    If LCase$(actualText) <> cleanToken Then GoTo NextSpellToken
+
+                    ' -- Create the finding --
+                    Dim foundText As String
+                    foundText = actualText
+
+                    locStr = TextAnchoring.GetLocationString(matchRng, doc)
+                    If Err.Number <> 0 Then locStr = "unknown location": Err.Clear
+
+                    issueText = sourceLabel & " spelling detected: '" & foundText & "'"
+
+                    ' -- Downgrade italic / quoted text --
+                    Dim severity As String
+                    Dim suggestion As String
+                    severity = "error"
+                    suggestion = targetWords(matchIdx)
+
+                    If IsRangeItalic(matchRng) Then
+                        severity = "possible_error"
+                        suggestion = ""
+                        issueText = issueText & " (in italic text -- review manually)"
+                    ElseIf IsInsideQuotes(matchRng, doc) Then
+                        severity = "possible_error"
+                        suggestion = ""
+                        issueText = issueText & " (in quoted text -- review manually)"
+                    End If
+
+                    ' Mark as auto-fix safe when severity is "error"
+                    Dim spAutoFix As Boolean
+                    Dim spReplacement As String
+                    spAutoFix = False
+                    spReplacement = ""
+                    If severity = "error" And Len(suggestion) > 0 Then
+                        spAutoFix = True
+                        spReplacement = suggestion
+                    End If
+
+                    Set finding = TextAnchoring.CreateIssueDict(RULE_NAME, locStr, issueText, suggestion, _
+                        spRangeStart, spRangeEnd, severity, spAutoFix, spReplacement, _
+                        foundText, "exact_text", "high")
+                    issues.Add finding
+                End If
+NextSpellToken:
+            End If
+        Loop
+NextSpellPara:
+    Next para
+    On Error GoTo 0
 End Sub
+
+' ============================================================
+'  PRIVATE: Check if a character is a word character for
+'  spelling tokenisation (letter, digit, apostrophe, hyphen)
+' ============================================================
+Private Function IsWordCharSpelling(ByVal ch As String) As Boolean
+    If Len(ch) <> 1 Then
+        IsWordCharSpelling = False
+        Exit Function
+    End If
+    Dim c As Long
+    c = AscW(ch)
+    ' A-Z, a-z
+    If (c >= 65 And c <= 90) Or (c >= 97 And c <= 122) Then
+        IsWordCharSpelling = True
+        Exit Function
+    End If
+    ' 0-9
+    If c >= 48 And c <= 57 Then
+        IsWordCharSpelling = True
+        Exit Function
+    End If
+    ' Apostrophe (for contractions like "don't" - these won't match spelling words)
+    ' Hyphen (for compound words)
+    If c = 39 Or c = 45 Then
+        IsWordCharSpelling = True
+        Exit Function
+    End If
+    ' Smart apostrophes
+    If c = 8217 Or c = 8216 Then
+        IsWordCharSpelling = True
+        Exit Function
+    End If
+    IsWordCharSpelling = False
+End Function
 
 ' ============================================================
 '  PRIVATE: Check if a found term is in the exceptions list
@@ -609,27 +697,37 @@ End Function
 Public Function Check_LicenceLicense(doc As Document) As Collection
     Dim issues As New Collection
 
-    ' Search for both spellings in the document body
+    ' Search body
     SearchForLicenceIssues doc.Content, doc, issues
 
-    ' Search footnotes
+    ' Search footnotes via story range
     On Error Resume Next
-    Dim fn As Footnote
-    For Each fn In doc.Footnotes
-        Err.Clear
-        SearchForLicenceIssues fn.Range, doc, issues
-        If Err.Number <> 0 Then Err.Clear
-    Next fn
+    If doc.Footnotes.Count > 0 Then
+        Dim fnStory As Range
+        Set fnStory = doc.StoryRanges(wdFootnotesStory)
+        If Err.Number = 0 And Not fnStory Is Nothing Then
+            Err.Clear
+            SearchForLicenceIssues fnStory, doc, issues
+            If Err.Number <> 0 Then Err.Clear
+        Else
+            Err.Clear
+        End If
+    End If
     On Error GoTo 0
 
-    ' Search endnotes
+    ' Search endnotes via story range
     On Error Resume Next
-    Dim en As Endnote
-    For Each en In doc.Endnotes
-        Err.Clear
-        SearchForLicenceIssues en.Range, doc, issues
-        If Err.Number <> 0 Then Err.Clear
-    Next en
+    If doc.Endnotes.Count > 0 Then
+        Dim enStory As Range
+        Set enStory = doc.StoryRanges(wdEndnotesStory)
+        If Err.Number = 0 And Not enStory Is Nothing Then
+            Err.Clear
+            SearchForLicenceIssues enStory, doc, issues
+            If Err.Number <> 0 Then Err.Clear
+        Else
+            Err.Clear
+        End If
+    End If
     On Error GoTo 0
 
     Set Check_LicenceLicense = issues
@@ -707,7 +805,7 @@ Private Sub SearchSingleLicenceTerm(ByVal term As String, _
         If Not found Then Exit Do
 
         ' Skip if outside page range
-        If Not EngineIsInPageRange(rng) Then
+        If Not TextAnchoring.IsInPageRange(rng) Then
             GoTo ContinueLicenceSearch
         End If
 
@@ -727,22 +825,22 @@ Private Sub SearchSingleLicenceTerm(ByVal term As String, _
 
         If IsRangeItalic(rng) Then
             On Error Resume Next
-            locStr = EngineGetLocationString(rng, doc)
+            locStr = TextAnchoring.GetLocationString(rng, doc)
             If Err.Number <> 0 Then locStr = "unknown location": Err.Clear
             On Error GoTo 0
 
-            Set finding = CreateIssueDict(RULE_NAME_LICENCE, locStr, "'" & rng.Text & "' -- in italic text, review manually", "", rng.Start, rng.End, "possible_error")
+            Set finding = TextAnchoring.CreateIssueDict(RULE_NAME_LICENCE, locStr, "'" & rng.Text & "' -- in italic text, review manually", "", rng.Start, rng.End, "possible_error")
             issues.Add finding
             GoTo ContinueLicenceSearch
         End If
 
         If IsInsideQuotes(rng, doc) Then
             On Error Resume Next
-            locStr = EngineGetLocationString(rng, doc)
+            locStr = TextAnchoring.GetLocationString(rng, doc)
             If Err.Number <> 0 Then locStr = "unknown location": Err.Clear
             On Error GoTo 0
 
-            Set finding = CreateIssueDict(RULE_NAME_LICENCE, locStr, "'" & rng.Text & "' -- in quoted text, review manually", "", rng.Start, rng.End, "possible_error")
+            Set finding = TextAnchoring.CreateIssueDict(RULE_NAME_LICENCE, locStr, "'" & rng.Text & "' -- in quoted text, review manually", "", rng.Start, rng.End, "possible_error")
             issues.Add finding
             GoTo ContinueLicenceSearch
         End If
@@ -796,14 +894,14 @@ Private Sub SearchSingleLicenceTerm(ByVal term As String, _
         ' Only create finding if we found something to flag
         If Len(issueText) > 0 Then
             On Error Resume Next
-            locStr = EngineGetLocationString(rng, doc)
+            locStr = TextAnchoring.GetLocationString(rng, doc)
             If Err.Number <> 0 Then
                 locStr = "unknown location"
                 Err.Clear
             End If
             On Error GoTo 0
 
-            Set finding = CreateIssueDict(RULE_NAME_LICENCE, locStr, issueText, suggestion, rng.Start, rng.End, "possible_error")
+            Set finding = TextAnchoring.CreateIssueDict(RULE_NAME_LICENCE, locStr, issueText, suggestion, rng.Start, rng.End, "possible_error")
             issues.Add finding
         End If
 
@@ -1019,7 +1117,7 @@ End Function
 Public Function Check_CheckCheque(doc As Document) As Collection
     Dim issues As New Collection
     Dim spellingMode As String
-    spellingMode = EngineGetSpellingMode()
+    spellingMode = TextAnchoring.GetSpellingMode()
 
     ' Only applies in UK mode (US uses "check" for everything)
     If spellingMode <> "UK" Then
@@ -1027,23 +1125,26 @@ Public Function Check_CheckCheque(doc As Document) As Collection
         Exit Function
     End If
 
-    ' Search body text for "check" / "checks" (context-aware)
+    ' Search body text
     SearchCheckCheque doc.Content, doc, issues
-
-    ' Search body text for financial compound phrases
     SearchFinancialCheckCompounds doc.Content, doc, issues
 
-    ' Search footnotes
+    ' Search footnotes via story range
     On Error Resume Next
-    Dim fn As Footnote
-    For Each fn In doc.Footnotes
-        Err.Clear
-        SearchCheckCheque fn.Range, doc, issues
-        If Err.Number <> 0 Then Err.Clear
-        Err.Clear
-        SearchFinancialCheckCompounds fn.Range, doc, issues
-        If Err.Number <> 0 Then Err.Clear
-    Next fn
+    If doc.Footnotes.Count > 0 Then
+        Dim fnStory As Range
+        Set fnStory = doc.StoryRanges(wdFootnotesStory)
+        If Err.Number = 0 And Not fnStory Is Nothing Then
+            Err.Clear
+            SearchCheckCheque fnStory, doc, issues
+            If Err.Number <> 0 Then Err.Clear
+            Err.Clear
+            SearchFinancialCheckCompounds fnStory, doc, issues
+            If Err.Number <> 0 Then Err.Clear
+        Else
+            Err.Clear
+        End If
+    End If
     On Error GoTo 0
 
     Set Check_CheckCheque = issues
@@ -1090,7 +1191,7 @@ Private Sub SearchCheckCheque(searchRange As Range, doc As Document, _
             If rng.Start <= lastPos Then Exit Do
             lastPos = rng.Start
 
-            If Not EngineIsInPageRange(rng) Then
+            If Not TextAnchoring.IsInPageRange(rng) Then
                 rng.Collapse wdCollapseEnd
                 GoTo NextCheckMatch
             End If
@@ -1104,7 +1205,7 @@ Private Sub SearchCheckCheque(searchRange As Range, doc As Document, _
             End If
 
             On Error Resume Next
-            locStr = EngineGetLocationString(rng, doc)
+            locStr = TextAnchoring.GetLocationString(rng, doc)
             If Err.Number <> 0 Then locStr = "unknown location": Err.Clear
             On Error GoTo 0
 
@@ -1115,7 +1216,7 @@ Private Sub SearchCheckCheque(searchRange As Range, doc As Document, _
                 suggestion = "cheque"
             End If
 
-            Set finding = CreateIssueDict(RULE_NAME_CHECK, locStr, _
+            Set finding = TextAnchoring.CreateIssueDict(RULE_NAME_CHECK, locStr, _
                 "UK spelling: '" & foundText & "' appears to be a noun (financial instrument). Use '" & suggestion & "' in UK English.", _
                 suggestion, rng.Start, rng.End, "possible_error")
             issues.Add finding
@@ -1426,17 +1527,17 @@ Private Sub SearchFinancialBatch(searchRange As Range, _
             If rng.Start <= lastPos Then Exit Do
             lastPos = rng.Start
 
-            If Not EngineIsInPageRange(rng) Then
+            If Not TextAnchoring.IsInPageRange(rng) Then
                 rng.Collapse wdCollapseEnd
                 GoTo NextFinMatch
             End If
 
             On Error Resume Next
-            locStr = EngineGetLocationString(rng, doc)
+            locStr = TextAnchoring.GetLocationString(rng, doc)
             If Err.Number <> 0 Then locStr = "unknown location": Err.Clear
             On Error GoTo 0
 
-            Set finding = CreateIssueDict(RULE_NAME_CHECK, locStr, _
+            Set finding = TextAnchoring.CreateIssueDict(RULE_NAME_CHECK, locStr, _
                 "UK spelling: '" & rng.Text & "' should be '" & _
                 CStr(suggestions(ti)) & "' in UK English.", _
                 "Use '" & CStr(suggestions(ti)) & "'", rng.Start, rng.End, _
@@ -1453,277 +1554,5 @@ NextFinTerm:
     Next ti
 End Sub
 
-' ================================================================
-' ================================================================
-'  RULE 13 -- COLOUR FORMATTING
-' ================================================================
-' ================================================================
-
-' ============================================================
-'  MAIN ENTRY POINT -- Colour Formatting
-' ============================================================
-Public Function Check_ColourFormatting(doc As Document) As Collection
-    Dim issues As New Collection
-    Dim para As Paragraph
-    Dim paraRange As Range
-    Dim paraColor As Long
-    Dim colourCounts As Object
-    Dim dominantColour As Long
-    Dim maxCount As Long
-
-    Const WD_COLOR_AUTOMATIC As Long = -16777216
-
-    ' -- Build hyperlink position set once (avoid O(n^2)) ------
-    Dim hlStarts As Object, hlEnds As Object
-    Set hlStarts = CreateObject("Scripting.Dictionary")
-    Set hlEnds = CreateObject("Scripting.Dictionary")
-    On Error Resume Next
-    Dim hl As Hyperlink
-    Dim hlIdx As Long: hlIdx = 0
-    For Each hl In doc.Hyperlinks
-        Err.Clear
-        hlStarts.Add hlIdx, hl.Range.Start
-        hlEnds.Add hlIdx, hl.Range.End
-        If Err.Number <> 0 Then Err.Clear
-        hlIdx = hlIdx + 1
-    Next hl
-    On Error GoTo 0
-
-    ' -- Pass 1: count paragraph-level colours -----------------
-    Set colourCounts = CreateObject("Scripting.Dictionary")
-
-    On Error Resume Next
-    For Each para In doc.Paragraphs
-        Err.Clear
-        Set paraRange = para.Range
-        If Err.Number <> 0 Then Err.Clear: GoTo NextPC1
-
-        If Not EngineIsInPageRange(paraRange) Then GoTo NextPC1
-
-        paraColor = paraRange.Font.Color
-        If Err.Number <> 0 Then Err.Clear: GoTo NextPC1
-
-        ' Skip indeterminate (mixed-colour paragraphs counted in pass 2)
-        If paraColor = 9999999 Then GoTo NextPC1
-
-        If colourCounts.Exists(paraColor) Then
-            colourCounts(paraColor) = colourCounts(paraColor) + 1
-        Else
-            colourCounts.Add paraColor, 1
-        End If
-NextPC1:
-    Next para
-    On Error GoTo 0
-
-    ' -- Determine dominant colour -----------------------------
-    If colourCounts.Count = 0 Then
-        Set Check_ColourFormatting = issues
-        Exit Function
-    End If
-
-    dominantColour = 0: maxCount = 0
-    Dim colourKey As Variant
-    For Each colourKey In colourCounts.keys
-        If colourCounts(colourKey) > maxCount Then
-            maxCount = colourCounts(colourKey)
-            dominantColour = CLng(colourKey)
-        End If
-    Next colourKey
-
-    ' -- Pass 2: flag paragraphs with non-standard colours -----
-    On Error Resume Next
-    For Each para In doc.Paragraphs
-        Err.Clear
-        Set paraRange = para.Range
-        If Err.Number <> 0 Then Err.Clear: GoTo NextPC2
-
-        If Not EngineIsInPageRange(paraRange) Then GoTo NextPC2
-
-        ' Skip heading-styled paragraphs
-        Dim styleName As String
-        styleName = ""
-        styleName = para.Style.NameLocal
-        If Err.Number <> 0 Then Err.Clear: styleName = ""
-        If LCase(Left(styleName, 7)) = "heading" Then GoTo NextPC2
-
-        paraColor = paraRange.Font.Color
-        If Err.Number <> 0 Then Err.Clear: GoTo NextPC2
-
-        ' Skip dominant, automatic, or indeterminate
-        If paraColor = dominantColour Or _
-           paraColor = WD_COLOR_AUTOMATIC Or _
-           paraColor = 9999999 Then GoTo NextPC2
-
-        ' Skip if inside a hyperlink
-        If IsRangeInsideHyperlink(paraRange, hlStarts, hlEnds) Then GoTo NextPC2
-
-        ' Flag this paragraph
-        FlushColourGroup doc, issues, paraRange.Start, paraRange.End, paraColor
-
-NextPC2:
-    Next para
-    On Error GoTo 0
-
-    Set Check_ColourFormatting = issues
-End Function
-
-' ============================================================
-'  PRIVATE: Flush a grouped colour finding
-' ============================================================
-Private Sub FlushColourGroup(doc As Document, _
-                              ByRef issues As Collection, _
-                              ByVal startPos As Long, _
-                              ByVal endPos As Long, _
-                              ByVal fontColor As Long)
-    Dim finding As Object
-    Dim locStr As String
-    Dim hexStr As String
-    Dim rng As Range
-
-    hexStr = ColourToHex(fontColor)
-
-    On Error Resume Next
-    Set rng = doc.Range(startPos, endPos)
-    If Err.Number <> 0 Then
-        Err.Clear
-        On Error GoTo 0
-        Exit Sub
-    End If
-
-    locStr = EngineGetLocationString(rng, doc)
-    If Err.Number <> 0 Then
-        locStr = "unknown location"
-        Err.Clear
-    End If
-    On Error GoTo 0
-
-    Dim previewText As String
-    On Error Resume Next
-    previewText = Left(rng.Text, 60)
-    If Err.Number <> 0 Then
-        previewText = "(text unavailable)"
-        Err.Clear
-    End If
-    On Error GoTo 0
-
-    Set finding = CreateIssueDict(RULE_NAME_COLOUR, locStr, "Non-standard font colour " & hexStr & " detected: '" & previewText & "'", "Change font colour to match document default", startPos, endPos, "possible_error")
-    issues.Add finding
-End Sub
-
-' ============================================================
-'  PRIVATE: Convert a Long colour value to hex string
-' ============================================================
-Private Function ColourToHex(ByVal colorVal As Long) As String
-    Dim cR As Long
-    Dim cG As Long
-    Dim cB As Long
-
-    ' Word stores colours as BGR in Long format
-    cR = colorVal Mod 256
-    cG = (colorVal \ 256) Mod 256
-    cB = (colorVal \ 65536) Mod 256
-
-    ColourToHex = "#" & Right("0" & Hex(cR), 2) & _
-                        Right("0" & Hex(cG), 2) & _
-                        Right("0" & Hex(cB), 2)
-End Function
-
-' ============================================================
-'  PRIVATE: Check if a run is inside a hyperlink
-' ============================================================
-Private Function IsRangeInsideHyperlink(rng As Range, _
-                                        hlStarts As Object, _
-                                        hlEnds As Object) As Boolean
-    Dim i As Long
-    For i = 0 To hlStarts.Count - 1
-        If hlStarts(i) <= rng.Start And hlEnds(i) >= rng.End Then
-            IsRangeInsideHyperlink = True
-            Exit Function
-        End If
-    Next i
-    IsRangeInsideHyperlink = False
-End Function
 
 
-' ----------------------------------------------------------------
-'  PRIVATE: Create a dictionary-based finding (no class dependency)
-' ----------------------------------------------------------------
-Private Function CreateIssueDict(ByVal ruleName_ As String, _
-                                 ByVal location_ As String, _
-                                 ByVal issue_ As String, _
-                                 ByVal suggestion_ As String, _
-                                 ByVal rangeStart_ As Long, _
-                                 ByVal rangeEnd_ As Long, _
-                                 Optional ByVal severity_ As String = "error", _
-                                 Optional ByVal autoFixSafe_ As Boolean = False, _
-                                 Optional ByVal replacementText_ As String = "") As Object
-    Dim d As Object
-    Set d = CreateObject("Scripting.Dictionary")
-    d("RuleName") = ruleName_
-    d("Location") = location_
-    d("Issue") = issue_
-    d("Suggestion") = suggestion_
-    d("RangeStart") = rangeStart_
-    d("RangeEnd") = rangeEnd_
-    d("Severity") = severity_
-    d("AutoFixSafe") = autoFixSafe_
-    If autoFixSafe_ Then d("ReplacementText") = replacementText_
-    Set CreateIssueDict = d
-End Function
-
-
-' ----------------------------------------------------------------
-'  Late-bound wrapper: PleadingsEngine.IsInPageRange
-' ----------------------------------------------------------------
-Private Function EngineIsInPageRange(rng As Object) As Boolean
-    On Error Resume Next
-    EngineIsInPageRange = Application.Run("PleadingsEngine.IsInPageRange", rng)
-    If Err.Number <> 0 Then
-        Debug.Print "EngineIsInPageRange: fallback (Err " & Err.Number & ": " & Err.Description & ")"
-        EngineIsInPageRange = True
-        Err.Clear
-    End If
-    On Error GoTo 0
-End Function
-
-' ----------------------------------------------------------------
-'  Late-bound wrapper: PleadingsEngine.GetLocationString
-' ----------------------------------------------------------------
-Private Function EngineGetLocationString(rng As Object, doc As Document) As String
-    On Error Resume Next
-    EngineGetLocationString = Application.Run("PleadingsEngine.GetLocationString", rng, doc)
-    If Err.Number <> 0 Then
-        Debug.Print "EngineGetLocationString: fallback (Err " & Err.Number & ": " & Err.Description & ")"
-        EngineGetLocationString = "unknown location"
-        Err.Clear
-    End If
-    On Error GoTo 0
-End Function
-
-' ----------------------------------------------------------------
-'  Late-bound wrapper: PleadingsEngine.IsWhitelistedTerm
-' ----------------------------------------------------------------
-Private Function EngineIsWhitelistedTerm(ByVal term As String) As Boolean
-    On Error Resume Next
-    EngineIsWhitelistedTerm = Application.Run("PleadingsEngine.IsWhitelistedTerm", term)
-    If Err.Number <> 0 Then
-        Debug.Print "EngineIsWhitelistedTerm: fallback (Err " & Err.Number & ": " & Err.Description & ")"
-        EngineIsWhitelistedTerm = False
-        Err.Clear
-    End If
-    On Error GoTo 0
-End Function
-
-' ----------------------------------------------------------------
-'  Late-bound wrapper: PleadingsEngine.GetSpellingMode
-' ----------------------------------------------------------------
-Private Function EngineGetSpellingMode() As String
-    On Error Resume Next
-    EngineGetSpellingMode = Application.Run("PleadingsEngine.GetSpellingMode")
-    If Err.Number <> 0 Then
-        Debug.Print "EngineGetSpellingMode: fallback (Err " & Err.Number & ": " & Err.Description & ")"
-        EngineGetSpellingMode = "UK"
-        Err.Clear
-    End If
-    On Error GoTo 0
-End Function

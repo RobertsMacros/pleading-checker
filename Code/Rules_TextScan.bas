@@ -6,7 +6,9 @@ Attribute VB_Name = "Rules_TextScan"
 '   - Check_SpellOutUnderTen (from Rule34)
 '
 ' Dependencies:
-'   - PleadingsEngine.bas (IsInPageRange, GetLocationString)
+'   - TextAnchoring.bas (IsInPageRange, GetLocationString, IsPastPageFilter,
+'                        CreateIssueDict, StripPunctuation, IsPunctuation,
+'                        IsLetterChar, GetListPrefixLen)
 ' ============================================================
 Option Explicit
 
@@ -57,7 +59,8 @@ Public Function Check_RepeatedWords(doc As Document) As Collection
         End If
 
         ' Skip paragraphs outside the configured page range
-        If Not EngineIsInPageRange(paraRange) Then
+        If TextAnchoring.IsPastPageFilter(paraRange.Start) Then Exit For
+        If Not TextAnchoring.IsInPageRange(paraRange) Then
             GoTo NextParagraph_RW
         End If
 
@@ -74,7 +77,7 @@ Public Function Check_RepeatedWords(doc As Document) As Collection
 
         ' Calculate auto-number prefix offset
         Dim rwListPrefixLen As Long
-        rwListPrefixLen = GetSOListPrefixLen(para, paraText)
+        rwListPrefixLen = TextAnchoring.GetListPrefixLen(para, paraText)
 
         ' -- Tokenise by scanning character positions directly ---
         ' This avoids misalignment from tabs, multiple spaces, NBSP.
@@ -113,7 +116,7 @@ Public Function Check_RepeatedWords(doc As Document) As Collection
 
             Dim rawToken As String
             rawToken = Mid$(paraText, tokStart, tokEnd - tokStart)
-            currWord = LCase(StripPunctuation(rawToken))
+            currWord = LCase(TextAnchoring.StripPunctuation(rawToken))
 
             If Len(currWord) = 0 Then
                 prevWord = ""
@@ -122,37 +125,117 @@ Public Function Check_RepeatedWords(doc As Document) As Collection
 
             ' Check for repetition with previous token
             If currWord = prevWord And Len(currWord) > 0 Then
-                ' Determine severity
-                If IsKnownValidRepetition(currWord, knownValid) Then
-                    severity = "possible_error"
-                    issueText = "Repeated word '" & currWord & "' " & _
-                                "-- review context; may be intentional"
-                Else
-                    severity = "error"
-                    issueText = "Repeated word '" & currWord & "' detected"
-                End If
-
-                suggestion = "Remove the duplicate '" & currWord & "'"
-
                 ' tokStart is 1-based in paraText; convert to document position
                 rangeStart = paraRange.Start + (tokStart - 1) - rwListPrefixLen
                 rangeEnd = rangeStart + (tokEnd - tokStart)
 
+                ' ── Whole-word verification ──────────────────────
+                ' paraRange.Text may include tracked-change or field-code
+                ' text that is invisible.  Verify the document ranges
+                ' for BOTH the current and previous token actually
+                ' contain the expected word; try ±1/±2 offsets if not.
                 Err.Clear
                 Dim matchRange As Range
                 Set matchRange = doc.Range(rangeStart, rangeEnd)
-                If Err.Number <> 0 Then
-                    locStr = "unknown location"
-                    Err.Clear
-                Else
-                    locStr = EngineGetLocationString(matchRange, doc)
-                    If Err.Number <> 0 Then
-                        locStr = "unknown location"
+                If Err.Number <> 0 Then Err.Clear: GoTo NextScanPos_RW
+
+                Dim actualCurr As String
+                actualCurr = LCase(TextAnchoring.StripPunctuation(matchRange.Text))
+                If Err.Number <> 0 Then Err.Clear: GoTo NextScanPos_RW
+                If actualCurr <> currWord Then
+                    ' Try alternative offsets
+                    Dim rwOffset As Long
+                    Dim rwFixed As Boolean
+                    rwFixed = False
+                    Dim rwTryOffsets As Variant
+                    rwTryOffsets = Array(-1, 1, -2, 2)
+                    Dim rwOff As Long
+                    For rwOff = LBound(rwTryOffsets) To UBound(rwTryOffsets)
+                        rwOffset = CLng(rwTryOffsets(rwOff))
+                        Dim rwTryStart As Long
+                        rwTryStart = rangeStart + rwOffset
+                        If rwTryStart >= 0 Then
+                            Set matchRange = doc.Range(rwTryStart, rwTryStart + (tokEnd - tokStart))
+                            If Err.Number = 0 Then
+                                actualCurr = LCase(TextAnchoring.StripPunctuation(matchRange.Text))
+                                If Err.Number = 0 And actualCurr = currWord Then
+                                    rangeStart = rwTryStart
+                                    rangeEnd = rwTryStart + (tokEnd - tokStart)
+                                    rwFixed = True
+                                    TextAnchoring.PerfCount "anchoring_corrections"
+                                    Exit For
+                                End If
+                                If Err.Number <> 0 Then Err.Clear
+                            Else
+                                Err.Clear
+                            End If
+                        End If
+                    Next rwOff
+                    If Not rwFixed Then GoTo NextScanPos_RW
+                End If
+
+                Dim prevRngStart As Long, prevRngEnd As Long
+                prevRngStart = paraRange.Start + (prevTokenStart - 1) - rwListPrefixLen
+                prevRngEnd = prevRngStart + (prevTokenEnd - prevTokenStart)
+
+                Dim prevMatchRange As Range
+                Set prevMatchRange = doc.Range(prevRngStart, prevRngEnd)
+                If Err.Number <> 0 Then Err.Clear: GoTo NextScanPos_RW
+
+                Dim actualPrev As String
+                actualPrev = LCase(TextAnchoring.StripPunctuation(prevMatchRange.Text))
+                If Err.Number <> 0 Then Err.Clear: GoTo NextScanPos_RW
+                If actualPrev <> currWord Then GoTo NextScanPos_RW
+
+                ' Also verify the gap between the two words has no
+                ' hidden content (only whitespace/punctuation).
+                If prevRngEnd < rangeStart Then
+                    Dim gapRange As Range
+                    Set gapRange = doc.Range(prevRngEnd, rangeStart)
+                    If Err.Number = 0 Then
+                        Dim gapText As String
+                        gapText = gapRange.Text
+                        If Err.Number = 0 Then
+                            Dim gIdx As Long
+                            Dim gCh As String
+                            For gIdx = 1 To Len(gapText)
+                                gCh = Mid$(gapText, gIdx, 1)
+                                If gCh <> " " And gCh <> vbTab And _
+                                   gCh <> ChrW(160) And gCh <> vbCr And _
+                                   gCh <> vbLf And gCh <> Chr(11) And _
+                                   Not TextAnchoring.IsPunctuation(gCh) Then
+                                    ' Non-whitespace content between the two
+                                    ' words – this is not a real repetition.
+                                    GoTo NextScanPos_RW
+                                End If
+                            Next gIdx
+                        Else
+                            Err.Clear
+                        End If
+                    Else
                         Err.Clear
                     End If
                 End If
+                ' ── End whole-word verification ──────────────────
 
-                Set finding = CreateIssueDict(RULE_NAME_REPEATED, locStr, issueText, suggestion, rangeStart, rangeEnd, severity)
+                ' Determine severity
+                If IsKnownValidRepetition(currWord, knownValid) Then
+                    severity = "possible_error"
+                    issueText = "Repeated word '" & currWord & "'"
+                Else
+                    severity = "error"
+                    issueText = "Repeated word '" & currWord & "'"
+                End If
+
+                suggestion = "Remove the duplicate '" & currWord & "'"
+
+                locStr = TextAnchoring.GetLocationString(matchRange, doc)
+                If Err.Number <> 0 Then
+                    locStr = "unknown location"
+                    Err.Clear
+                End If
+
+                Set finding = TextAnchoring.CreateIssueDict(RULE_NAME_REPEATED, locStr, issueText, suggestion, rangeStart, rangeEnd, severity, False, "", rawToken, "token")
                 issues.Add finding
             End If
 
@@ -212,7 +295,8 @@ Public Function Check_SpellOutUnderTen(doc As Document) As Collection
         End If
 
         ' Skip paragraphs outside the configured page range
-        If Not EngineIsInPageRange(paraRange) Then
+        If TextAnchoring.IsPastPageFilter(paraRange.Start) Then Exit For
+        If Not TextAnchoring.IsInPageRange(paraRange) Then
             GoTo NextParagraph_SO
         End If
 
@@ -235,6 +319,15 @@ Public Function Check_SpellOutUnderTen(doc As Document) As Collection
         If Err.Number <> 0 Then isBlockQ = False: Err.Clear
         If isBlockQ Then GoTo NextParagraph_SO
 
+        ' -- Skip headings (numbering is structural, not prose) --
+        Dim soOutlineLevel As Long
+        soOutlineLevel = 10
+        On Error Resume Next
+        soOutlineLevel = para.OutlineLevel
+        If Err.Number <> 0 Then soOutlineLevel = 10: Err.Clear
+        On Error Resume Next
+        If soOutlineLevel >= 1 And soOutlineLevel <= 9 Then GoTo NextParagraph_SO
+
         ' -- Get paragraph text ------------------------------
         paraText = paraRange.Text
         If Err.Number <> 0 Then
@@ -247,7 +340,7 @@ Public Function Check_SpellOutUnderTen(doc As Document) As Collection
 
         ' -- Calculate auto-number prefix offset -------------
         Dim soListPrefixLen As Long
-        soListPrefixLen = GetSOListPrefixLen(para, paraText)
+        soListPrefixLen = TextAnchoring.GetListPrefixLen(para, paraText)
 
         ' -- Scan character by character for digits 0-9 ------
         For i = 1 To textLen
@@ -255,6 +348,11 @@ Public Function Check_SpellOutUnderTen(doc As Document) As Collection
 
             ' Check if character is a digit 0-9
             If ch >= "0" And ch <= "9" Then
+                ' -- Check: digit at start of paragraph (likely numbering) --
+                If IsAtParagraphStart(paraText, i, soListPrefixLen) Then
+                    GoTo NextChar
+                End If
+
                 digitVal = CInt(ch)
 
                 ' -- Check: isolated digit (not part of larger number) --
@@ -316,20 +414,62 @@ Public Function Check_SpellOutUnderTen(doc As Document) As Collection
                 rangeStart = paraRange.Start + i - 1 - soListPrefixLen
                 rangeEnd = rangeStart + 1
 
+                ' -- Stale-anchor validation: verify document text matches --
                 Err.Clear
                 Set charRange = doc.Range(rangeStart, rangeEnd)
                 If Err.Number <> 0 Then
-                    locStr = "unknown location"
                     Err.Clear
-                Else
-                    locStr = EngineGetLocationString(charRange, doc)
-                    If Err.Number <> 0 Then
-                        locStr = "unknown location"
-                        Err.Clear
+                    GoTo NextChar
+                End If
+                Dim anchorText As String
+                anchorText = charRange.Text
+                If Err.Number <> 0 Then Err.Clear: GoTo NextChar
+
+                If anchorText <> ch Then
+                    ' Try alternative offsets +/-1, +/-2
+                    Dim soOffset As Long
+                    Dim soFixed As Boolean
+                    soFixed = False
+                    Dim soTryOffsets As Variant
+                    soTryOffsets = Array(-1, 1, -2, 2)
+                    Dim soOff As Long
+                    For soOff = LBound(soTryOffsets) To UBound(soTryOffsets)
+                        soOffset = CLng(soTryOffsets(soOff))
+                        Dim soTryStart As Long
+                        soTryStart = rangeStart + soOffset
+                        If soTryStart >= 0 Then
+                            Set charRange = doc.Range(soTryStart, soTryStart + 1)
+                            If Err.Number = 0 Then
+                                If charRange.Text = ch Then
+                                    rangeStart = soTryStart
+                                    rangeEnd = soTryStart + 1
+                                    soFixed = True
+                                    TextAnchoring.PerfCount "anchoring_corrections"
+                                    Exit For
+                                End If
+                            Else
+                                Err.Clear
+                            End If
+                        End If
+                    Next soOff
+                    If Not soFixed Then
+                        Debug.Print "ANCHOR_WARN: SpellOutUnderTen anchor mismatch at pos " & rangeStart & _
+                                    ": expected '" & ch & "', got '" & anchorText & "'"
+                        GoTo NextChar
                     End If
                 End If
 
-                Set finding = CreateIssueDict(RULE_NAME_SPELL_OUT, locStr, "Number under 10 is given as a figure in running prose.", "Write '" & numberWords(digitVal) & "' instead of '" & ch & "'.", rangeStart, rangeEnd, "warning", False)
+                locStr = TextAnchoring.GetLocationString(charRange, doc)
+                If Err.Number <> 0 Then
+                    locStr = "unknown location"
+                    Err.Clear
+                End If
+
+                Set finding = TextAnchoring.CreateIssueDict(RULE_NAME_SPELL_OUT, locStr, _
+                    "Number under 10 is given as a figure in running prose.", _
+                    "Write '" & numberWords(digitVal) & "' instead of '" & ch & "'.", _
+                    rangeStart, rangeEnd, "warning", False, "", _
+                    ch, "token", "medium")
                 issues.Add finding
             End If
 
@@ -347,59 +487,6 @@ End Function
 '  HELPERS FOR Check_RepeatedWords
 ' ============================================================
 
-' ------------------------------------------------------------
-'  PRIVATE: Strip leading and trailing punctuation from a word
-'  Removes characters like . , ; : ! ? " ' ( ) [ ] etc.
-' ------------------------------------------------------------
-Private Function StripPunctuation(ByVal word As String) As String
-    Dim ch As String
-    Dim startPos As Long
-    Dim endPos As Long
-
-    word = Trim(word)
-    If Len(word) = 0 Then
-        StripPunctuation = ""
-        Exit Function
-    End If
-
-    ' Strip from start
-    startPos = 1
-    Do While startPos <= Len(word)
-        ch = Mid(word, startPos, 1)
-        If IsPunctuation(ch) Then
-            startPos = startPos + 1
-        Else
-            Exit Do
-        End If
-    Loop
-
-    ' Strip from end
-    endPos = Len(word)
-    Do While endPos >= startPos
-        ch = Mid(word, endPos, 1)
-        If IsPunctuation(ch) Then
-            endPos = endPos - 1
-        Else
-            Exit Do
-        End If
-    Loop
-
-    If startPos > endPos Then
-        StripPunctuation = ""
-    Else
-        StripPunctuation = Mid(word, startPos, endPos - startPos + 1)
-    End If
-End Function
-
-' ------------------------------------------------------------
-'  PRIVATE: Check if a character is punctuation
-' ------------------------------------------------------------
-Private Function IsPunctuation(ByVal ch As String) As Boolean
-    Dim PUNCT_CHARS As String
-    PUNCT_CHARS = ".,;:!?""'()[]{}/-" & Chr(8220) & Chr(8221) & _
-                  Chr(8216) & Chr(8217) & Chr(8212) & Chr(8211)
-    IsPunctuation = (InStr(1, PUNCT_CHARS, ch) > 0)
-End Function
 
 ' ------------------------------------------------------------
 '  PRIVATE: Check if a word is in the known-valid list
@@ -424,29 +511,6 @@ End Function
 '  HELPERS FOR Check_SpellOutUnderTen
 ' ============================================================
 
-' ------------------------------------------------------------
-'  PRIVATE: Check if paragraph style should be excluded
-'  Excludes: Table, Code, Data, Technical, Footnote
-' ------------------------------------------------------------
-' Calculate the length of auto-generated list numbering text
-' that appears in Range.Text but doesn't map to document positions.
-Private Function GetSOListPrefixLen(para As Paragraph, ByVal paraText As String) As Long
-    GetSOListPrefixLen = 0
-    On Error Resume Next
-    Dim lStr As String
-    lStr = para.Range.ListFormat.ListString
-    If Err.Number <> 0 Then Err.Clear: On Error GoTo 0: Exit Function
-    On Error GoTo 0
-    If Len(lStr) = 0 Then Exit Function
-    If Len(paraText) > Len(lStr) Then
-        If Left$(paraText, Len(lStr)) = lStr Then
-            GetSOListPrefixLen = Len(lStr)
-            If Mid$(paraText, GetSOListPrefixLen + 1, 1) = vbTab Then
-                GetSOListPrefixLen = GetSOListPrefixLen + 1
-            End If
-        End If
-    End If
-End Function
 
 Private Function IsExcludedStyle(ByVal styleName As String) As Boolean
     Dim lStyle As String
@@ -568,7 +632,7 @@ Private Function GetPrecedingWord(ByRef txt As String, _
     wordEnd = k
     Do While k >= 1
         ch = Mid(txt, k, 1)
-        If IsLetterChar(ch) Then
+        If TextAnchoring.IsLetterChar(ch) Then
             k = k - 1
         Else
             Exit Do
@@ -830,7 +894,7 @@ Private Function IsAdjacentToLetter(ByRef txt As String, _
 
     ' Check character before
     If pos > 1 Then
-        If IsLetterChar(Mid(txt, pos - 1, 1)) Then
+        If TextAnchoring.IsLetterChar(Mid(txt, pos - 1, 1)) Then
             IsAdjacentToLetter = True
             Exit Function
         End If
@@ -838,7 +902,7 @@ Private Function IsAdjacentToLetter(ByRef txt As String, _
 
     ' Check character after
     If pos < textLen Then
-        If IsLetterChar(Mid(txt, pos + 1, 1)) Then
+        If TextAnchoring.IsLetterChar(Mid(txt, pos + 1, 1)) Then
             IsAdjacentToLetter = True
             Exit Function
         End If
@@ -882,7 +946,7 @@ Private Function IsFollowedByMonthName(ByRef txt As String, _
     Dim wordEnd As Long
     wordEnd = wordStart
     Do While wordEnd <= textLen
-        If Not IsLetterChar(Mid(txt, wordEnd, 1)) Then Exit Do
+        If Not TextAnchoring.IsLetterChar(Mid(txt, wordEnd, 1)) Then Exit Do
         wordEnd = wordEnd + 1
     Loop
 
@@ -905,74 +969,413 @@ Private Function IsFollowedByMonthName(ByRef txt As String, _
     Next m
 End Function
 
-' ============================================================
-'  SHARED HELPER (used by both rules' helpers)
-' ============================================================
-
-' ------------------------------------------------------------
-'  PRIVATE: Check if a character is a letter (A-Z, a-z,
-'  extended Latin)
-' ------------------------------------------------------------
-Private Function IsLetterChar(ByVal ch As String) As Boolean
-    Dim code As Long
-    code = AscW(ch)
-    IsLetterChar = (code >= 65 And code <= 90) Or _
-                   (code >= 97 And code <= 122) Or _
-                   (code >= 192 And code <= 687) ' Extended Latin
-End Function
-
-
-' ----------------------------------------------------------------
-'  PRIVATE: Create a dictionary-based finding (no class dependency)
-' ----------------------------------------------------------------
-Private Function CreateIssueDict(ByVal ruleName_ As String, _
-                                 ByVal location_ As String, _
-                                 ByVal issue_ As String, _
-                                 ByVal suggestion_ As String, _
-                                 ByVal rangeStart_ As Long, _
-                                 ByVal rangeEnd_ As Long, _
-                                 Optional ByVal severity_ As String = "error", _
-                                 Optional ByVal autoFixSafe_ As Boolean = False, _
-                                 Optional ByVal replacementText_ As String = "") As Object
-    Dim d As Object
-    Set d = CreateObject("Scripting.Dictionary")
-    d("RuleName") = ruleName_
-    d("Location") = location_
-    d("Issue") = issue_
-    d("Suggestion") = suggestion_
-    d("RangeStart") = rangeStart_
-    d("RangeEnd") = rangeEnd_
-    d("Severity") = severity_
-    d("AutoFixSafe") = autoFixSafe_
-    If autoFixSafe_ Then d("ReplacementText") = replacementText_
-    Set CreateIssueDict = d
-End Function
-
-
-' ----------------------------------------------------------------
-'  Late-bound wrapper: PleadingsEngine.IsInPageRange
-' ----------------------------------------------------------------
-Private Function EngineIsInPageRange(rng As Object) As Boolean
-    On Error Resume Next
-    EngineIsInPageRange = Application.Run("PleadingsEngine.IsInPageRange", rng)
-    If Err.Number <> 0 Then
-        Debug.Print "EngineIsInPageRange: fallback (Err " & Err.Number & ": " & Err.Description & ")"
-        EngineIsInPageRange = True
-        Err.Clear
+' Check if the digit is effectively at the start of paragraph text
+' (possibly after whitespace/tab), which typically means paragraph numbering
+Private Function IsAtParagraphStart(ByRef txt As String, _
+                                     ByVal pos As Long, _
+                                     ByVal listPrefixLen As Long) As Boolean
+    IsAtParagraphStart = False
+    Dim effectivePos As Long
+    effectivePos = pos - listPrefixLen
+    If effectivePos > 5 Then Exit Function  ' not near start
+    ' Check that everything before this digit is whitespace/tab
+    Dim k As Long
+    For k = 1 + listPrefixLen To pos - 1
+        Dim c As String
+        c = Mid$(txt, k, 1)
+        If c <> " " And c <> vbTab And c <> ChrW(160) Then
+            Exit Function  ' non-whitespace before digit = not paragraph start
+        End If
+    Next k
+    ' Also check if digit is followed by "." or ")" which is numbering
+    If pos < Len(txt) Then
+        Dim nextCh As String
+        nextCh = Mid$(txt, pos + 1, 1)
+        If nextCh = "." Or nextCh = ")" Or nextCh = " " Then
+            IsAtParagraphStart = True
+        End If
     End If
-    On Error GoTo 0
 End Function
 
-' ----------------------------------------------------------------
-'  Late-bound wrapper: PleadingsEngine.GetLocationString
-' ----------------------------------------------------------------
-Private Function EngineGetLocationString(rng As Object, doc As Document) As String
+' ============================================================
+'  PUBLIC: ProcessParagraph_RepeatedWords
+'  Per-paragraph handler extracted from Check_RepeatedWords.
+'  Scans a single paragraph for consecutive repeated words.
+' ============================================================
+Public Sub ProcessParagraph_RepeatedWords(doc As Document, paraRange As Range, paraText As String, paraStart As Long, listPrefixLen As Long, ByRef issues As Collection)
+    Dim knownValid As Variant
+    knownValid = Array("that", "had", "is", "was", "can")
+
+    Dim tLen As Long
+    tLen = Len(paraText)
+    If tLen < 3 Then Exit Sub
+
+    Dim prevWord As String
+    prevWord = ""
+    Dim prevTokenStart As Long, prevTokenEnd As Long
+    prevTokenStart = 0: prevTokenEnd = 0
+
+    Dim scanPos As Long
+    scanPos = 1  ' 1-based position in paraText
+
+    Dim currWord As String
+    Dim rawToken As String
+    Dim severity As String
+    Dim issueText As String
+    Dim suggestion As String
+    Dim locStr As String
+    Dim rangeStart As Long
+    Dim rangeEnd As Long
+    Dim finding As Object
+
     On Error Resume Next
-    EngineGetLocationString = Application.Run("PleadingsEngine.GetLocationString", rng, doc)
-    If Err.Number <> 0 Then
-        Debug.Print "EngineGetLocationString: fallback (Err " & Err.Number & ": " & Err.Description & ")"
-        EngineGetLocationString = "unknown location"
-        Err.Clear
-    End If
+    Do While scanPos <= tLen
+        ' Skip whitespace
+        Dim sc As String
+        sc = Mid$(paraText, scanPos, 1)
+        If sc = " " Or sc = vbTab Or sc = ChrW(160) Or _
+           sc = vbCr Or sc = vbLf Or sc = Chr(11) Then
+            scanPos = scanPos + 1
+            GoTo NextScanPos_PPR
+        End If
+
+        ' Found start of a token
+        Dim tokStart As Long
+        tokStart = scanPos
+        Do While scanPos <= tLen
+            sc = Mid$(paraText, scanPos, 1)
+            If sc = " " Or sc = vbTab Or sc = ChrW(160) Or _
+               sc = vbCr Or sc = vbLf Or sc = Chr(11) Then Exit Do
+            scanPos = scanPos + 1
+        Loop
+        Dim tokEnd As Long
+        tokEnd = scanPos  ' one past end (exclusive)
+
+        rawToken = Mid$(paraText, tokStart, tokEnd - tokStart)
+        currWord = LCase(TextAnchoring.StripPunctuation(rawToken))
+
+        If Len(currWord) = 0 Then
+            prevWord = ""
+            GoTo NextScanPos_PPR
+        End If
+
+        ' Check for repetition with previous token
+        If currWord = prevWord And Len(currWord) > 0 Then
+            ' tokStart is 1-based in paraText; convert to document position
+            rangeStart = paraStart + (tokStart - 1) - listPrefixLen
+            rangeEnd = rangeStart + (tokEnd - tokStart)
+
+            ' -- Whole-word verification --
+            Err.Clear
+            Dim matchRange As Range
+            Set matchRange = doc.Range(rangeStart, rangeEnd)
+            If Err.Number <> 0 Then Err.Clear: GoTo NextScanPos_PPR
+
+            Dim actualCurr As String
+            actualCurr = LCase(TextAnchoring.StripPunctuation(matchRange.Text))
+            If Err.Number <> 0 Then Err.Clear: GoTo NextScanPos_PPR
+            If actualCurr <> currWord Then
+                ' Try alternative offsets
+                Dim rwOffset As Long
+                Dim rwFixed As Boolean
+                rwFixed = False
+                Dim rwTryOffsets As Variant
+                rwTryOffsets = Array(-1, 1, -2, 2)
+                Dim rwOff As Long
+                For rwOff = LBound(rwTryOffsets) To UBound(rwTryOffsets)
+                    rwOffset = CLng(rwTryOffsets(rwOff))
+                    Dim rwTryStart As Long
+                    rwTryStart = rangeStart + rwOffset
+                    If rwTryStart >= 0 Then
+                        Set matchRange = doc.Range(rwTryStart, rwTryStart + (tokEnd - tokStart))
+                        If Err.Number = 0 Then
+                            actualCurr = LCase(TextAnchoring.StripPunctuation(matchRange.Text))
+                            If Err.Number = 0 And actualCurr = currWord Then
+                                rangeStart = rwTryStart
+                                rangeEnd = rwTryStart + (tokEnd - tokStart)
+                                rwFixed = True
+                                TextAnchoring.PerfCount "anchoring_corrections"
+                                Exit For
+                            End If
+                            If Err.Number <> 0 Then Err.Clear
+                        Else
+                            Err.Clear
+                        End If
+                    End If
+                Next rwOff
+                If Not rwFixed Then GoTo NextScanPos_PPR
+            End If
+
+            Dim prevRngStart As Long, prevRngEnd As Long
+            prevRngStart = paraStart + (prevTokenStart - 1) - listPrefixLen
+            prevRngEnd = prevRngStart + (prevTokenEnd - prevTokenStart)
+
+            Dim prevMatchRange As Range
+            Set prevMatchRange = doc.Range(prevRngStart, prevRngEnd)
+            If Err.Number <> 0 Then Err.Clear: GoTo NextScanPos_PPR
+
+            Dim actualPrev As String
+            actualPrev = LCase(TextAnchoring.StripPunctuation(prevMatchRange.Text))
+            If Err.Number <> 0 Then Err.Clear: GoTo NextScanPos_PPR
+            If actualPrev <> currWord Then GoTo NextScanPos_PPR
+
+            ' Also verify the gap between the two words has no
+            ' hidden content (only whitespace/punctuation).
+            If prevRngEnd < rangeStart Then
+                Dim gapRange As Range
+                Set gapRange = doc.Range(prevRngEnd, rangeStart)
+                If Err.Number = 0 Then
+                    Dim gapText As String
+                    gapText = gapRange.Text
+                    If Err.Number = 0 Then
+                        Dim gIdx As Long
+                        Dim gCh As String
+                        For gIdx = 1 To Len(gapText)
+                            gCh = Mid$(gapText, gIdx, 1)
+                            If gCh <> " " And gCh <> vbTab And _
+                               gCh <> ChrW(160) And gCh <> vbCr And _
+                               gCh <> vbLf And gCh <> Chr(11) And _
+                               Not TextAnchoring.IsPunctuation(gCh) Then
+                                ' Non-whitespace content between the two
+                                ' words - this is not a real repetition.
+                                GoTo NextScanPos_PPR
+                            End If
+                        Next gIdx
+                    Else
+                        Err.Clear
+                    End If
+                Else
+                    Err.Clear
+                End If
+            End If
+            ' -- End whole-word verification --
+
+            ' Determine severity
+            If IsKnownValidRepetition(currWord, knownValid) Then
+                severity = "possible_error"
+                issueText = "Repeated word '" & currWord & "'"
+            Else
+                severity = "error"
+                issueText = "Repeated word '" & currWord & "'"
+            End If
+
+            suggestion = "Remove the duplicate '" & currWord & "'"
+
+            locStr = TextAnchoring.GetLocationString(matchRange, doc)
+            If Err.Number <> 0 Then
+                locStr = "unknown location"
+                Err.Clear
+            End If
+
+            Set finding = TextAnchoring.CreateIssueDict(RULE_NAME_REPEATED, locStr, issueText, suggestion, rangeStart, rangeEnd, severity, False, "", rawToken, "token")
+            issues.Add finding
+        End If
+
+        prevWord = currWord
+        prevTokenStart = tokStart
+        prevTokenEnd = tokEnd
+NextScanPos_PPR:
+    Loop
     On Error GoTo 0
-End Function
+End Sub
+
+' ============================================================
+'  PUBLIC: ProcessParagraph_SpellOutUnderTen
+'  Per-paragraph handler extracted from Check_SpellOutUnderTen.
+'  Scans a single paragraph for digits 0-9 that should be
+'  spelled out in running prose.
+' ============================================================
+Public Sub ProcessParagraph_SpellOutUnderTen(doc As Document, paraRange As Range, paraText As String, paraStart As Long, listPrefixLen As Long, ByRef issues As Collection)
+    ' Number word map
+    Dim numberWords(0 To 9) As String
+    numberWords(0) = "zero"
+    numberWords(1) = "one"
+    numberWords(2) = "two"
+    numberWords(3) = "three"
+    numberWords(4) = "four"
+    numberWords(5) = "five"
+    numberWords(6) = "six"
+    numberWords(7) = "seven"
+    numberWords(8) = "eight"
+    numberWords(9) = "nine"
+
+    Dim styleName As String
+    Dim i As Long
+    Dim ch As String
+    Dim digitVal As Long
+    Dim finding As Object
+    Dim locStr As String
+    Dim charRange As Range
+    Dim textLen As Long
+
+    On Error Resume Next
+
+    ' -- Check paragraph style for exclusions --
+    styleName = ""
+    styleName = paraRange.ParagraphStyle
+    If Err.Number <> 0 Then
+        Err.Clear
+        styleName = ""
+    End If
+
+    If IsExcludedStyle(styleName) Then
+        Exit Sub
+    End If
+
+    ' -- Skip block quotes / indented extracts --
+    Dim isBlockQ As Boolean
+    isBlockQ = False
+    isBlockQ = Application.Run("Rules_Formatting.IsBlockQuotePara", paraRange.Paragraphs(1))
+    If Err.Number <> 0 Then isBlockQ = False: Err.Clear
+    If isBlockQ Then Exit Sub
+
+    ' -- Skip headings (numbering is structural, not prose) --
+    Dim soOutlineLevel As Long
+    soOutlineLevel = 10
+    soOutlineLevel = paraRange.Paragraphs(1).OutlineLevel
+    If Err.Number <> 0 Then soOutlineLevel = 10: Err.Clear
+    If soOutlineLevel >= 1 And soOutlineLevel <= 9 Then Exit Sub
+
+    textLen = Len(paraText)
+    If textLen = 0 Then Exit Sub
+
+    ' -- Scan character by character for digits 0-9 --
+    For i = 1 To textLen
+        ch = Mid(paraText, i, 1)
+
+        ' Check if character is a digit 0-9
+        If ch >= "0" And ch <= "9" Then
+            ' -- Check: digit at start of paragraph (likely numbering) --
+            If IsAtParagraphStart(paraText, i, listPrefixLen) Then
+                GoTo NextChar_PPS
+            End If
+
+            digitVal = CInt(ch)
+
+            ' -- Check: isolated digit (not part of larger number) --
+            If IsPartOfLargerNumber(paraText, i, textLen) Then
+                GoTo NextChar_PPS
+            End If
+
+            ' -- Check: digit adjacent to a letter (postcodes, codes) --
+            If IsAdjacentToLetter(paraText, i, textLen) Then
+                GoTo NextChar_PPS
+            End If
+
+            ' -- Check: preceded by structural reference word --
+            If IsPrecededByStructuralRef(paraText, i) Then
+                GoTo NextChar_PPS
+            End If
+
+            ' -- Check: inside parentheses (clause sub-numbers) --
+            If IsInsideParentheses(paraText, i) Then
+                GoTo NextChar_PPS
+            End If
+
+            ' -- Check: digit followed by opening bracket (clause ref like 1(4)) --
+            If IsFollowedByBracket(paraText, i, textLen) Then
+                GoTo NextChar_PPS
+            End If
+
+            ' -- Check: digit followed by month name (date like 1 October) --
+            If IsFollowedByMonthName(paraText, i, textLen) Then
+                GoTo NextChar_PPS
+            End If
+
+            ' -- Check: part of a range pattern --
+            If IsPartOfRange(paraText, i, textLen) Then
+                GoTo NextChar_PPS
+            End If
+
+            ' -- Check: citation context --
+            If IsInCitationContext(paraText, i) Then
+                GoTo NextChar_PPS
+            End If
+
+            ' -- Check: preceded by currency/unit symbols --
+            If IsPrecededByCurrencyOrUnit(paraText, i) Then
+                GoTo NextChar_PPS
+            End If
+
+            ' -- Check: conjunction-linked structural ref --
+            If IsConjunctionLinkedRef(paraText, i) Then
+                GoTo NextChar_PPS
+            End If
+
+            ' -- All checks passed: flag this digit --
+            Dim rangeStart As Long
+            Dim rangeEnd As Long
+
+            rangeStart = paraStart + i - 1 - listPrefixLen
+            rangeEnd = rangeStart + 1
+
+            ' -- Stale-anchor validation: verify document text matches --
+            Err.Clear
+            Set charRange = doc.Range(rangeStart, rangeEnd)
+            If Err.Number <> 0 Then
+                Err.Clear
+                GoTo NextChar_PPS
+            End If
+            Dim anchorText As String
+            anchorText = charRange.Text
+            If Err.Number <> 0 Then Err.Clear: GoTo NextChar_PPS
+
+            If anchorText <> ch Then
+                ' Try alternative offsets +/-1, +/-2
+                Dim soOffset As Long
+                Dim soFixed As Boolean
+                soFixed = False
+                Dim soTryOffsets As Variant
+                soTryOffsets = Array(-1, 1, -2, 2)
+                Dim soOff As Long
+                For soOff = LBound(soTryOffsets) To UBound(soTryOffsets)
+                    soOffset = CLng(soTryOffsets(soOff))
+                    Dim soTryStart As Long
+                    soTryStart = rangeStart + soOffset
+                    If soTryStart >= 0 Then
+                        Set charRange = doc.Range(soTryStart, soTryStart + 1)
+                        If Err.Number = 0 Then
+                            If charRange.Text = ch Then
+                                rangeStart = soTryStart
+                                rangeEnd = soTryStart + 1
+                                soFixed = True
+                                TextAnchoring.PerfCount "anchoring_corrections"
+                                Exit For
+                            End If
+                        Else
+                            Err.Clear
+                        End If
+                    End If
+                Next soOff
+                If Not soFixed Then
+                    Debug.Print "ANCHOR_WARN: SpellOutUnderTen anchor mismatch at pos " & rangeStart & _
+                                ": expected '" & ch & "', got '" & anchorText & "'"
+                    GoTo NextChar_PPS
+                End If
+            End If
+
+            locStr = TextAnchoring.GetLocationString(charRange, doc)
+            If Err.Number <> 0 Then
+                locStr = "unknown location"
+                Err.Clear
+            End If
+
+            Set finding = TextAnchoring.CreateIssueDict(RULE_NAME_SPELL_OUT, locStr, _
+                "Number under 10 is given as a figure in running prose.", _
+                "Write '" & numberWords(digitVal) & "' instead of '" & ch & "'.", _
+                rangeStart, rangeEnd, "warning", False, "", _
+                ch, "token", "medium")
+            issues.Add finding
+        End If
+
+NextChar_PPS:
+    Next i
+    On Error GoTo 0
+End Sub
+
+
+
+
+
+
+

@@ -11,22 +11,17 @@ Attribute VB_Name = "PleadingsEngine"
 ' Dependencies:
 '
 ' Optional rule modules (import any subset):
-'   - Rules_Spelling.bas        (Rules 1, 12, 13)
-'   - Rules_TextScan.bas        (Rules 2, 34)
-'   - Rules_Numbering.bas       (Rules 3, 8)
-'   - Rules_Headings.bas        (Rules 4, 21)
-'   - Rules_Terms.bas           (Rules 5, 7; 23 RETIRED)
-'   - Rules_Formatting.bas      (Rules 6, 11)
-'   - Rules_NumberFormats.bas    (Rules 9, 19; 18 RETIRED)
-'   - Rules_Lists.bas           (Rules 10, 15)
-'   - Rules_Punctuation.bas     (Rules 14, 16)
-'   - Rules_Quotes.bas          (Rules 17, 32, 33)
-'   - Rules_FootnoteIntegrity.bas (Rule 20)
-'   - Rules_Brands.bas          (Rule 22)
-'   - Rules_FootnoteHarts.bas   (Rules 24, 25, 26, 27)
-'   - Rules_LegalTerms.bas      (Rules 28, 29)
-'   - Rules_Italics.bas         (Rules 30, 31)
-'   - Rules_Spacing.bas        (Rules 35-39: double spaces, commas, spacing)
+'   - Rules_Spelling.bas        (spelling, licence/license, check/cheque)
+'   - Rules_TextScan.bas        (repeated words, spell out under ten)
+'   - Rules_Terms.bas           (custom term whitelist)
+'   - Rules_NumberFormats.bas    (date/time, currency/number format)
+'   - Rules_Punctuation.bas     (slash style, bracket integrity, dash usage)
+'   - Rules_FootnoteIntegrity.bas (footnote integrity)
+'   - Rules_Brands.bas          (brand name enforcement)
+'   - Rules_FootnoteHarts.bas   (footnote Hart's rules)
+'   - Rules_LegalTerms.bas      (mandated legal terms, always capitalise)
+'   - Rules_Italics.bas         (anglicised terms, foreign names)
+'   - Rules_Spacing.bas         (double spaces, commas, spacing)
 '
 ' Installation:
 '   1. Open the VBA Editor (Alt+F11)
@@ -42,6 +37,26 @@ Option Explicit
 
 ' -- Module-level state --
 Private ruleConfig      As Object
+
+' -- Cooperative cancellation --
+Public gCancelRun       As Boolean
+Private Const ERR_RUN_CANCELLED As Long = vbObjectError + 513
+
+' -- Grouped report / comment suppression infrastructure --
+Private Const SPELLING_COMMENT_THRESHOLD As Long = 25
+Private Const FOOTNOTE_COMMENT_THRESHOLD As Long = 15
+Private gSpellingGroups     As Object   ' Dictionary: "wrong|right" -> count
+Private gSpellingExamples   As Object   ' Dictionary: "wrong|right" -> first 3 locations
+Private gFootnoteGroups     As Object   ' Dictionary: "issueKey" -> Dictionary with Count, NoteNumbers, IssueText
+Private gGroupedSpellingCount As Long
+Private gGroupedFootnoteCount As Long
+Private gCommentsCreated    As Long
+Private gTrackedEditsApplied As Long
+Private gEditsSkippedUnsafe As Long
+
+' -- Unsafe autofix category set (report-only, no tracked edits) --
+Private gUnsafeAutofixRules As Object   ' Dictionary of rule names -> True
+
 Private pageRangeSet    As Object   ' Dictionary of page numbers (Long -> True)
 Private whitelistDict   As Object
 Private spellingMode    As String   ' "UK" or "US"
@@ -51,8 +66,15 @@ Private dateFormatPref As String   ' "UK" or "US" or "AUTO"
 Private termFormatPref As String   ' "BOLD", "BOLDITALIC", "ITALIC", or "NONE"
 Private termQuotePref  As String   ' "SINGLE" or "DOUBLE"
 Private spaceStylePref As String   ' "ONE" or "TWO"
+Private nonEngTermPref As String   ' "ITALICS" or "REGULAR"
+Private pageRangeString As String  ' Raw user-entered page-range spec (preserved for reports)
 Private ruleErrorCount  As Long
 Private ruleErrorLog    As String
+
+' -- Precomputed page-filter boundaries (set once per run) --
+Private gPageFilterEnabled   As Boolean
+Private gPageFilterStartPos  As Long
+Private gPageFilterEndPos    As Long
 
 ' -- Profiling infrastructure --
 Public Const ENABLE_PROFILING As Boolean = True
@@ -66,14 +88,429 @@ Private paraStartPos()  As Long
 Private paraStartCount  As Long
 Private paraCacheValid  As Boolean
 
+' -- Block-quote / TOC / cover-page region cache (built once per run) --
+Private bqStarts()      As Long
+Private bqEnds()        As Long
+Private bqCount         As Long
+Private tocStarts()     As Long
+Private tocEnds()       As Long
+Private tocCount        As Long
+Private coverPageEnd    As Long   ' -1 = no cover page detected
+
+' ============================================================
+'  COOPERATIVE CANCELLATION HELPERS
+' ============================================================
+Public Sub ResetCancelRun()
+    gCancelRun = False
+End Sub
+
+Public Sub RequestCancelRun()
+    gCancelRun = True
+End Sub
+
+Public Function CancelRunRequested() As Boolean
+    CancelRunRequested = gCancelRun
+End Function
+
+Private Sub CheckCancellation()
+    DoEvents
+    If gCancelRun Then Err.Raise ERR_RUN_CANCELLED, "PleadingsEngine", "Run cancelled"
+End Sub
+
+' ============================================================
+'  GROUPED REPORT + COMMENT SUPPRESSION HELPERS
+' ============================================================
+Private Sub InitGroupedReportState()
+    Set gSpellingGroups = CreateObject("Scripting.Dictionary")
+    Set gSpellingExamples = CreateObject("Scripting.Dictionary")
+    Set gFootnoteGroups = CreateObject("Scripting.Dictionary")
+    gGroupedSpellingCount = 0
+    gGroupedFootnoteCount = 0
+    gCommentsCreated = 0
+    gTrackedEditsApplied = 0
+    gEditsSkippedUnsafe = 0
+
+    ' Populate unsafe autofix rules (report-only categories)
+    Set gUnsafeAutofixRules = CreateObject("Scripting.Dictionary")
+    gUnsafeAutofixRules("double_spaces") = True
+    gUnsafeAutofixRules("missing_space_after_dot") = True
+    gUnsafeAutofixRules("space_before_punct") = True
+    gUnsafeAutofixRules("hyphens") = True
+    gUnsafeAutofixRules("dash_usage") = True
+    gUnsafeAutofixRules("footnote_integrity") = True
+    gUnsafeAutofixRules("duplicate_footnotes") = True
+    gUnsafeAutofixRules("footnote_harts") = True
+    gUnsafeAutofixRules("footnote_terminal_full_stop") = True
+    gUnsafeAutofixRules("footnote_initial_capital") = True
+    gUnsafeAutofixRules("footnote_abbreviation") = True
+    gUnsafeAutofixRules("footnotes_not_endnotes") = True
+End Sub
+
+' Returns the bucket name for a given rule (for threshold grouping)
+Private Function GetRuleBucket(ByVal ruleName As String) As String
+    Dim rn As String
+    rn = LCase$(ruleName)
+    Select Case rn
+        Case "spellchecker", "spelling", "licence_license", "check_cheque"
+            GetRuleBucket = "spelling"
+        Case "footnote_integrity", "footnote_harts", "footnote_terminal_full_stop", _
+             "footnote_initial_capital", "footnote_abbreviation", _
+             "footnotes_not_endnotes", "footnote_rules", "duplicate_footnotes"
+            GetRuleBucket = "footnote"
+        Case "double_spaces", "missing_space_after_dot", "space_before_punct", _
+             "double_commas", "trailing_spaces"
+            GetRuleBucket = "spacing"
+        Case "hyphens", "dash_usage"
+            GetRuleBucket = "dash"
+        Case Else
+            GetRuleBucket = ""
+    End Select
+End Function
+
+' Count findings by bucket in a collection
+Private Function CountByBucket(ByVal issues As Collection, ByVal bucket As String) As Long
+    Dim cnt As Long
+    cnt = 0
+    Dim i As Long
+    For i = 1 To issues.Count
+        If GetRuleBucket(CStr(GetIssueProp(issues(i), "RuleName"))) = bucket Then
+            cnt = cnt + 1
+        End If
+    Next i
+    CountByBucket = cnt
+End Function
+
+' Build grouped spelling data from issues collection
+Private Sub BuildSpellingGroups(ByVal issues As Collection)
+    Set gSpellingGroups = CreateObject("Scripting.Dictionary")
+    Set gSpellingExamples = CreateObject("Scripting.Dictionary")
+    gGroupedSpellingCount = 0
+    Dim i As Long
+    For i = 1 To issues.Count
+        Dim finding As Object
+        Set finding = issues(i)
+        If GetRuleBucket(CStr(GetIssueProp(finding, "RuleName"))) = "spelling" Then
+            gGroupedSpellingCount = gGroupedSpellingCount + 1
+            Dim matched As String
+            Dim sug As String
+            matched = CStr(GetIssueProp(finding, "MatchedText"))
+            sug = CStr(GetIssueProp(finding, "Suggestion"))
+            If Len(matched) = 0 Then matched = "(unknown)"
+            If Len(sug) = 0 Then sug = "(no suggestion)"
+            Dim pairKey As String
+            pairKey = LCase$(matched) & "|" & LCase$(sug)
+            If gSpellingGroups.Exists(pairKey) Then
+                gSpellingGroups(pairKey) = CLng(gSpellingGroups(pairKey)) + 1
+            Else
+                gSpellingGroups(pairKey) = 1
+            End If
+            ' Store first 3 example locations
+            If Not gSpellingExamples.Exists(pairKey) Then
+                gSpellingExamples(pairKey) = CStr(GetIssueProp(finding, "Location"))
+            Else
+                Dim existing As String
+                existing = CStr(gSpellingExamples(pairKey))
+                ' Count pipes to see how many we have
+                Dim pipeCount As Long
+                Dim pc As Long
+                pipeCount = 0
+                For pc = 1 To Len(existing)
+                    If Mid$(existing, pc, 1) = "|" Then pipeCount = pipeCount + 1
+                Next pc
+                If pipeCount < 2 Then
+                    gSpellingExamples(pairKey) = existing & "|" & CStr(GetIssueProp(finding, "Location"))
+                End If
+            End If
+        End If
+    Next i
+End Sub
+
+' Build grouped footnote data from issues collection
+Private Sub BuildFootnoteGroups(ByVal issues As Collection)
+    Set gFootnoteGroups = CreateObject("Scripting.Dictionary")
+    gGroupedFootnoteCount = 0
+    Dim i As Long
+    For i = 1 To issues.Count
+        Dim finding As Object
+        Set finding = issues(i)
+        If GetRuleBucket(CStr(GetIssueProp(finding, "RuleName"))) = "footnote" Then
+            gGroupedFootnoteCount = gGroupedFootnoteCount + 1
+            Dim issText As String
+            issText = CStr(GetIssueProp(finding, "Issue"))
+            Dim loc As String
+            loc = CStr(GetIssueProp(finding, "Location"))
+            Dim fnKey As String
+            fnKey = LCase$(Left$(issText, 80))
+            If gFootnoteGroups.Exists(fnKey) Then
+                Dim grp As Object
+                Set grp = gFootnoteGroups(fnKey)
+                grp("Count") = CLng(grp("Count")) + 1
+                If Len(CStr(grp("Locations"))) < 500 Then
+                    grp("Locations") = CStr(grp("Locations")) & "|" & loc
+                End If
+            Else
+                Dim newGrp As Object
+                Set newGrp = CreateObject("Scripting.Dictionary")
+                newGrp("Count") = 1
+                newGrp("IssueText") = issText
+                newGrp("Locations") = loc
+                Set gFootnoteGroups(fnKey) = newGrp
+            End If
+        End If
+    Next i
+End Sub
+
+' Check if a rule is in an unsafe autofix category
+Public Function IsUnsafeAutofixRule(ByVal ruleName As String) As Boolean
+    If gUnsafeAutofixRules Is Nothing Then
+        IsUnsafeAutofixRule = False
+        Exit Function
+    End If
+    IsUnsafeAutofixRule = gUnsafeAutofixRules.Exists(LCase$(ruleName))
+End Function
+
+' Strong anchor check for tracked changes
+Public Function IsStrongTrackedAnchor(ByVal matchedText As String) As Boolean
+    IsStrongTrackedAnchor = False
+    If Len(matchedText) = 0 Then Exit Function
+    Dim i As Long
+    Dim ch As String
+    For i = 1 To Len(matchedText)
+        ch = Mid$(matchedText, i, 1)
+        If (ch >= "A" And ch <= "Z") Or _
+           (ch >= "a" And ch <= "z") Or _
+           (ch >= "0" And ch <= "9") Then
+            IsStrongTrackedAnchor = True
+            Exit Function
+        End If
+    Next i
+End Function
+
+' Public accessors for grouped report data
+Public Function GetGroupedSpellingCount() As Long
+    GetGroupedSpellingCount = gGroupedSpellingCount
+End Function
+
+Public Function GetGroupedFootnoteCount() As Long
+    GetGroupedFootnoteCount = gGroupedFootnoteCount
+End Function
+
+Public Function GetCommentsCreated() As Long
+    GetCommentsCreated = gCommentsCreated
+End Function
+
+Public Function GetTrackedEditsApplied() As Long
+    GetTrackedEditsApplied = gTrackedEditsApplied
+End Function
+
+Public Function GetEditsSkippedUnsafe() As Long
+    GetEditsSkippedUnsafe = gEditsSkippedUnsafe
+End Function
+
+Public Function GetSpellingGroupsDict() As Object
+    Set GetSpellingGroupsDict = gSpellingGroups
+End Function
+
+Public Function GetSpellingExamplesDict() As Object
+    Set GetSpellingExamplesDict = gSpellingExamples
+End Function
+
+Public Function GetFootnoteGroupsDict() As Object
+    Set GetFootnoteGroupsDict = gFootnoteGroups
+End Function
+
+' Generate plain-text report
+Public Function GenerateTextReport(issues As Collection, _
+                                    filePath As String, _
+                                    Optional doc As Document = Nothing) As String
+    TraceEnter "GenerateTextReport"
+    Dim fileNum As Integer
+    Dim i As Long
+
+    ' Resolve document name
+    Dim docName As String
+    On Error Resume Next
+    If Not doc Is Nothing Then
+        docName = doc.Name
+    Else
+        docName = "(no document)"
+    End If
+    If Err.Number <> 0 Then docName = "(unknown)": Err.Clear
+    On Error GoTo 0
+
+    fileNum = FreeFile
+    On Error Resume Next
+    Open filePath For Output As #fileNum
+    If Err.Number <> 0 Then
+        GenerateTextReport = "Error: could not write to " & filePath
+        Err.Clear
+        On Error GoTo 0
+        Exit Function
+    End If
+    On Error GoTo 0
+
+    On Error GoTo TxtReportErr
+
+    ' ASCII art header
+    Print #fileNum, "============================================================"
+    Print #fileNum, "  ____       _               _   _       "
+    Print #fileNum, " |  _ \ ___ | |__   ___ _ __| |_( )___   "
+    Print #fileNum, " | |_) / _ \| '_ \ / _ \ '__| __|// __| "
+    Print #fileNum, " |  _ < (_) | |_) |  __/ |  | |_  \__ \ "
+    Print #fileNum, " |_| \_\___/|_.__/ \___|_|   \__| |___/  "
+    Print #fileNum, "  __  __                              "
+    Print #fileNum, " |  \/  | __ _  ___ _ __ ___  ___     "
+    Print #fileNum, " | |\/| |/ _` |/ __| '__/ _ \/ __|    "
+    Print #fileNum, " | |  | | (_| | (__| | | (_) \__ \    "
+    Print #fileNum, " |_|  |_|\__,_|\___|_|  \___/|___/    "
+    Print #fileNum, ""
+    Print #fileNum, "  PLEADINGS CHECKER REPORT"
+    Print #fileNum, "============================================================"
+    Print #fileNum, ""
+    Print #fileNum, "Document:  " & docName
+    Print #fileNum, "Date:      " & Format(Now, "yyyy-mm-dd hh:nn:ss")
+
+    Dim prStr As String
+    prStr = pageRangeString
+    If Len(prStr) = 0 Then prStr = "all"
+    Print #fileNum, "Pages:     " & prStr
+    Print #fileNum, "Issues:    " & issues.Count
+    Print #fileNum, ""
+
+    ' -- Grouped Spelling Section --
+    If gGroupedSpellingCount > 0 Then
+        Print #fileNum, "============================================================"
+        Print #fileNum, "  SPELLING (" & gGroupedSpellingCount & " occurrences, " & _
+                        gSpellingGroups.Count & " unique pairs)"
+        Print #fileNum, "============================================================"
+        Dim spKeys As Variant
+        spKeys = gSpellingGroups.keys
+        Dim sk As Long
+        For sk = 0 To gSpellingGroups.Count - 1
+            Dim pairParts() As String
+            pairParts = Split(CStr(spKeys(sk)), "|")
+            Dim spWrong As String, spRight As String
+            spWrong = pairParts(0)
+            If UBound(pairParts) >= 1 Then spRight = pairParts(1) Else spRight = "?"
+            Print #fileNum, "  " & spWrong & " -> " & spRight & _
+                            "  (" & gSpellingGroups(spKeys(sk)) & " occurrences)"
+            If gSpellingExamples.Exists(CStr(spKeys(sk))) Then
+                Dim exLocs() As String
+                exLocs = Split(CStr(gSpellingExamples(spKeys(sk))), "|")
+                Dim ex As Long
+                For ex = 0 To UBound(exLocs)
+                    Print #fileNum, "    - " & exLocs(ex)
+                Next ex
+            End If
+        Next sk
+        Print #fileNum, ""
+    End If
+
+    ' -- Grouped Footnote Section --
+    If gGroupedFootnoteCount > 0 Then
+        Print #fileNum, "============================================================"
+        Print #fileNum, "  FOOTNOTES (" & gGroupedFootnoteCount & " findings)"
+        Print #fileNum, "============================================================"
+        Dim fnKeys As Variant
+        fnKeys = gFootnoteGroups.keys
+        Dim fk As Long
+        For fk = 0 To gFootnoteGroups.Count - 1
+            Dim fnGrp As Object
+            Set fnGrp = gFootnoteGroups(fnKeys(fk))
+            Print #fileNum, "  " & CStr(fnGrp("IssueText"))
+            Print #fileNum, "    Count: " & CStr(fnGrp("Count"))
+            Dim fnLocs() As String
+            fnLocs = Split(CStr(fnGrp("Locations")), "|")
+            Dim fl As Long
+            For fl = 0 To UBound(fnLocs)
+                If fl < 5 Then Print #fileNum, "    - " & fnLocs(fl)
+            Next fl
+            If UBound(fnLocs) >= 5 Then
+                Print #fileNum, "    ... and " & (UBound(fnLocs) - 4) & " more"
+            End If
+        Next fk
+        Print #fileNum, ""
+    End If
+
+    ' -- By UI label --
+    Print #fileNum, "============================================================"
+    Print #fileNum, "  ALL FINDINGS BY TYPE"
+    Print #fileNum, "============================================================"
+
+    ' Group by UI label
+    Dim uiGroups As Object
+    Set uiGroups = CreateObject("Scripting.Dictionary")
+    For i = 1 To issues.Count
+        Dim uiLbl As String
+        uiLbl = GetUILabel(CStr(GetIssueProp(issues(i), "RuleName")))
+        If Not uiGroups.Exists(uiLbl) Then
+            Dim grpColl As Collection
+            Set grpColl = New Collection
+            Set uiGroups(uiLbl) = grpColl
+        End If
+        Dim theGroup As Collection
+        Set theGroup = uiGroups(uiLbl)
+        theGroup.Add issues(i)
+    Next i
+
+    Dim uiKeys As Variant
+    uiKeys = uiGroups.keys
+    Dim uk As Long
+    For uk = 0 To uiGroups.Count - 1
+        Dim labelGroup As Collection
+        Set labelGroup = uiGroups(uiKeys(uk))
+        Print #fileNum, ""
+        Print #fileNum, "--- " & CStr(uiKeys(uk)) & " (" & labelGroup.Count & ") ---"
+        Dim gi As Long
+        Dim maxItems As Long
+        maxItems = labelGroup.Count
+        If maxItems > 50 Then maxItems = 50
+        For gi = 1 To maxItems
+            Dim gFinding As Object
+            Set gFinding = labelGroup(gi)
+            Print #fileNum, "  [" & CStr(GetIssueProp(gFinding, "Location")) & "] " & _
+                            CStr(GetIssueProp(gFinding, "Issue"))
+        Next gi
+        If labelGroup.Count > 50 Then
+            Print #fileNum, "  ... and " & (labelGroup.Count - 50) & " more"
+        End If
+    Next uk
+
+    Print #fileNum, ""
+    Print #fileNum, "============================================================"
+    Print #fileNum, "  END OF REPORT"
+    Print #fileNum, "============================================================"
+
+    Close #fileNum
+    GenerateTextReport = "Text report saved: " & filePath
+    TraceExit "GenerateTextReport"
+    Exit Function
+
+TxtReportErr:
+    On Error Resume Next
+    Close #fileNum
+    On Error GoTo 0
+    GenerateTextReport = "Error writing text report: Err " & Err.Number & ": " & Err.Description
+    TraceExit "GenerateTextReport", "FAILED"
+End Function
+
+' Print debug summary to Immediate window
+Public Sub PrintDebugSummary(ByVal issues As Collection)
+    Debug.Print "=== PLEADINGS CHECKER DEBUG SUMMARY ==="
+    Debug.Print "  Total issues:           " & issues.Count
+    Debug.Print "  Grouped spelling count:  " & gGroupedSpellingCount
+    Debug.Print "  Grouped footnote count:  " & gGroupedFootnoteCount
+    Debug.Print "  Comments created:        " & gCommentsCreated
+    Debug.Print "  Tracked edits applied:   " & gTrackedEditsApplied
+    Debug.Print "  Edits skipped (unsafe):  " & gEditsSkippedUnsafe
+    Debug.Print "  Top 5 slowest: " & GetTopSlowestRules(5)
+    Debug.Print "=== END DEBUG SUMMARY ==="
+End Sub
+
 ' ============================================================
 '  ENTRY POINT
 ' ============================================================
 Public Sub PleadingsChecker()
-    If ActiveDocument Is Nothing Then
-        MsgBox "Please open a document first.", vbExclamation, "Pleadings Checker"
-        Exit Sub
-    End If
     ' Show the UserForm; fall back to quick run if form not imported
     On Error Resume Next
     frmPleadingsChecker.Show
@@ -86,19 +523,109 @@ Public Sub PleadingsChecker()
 End Sub
 
 ' ============================================================
-'  QUICK RUN (fallback when launcher is not imported)
-'  Runs all available rules and shows summary via MsgBox.
+'  TARGET DOCUMENT SELECTION
+'  Lets the user choose which open document to check.
+'  Skips the macro host (ThisDocument) unless it's the only one.
+' ============================================================
+Public Function GetTargetDocument() As Document
+    Set GetTargetDocument = Nothing
+    Dim hostName As String
+    On Error Resume Next
+    hostName = ThisDocument.Name
+    If Err.Number <> 0 Then hostName = "": Err.Clear
+    On Error GoTo 0
+
+    ' Build list of candidate documents (skip macro host)
+    Dim candidates As New Collection
+    Dim doc As Document
+    For Each doc In Documents
+        If doc.Name <> hostName Then
+            candidates.Add doc
+        End If
+    Next doc
+
+    ' No candidates: check if host is the only document
+    If candidates.Count = 0 Then
+        If Documents.Count = 1 Then
+            ' Only the host is open -- confirm
+            Dim hostChoice As VbMsgBoxResult
+            hostChoice = MsgBox("The only open document is the macro host:" & vbCrLf & _
+                                hostName & vbCrLf & vbCrLf & _
+                                "Run the checker against this document?", _
+                                vbYesNo + vbQuestion, "Pleadings Checker")
+            If hostChoice = vbYes Then
+                Set GetTargetDocument = Documents(1)
+            End If
+        Else
+            MsgBox "No suitable target document is open." & vbCrLf & _
+                   "Please open the document you want to check.", _
+                   vbExclamation, "Pleadings Checker"
+        End If
+        Exit Function
+    End If
+
+    ' Single candidate: select automatically
+    If candidates.Count = 1 Then
+        Set GetTargetDocument = candidates(1)
+        Debug.Print "GetTargetDocument: auto-selected " & candidates(1).Name
+        Exit Function
+    End If
+
+    ' Multiple candidates: show picker
+    Dim prompt As String
+    prompt = "Select the document to check:" & vbCrLf & vbCrLf
+    Dim idx As Long
+    For idx = 1 To candidates.Count
+        prompt = prompt & idx & ". " & candidates(idx).Name & vbCrLf
+    Next idx
+
+    Dim selectionText As String
+    selectionText = InputBox(prompt, "Pleadings Checker - Select Document", "1")
+    If Len(Trim(selectionText)) = 0 Then Exit Function  ' cancelled
+
+    Dim chosen As Long
+    If IsNumeric(selectionText) Then
+        chosen = CLng(selectionText)
+        If chosen >= 1 And chosen <= candidates.Count Then
+            Set GetTargetDocument = candidates(chosen)
+        Else
+            MsgBox "Invalid selection.", vbExclamation, "Pleadings Checker"
+        End If
+    Else
+        MsgBox "Invalid selection.", vbExclamation, "Pleadings Checker"
+    End If
+End Function
+
+' ============================================================
+'  QUICK RUN (fallback when launcher/form is not imported)
+'  Prompts for target document via GetTargetDocument(), then
+'  asks for an optional page range before running all rules
+'  with UK spelling.  Shows summary via MsgBox.
 ' ============================================================
 Public Sub RunQuick()
     TraceEnter "RunQuick"
-    DebugLogDoc "RunQuick target", ActiveDocument
+    Dim targetDoc As Document
+    Set targetDoc = GetTargetDocument()
+    If targetDoc Is Nothing Then
+        TraceExit "RunQuick", "no target selected"
+        Exit Sub
+    End If
+    DebugLogDoc "RunQuick target", targetDoc
+    Debug.Print "RunQuick: macro host=" & ThisDocument.Name & " target=" & targetDoc.Name
+
     Dim cfg As Object
     Set cfg = InitRuleConfig()
-    SetPageRange 0, 0
+
+    ' Prompt for page range (blank = all pages)
+    Dim pgInput As String
+    pgInput = InputBox("Page range (e.g. 1,3,5-8) or blank for all pages:", _
+                        "Pleadings Checker - Page Range", "")
+    SetPageRangeFromString Trim(pgInput)
+
     SetSpellingMode "UK"
 
     Dim issues As Collection
-    Set issues = RunAllPleadingsRules(ActiveDocument, cfg)
+    Set issues = RunAllPleadingsRules(targetDoc, cfg)
 
     Dim summary As String
     summary = GetIssueSummary(issues)
@@ -107,7 +634,7 @@ Public Sub RunQuick()
         MsgBox "No issues found.", vbInformation, "Pleadings Checker"
     Else
         MsgBox summary, vbInformation, "Pleadings Checker"
-        ApplySuggestionsAsTrackedChanges ActiveDocument, issues, True
+        ApplySuggestionsAsTrackedChanges targetDoc, issues, True
     End If
     TraceExit "RunQuick", issues.Count & " issues"
 End Sub
@@ -205,44 +732,39 @@ Public Function GetSpaceStylePref() As String
 End Function
 
 ' ============================================================
+'  NON-ENGLISH TERMS FORMAT PREFERENCE (italics or regular text)
+' ============================================================
+Public Sub SetNonEngTermPref(ByVal mode As String)
+    nonEngTermPref = UCase(Trim(mode))
+    If nonEngTermPref <> "REGULAR" Then nonEngTermPref = "ITALICS"
+End Sub
+
+Public Function GetNonEngTermPref() As String
+    If Len(nonEngTermPref) = 0 Then nonEngTermPref = "ITALICS"
+    GetNonEngTermPref = nonEngTermPref
+End Function
+
+' ============================================================
 '  RULE CONFIGURATION
 ' ============================================================
 Public Function InitRuleConfig() As Object
     Dim cfg As Object
     Set cfg = CreateObject("Scripting.Dictionary")
 
-    cfg.Add "spelling", True
+    cfg.Add "spellchecker", True
     cfg.Add "repeated_words", True
-    cfg.Add "sequential_numbering", True
-    cfg.Add "heading_capitalisation", True
     cfg.Add "custom_term_whitelist", True
-    cfg.Add "defined_terms", True
-    cfg.Add "clause_number_format", True
     cfg.Add "date_time_format", True
-    cfg.Add "list_rules", True
-    cfg.Add "formatting_consistency", True
-    cfg.Add "licence_license", True
-    cfg.Add "check_cheque", True
-    cfg.Add "slash_style", True
-    cfg.Add "dash_usage", True
-    cfg.Add "bracket_integrity", True
-    cfg.Add "quotation_mark_consistency", True
+    cfg.Add "punctuation", True
     cfg.Add "currency_number_format", True
     cfg.Add "footnote_rules", True
-    cfg.Add "title_formatting", True
+    cfg.Add "duplicate_footnotes", False
     cfg.Add "brand_name_enforcement", True
     cfg.Add "mandated_legal_term_forms", True
     cfg.Add "always_capitalise_terms", True
-    cfg.Add "known_anglicised_terms_not_italic", True
-    cfg.Add "foreign_names_not_italic", True
-    cfg.Add "single_quotes_default", True
-    cfg.Add "smart_quote_consistency", True
+    cfg.Add "non_english_terms", True
     cfg.Add "spell_out_under_ten", True
     cfg.Add "double_spaces", True
-    cfg.Add "double_commas", True
-    cfg.Add "space_before_punct", True
-    cfg.Add "missing_space_after_dot", True
-    cfg.Add "trailing_spaces", True
 
     Set InitRuleConfig = cfg
 End Function
@@ -428,20 +950,212 @@ Private Sub BuildParagraphCache(doc As Document)
     ReDim paraStartPos(0 To cap - 1)
     paraStartCount = 0
 
+    ' -- Region cache initialisation --
+    Const BODY_TEXT_MIN_LEN As Long = 200
+    coverPageEnd = -1
+
+    Dim bqCap As Long: bqCap = 64
+    ReDim bqStarts(0 To bqCap - 1)
+    ReDim bqEnds(0 To bqCap - 1)
+    bqCount = 0
+
+    Dim tocCap As Long: tocCap = 16
+    ReDim tocStarts(0 To tocCap - 1)
+    ReDim tocEnds(0 To tocCap - 1)
+    tocCount = 0
+
+    ' -- Collect TOC field ranges first (separate from paragraph scan) --
+    On Error Resume Next
+    Dim toc As TableOfContents
+    For Each toc In doc.TablesOfContents
+        Err.Clear
+        Dim tocRng As Range
+        Set tocRng = toc.Range
+        If Err.Number = 0 Then
+            If tocCount >= tocCap Then
+                tocCap = tocCap * 2
+                ReDim Preserve tocStarts(0 To tocCap - 1)
+                ReDim Preserve tocEnds(0 To tocCap - 1)
+            End If
+            tocStarts(tocCount) = tocRng.Start
+            tocEnds(tocCount) = tocRng.End
+            tocCount = tocCount + 1
+        Else
+            Err.Clear
+        End If
+    Next toc
+    On Error GoTo 0
+
+    ' -- Smart-quote multi-paragraph tracking --
+    Dim insideMultiParaQuote As Boolean
+    insideMultiParaQuote = False
+
+    ' -- Single pass over all paragraphs --
     On Error Resume Next
     For Each para In doc.Paragraphs
+        Err.Clear
+
+        ' Cache paragraph start position
         If paraStartCount >= cap Then
             cap = cap * 2
             ReDim Preserve paraStartPos(0 To cap - 1)
         End If
-        paraStartPos(paraStartCount) = para.Range.Start
+        Dim pStart As Long, pEnd As Long
+        pStart = para.Range.Start
+        pEnd = para.Range.End
+        If Err.Number <> 0 Then Err.Clear: GoTo NextCachePara
+        paraStartPos(paraStartCount) = pStart
         paraStartCount = paraStartCount + 1
+
+        ' -- Cover page detection --
+        If coverPageEnd < 0 Then
+            Dim cpText As String
+            cpText = ""
+            cpText = para.Range.Text
+            If Err.Number <> 0 Then cpText = "": Err.Clear
+            If Len(cpText) > 0 Then
+                If Right$(cpText, 1) = vbCr Or Right$(cpText, 1) = Chr(13) Then
+                    cpText = Left$(cpText, Len(cpText) - 1)
+                End If
+            End If
+            Dim cleanCpText As String
+            cleanCpText = Replace(Replace(Replace(cpText, vbLf, ""), vbVerticalTab, ""), Chr(11), "")
+            If Len(cleanCpText) > BODY_TEXT_MIN_LEN Then
+                coverPageEnd = pStart
+            End If
+        End If
+
+        ' -- TOC paragraph detection (style-based and pattern-based) --
+        Dim tocSn As String
+        tocSn = ""
+        tocSn = LCase(para.Style.NameLocal)
+        If Err.Number <> 0 Then tocSn = "": Err.Clear
+        Dim isTocPara As Boolean
+        isTocPara = False
+        If InStr(tocSn, "toc") > 0 Or InStr(tocSn, "table of contents") > 0 Or _
+           InStr(tocSn, "contents") > 0 Then
+            isTocPara = True
+        End If
+        If Not isTocPara Then
+            Dim tocParaText As String
+            tocParaText = ""
+            tocParaText = para.Range.Text
+            If Err.Number <> 0 Then tocParaText = "": Err.Clear
+            If Len(tocParaText) > 3 Then
+                If tocParaText Like "*[." & vbTab & "][." & vbTab & "]*#" & vbCr Or _
+                   tocParaText Like "*[." & vbTab & "][." & vbTab & "]*#" Then
+                    isTocPara = True
+                End If
+            End If
+        End If
+        If isTocPara Then
+            If tocCount >= tocCap Then
+                tocCap = tocCap * 2
+                ReDim Preserve tocStarts(0 To tocCap - 1)
+                ReDim Preserve tocEnds(0 To tocCap - 1)
+            End If
+            tocStarts(tocCount) = pStart
+            tocEnds(tocCount) = pEnd
+            tocCount = tocCount + 1
+        End If
+
+        ' -- Block-quote detection using canonical IsBlockQuotePara --
+        Dim isBQ As Boolean
+        isBQ = False
+
+        ' Try canonical IsBlockQuotePara via Application.Run
+        Dim bqResult As Boolean
+        bqResult = False
+        bqResult = Application.Run("Rules_Formatting.IsBlockQuotePara", para)
+        If Err.Number <> 0 Then
+            ' Module not imported -- fall back to style-name-only check
+            Err.Clear
+            Dim fallbackSn As String
+            fallbackSn = ""
+            fallbackSn = LCase(para.Style.NameLocal)
+            If Err.Number <> 0 Then fallbackSn = "": Err.Clear
+            If InStr(fallbackSn, "quote") > 0 Or InStr(fallbackSn, "block") > 0 Or _
+               InStr(fallbackSn, "extract") > 0 Then
+                bqResult = True
+            End If
+        End If
+        isBQ = bqResult
+
+        ' -- Multi-paragraph smart-quote detection --
+        Dim pText As String
+        pText = ""
+        pText = para.Range.Text
+        If Err.Number <> 0 Then pText = "": Err.Clear
+        pText = Replace(Replace(Replace(pText, vbCr, ""), vbTab, ""), ChrW(160), "")
+        pText = Trim$(pText)
+
+        If Not isBQ Then
+            If Len(pText) > 2 Then
+                Dim firstCh As Long, lastCh As Long
+                Dim trimmed As String
+                firstCh = AscW(Left(pText, 1))
+                trimmed = pText
+                If Right(trimmed, 1) = vbCr Or Right(trimmed, 1) = vbLf Then
+                    trimmed = Left(trimmed, Len(trimmed) - 1)
+                End If
+                If Len(trimmed) > 1 Then
+                    lastCh = AscW(Right(trimmed, 1))
+                    ' Single-paragraph quote
+                    If (firstCh = 8220 And lastCh = 8221) Then isBQ = True
+                    If (firstCh = 34 And lastCh = 34) Then isBQ = True
+                    ' Start of multi-paragraph quote (opens but doesn't close)
+                    If Not isBQ And Not insideMultiParaQuote Then
+                        If (firstCh = 8220 And lastCh <> 8221) Or _
+                           (firstCh = 34 And lastCh <> 34) Then
+                            insideMultiParaQuote = True
+                            isBQ = True
+                        End If
+                    End If
+                End If
+            End If
+        End If
+
+        ' If inside a multi-paragraph quote, mark as block quote
+        If insideMultiParaQuote And Not isBQ Then
+            isBQ = True
+        End If
+
+        ' Check if this paragraph ends the multi-paragraph quote
+        If insideMultiParaQuote And Len(pText) > 1 Then
+            Dim endTrimmed As String
+            endTrimmed = pText
+            If Right(endTrimmed, 1) = vbCr Or Right(endTrimmed, 1) = vbLf Then
+                endTrimmed = Left(endTrimmed, Len(endTrimmed) - 1)
+            End If
+            If Len(endTrimmed) > 0 Then
+                Dim endCh As Long
+                endCh = AscW(Right(endTrimmed, 1))
+                If endCh = 8221 Or endCh = 34 Then
+                    insideMultiParaQuote = False
+                End If
+            End If
+        End If
+
+        If isBQ Then
+            If bqCount >= bqCap Then
+                bqCap = bqCap * 2
+                ReDim Preserve bqStarts(0 To bqCap - 1)
+                ReDim Preserve bqEnds(0 To bqCap - 1)
+            End If
+            bqStarts(bqCount) = pStart
+            bqEnds(bqCount) = pEnd
+            bqCount = bqCount + 1
+        End If
+
+NextCachePara:
     Next para
     On Error GoTo 0
 
     paraCacheValid = True
     PerfTimerEnd "BuildParagraphCache"
     PerfCount "paragraphs_cached", paraStartCount
+    PerfCount "block_quote_regions", bqCount
+    PerfCount "toc_regions", tocCount
 End Sub
 
 Private Function FindParagraphIndex(ByVal pos As Long) As Long
@@ -479,6 +1193,156 @@ Private Function FindParagraphIndex(ByVal pos As Long) As Long
 
     FindParagraphIndex = lo + 1  ' 1-based
 End Function
+
+' ============================================================
+'  CONSOLIDATED PARAGRAPH-LEVEL RULE RUNNER
+'  Iterates doc.Paragraphs exactly once and dispatches to all
+'  paragraph-level rule handlers that are enabled in the config.
+'  Each handler receives the paragraph's Range, text, start
+'  position, and list-prefix length, and appends issues to the
+'  shared collection.
+' ============================================================
+Public Sub RunParagraphRules(doc As Document, config As Object, _
+                              ByRef allIssues As Collection)
+    PerfTimerStart "paragraph_rules_combined"
+    TraceStep "RunParagraphRules", "starting consolidated paragraph pass"
+
+    ' -- Build list of enabled handlers --------------------------
+    ' Each entry is the fully qualified name for Application.Run
+    Dim handlers() As String
+    Dim hCount As Long
+    hCount = 0
+    ReDim handlers(0 To 15)
+
+    ' Repeated words
+    If IsRuleEnabled(config, "repeated_words") Then
+        handlers(hCount) = "Rules_TextScan.ProcessParagraph_RepeatedWords"
+        hCount = hCount + 1
+    End If
+    ' Spell out under ten
+    If IsRuleEnabled(config, "spell_out_under_ten") Then
+        handlers(hCount) = "Rules_TextScan.ProcessParagraph_SpellOutUnderTen"
+        hCount = hCount + 1
+    End If
+    ' Double spaces
+    If IsRuleEnabled(config, "double_spaces") Then
+        handlers(hCount) = "Rules_Spacing.ProcessParagraph_DoubleSpaces"
+        hCount = hCount + 1
+    End If
+    ' Punctuation sub-rules (all under "punctuation" toggle)
+    If IsRuleEnabled(config, "punctuation") Then
+        handlers(hCount) = "Rules_Punctuation.ProcessParagraph_TriplicatePunctuation"
+        hCount = hCount + 1
+        handlers(hCount) = "Rules_Punctuation.ProcessParagraph_DashUsage"
+        hCount = hCount + 1
+        handlers(hCount) = "Rules_Punctuation.ProcessParagraph_BracketIntegrity"
+        hCount = hCount + 1
+        handlers(hCount) = "Rules_Spacing.ProcessParagraph_DoubleCommas"
+        hCount = hCount + 1
+        handlers(hCount) = "Rules_Spacing.ProcessParagraph_MissingSpaceAfterDot"
+        hCount = hCount + 1
+    End If
+    ' Always capitalise terms
+    If IsRuleEnabled(config, "always_capitalise_terms") Then
+        handlers(hCount) = "Rules_LegalTerms.ProcessParagraph_AlwaysCapitalise"
+        hCount = hCount + 1
+    End If
+    ' Non-English terms (italics)
+    If IsRuleEnabled(config, "non_english_terms") Then
+        handlers(hCount) = "Rules_Italics.ProcessParagraph_AnglicisedTerms"
+        hCount = hCount + 1
+        handlers(hCount) = "Rules_Italics.ProcessParagraph_ForeignNames"
+        hCount = hCount + 1
+    End If
+
+    If hCount = 0 Then
+        PerfTimerEnd "paragraph_rules_combined"
+        Exit Sub
+    End If
+
+    ' -- Iterate paragraphs once ---------------------------------
+    Dim para As Paragraph
+    Dim paraRange As Range
+    Dim paraText As String
+    Dim paraStart As Long
+    Dim listPrefixLen As Long
+    Dim paraIssues As New Collection
+    Dim h As Long
+    Dim paraCount As Long
+    paraCount = 0
+
+    On Error Resume Next
+    For Each para In doc.Paragraphs
+        Err.Clear
+
+        Set paraRange = para.Range
+        If Err.Number <> 0 Then Err.Clear: GoTo NextParaRP
+        paraStart = paraRange.Start
+
+        ' Page-range filter
+        If IsPastPageFilter(paraStart) Then Exit For
+        If Not IsInPageRange(paraRange) Then GoTo NextParaRP
+
+        paraText = paraRange.Text
+        If Err.Number <> 0 Then Err.Clear: GoTo NextParaRP
+        If Len(paraText) = 0 Then GoTo NextParaRP
+
+        ' Calculate list prefix length
+        listPrefixLen = 0
+        Dim lStr As String
+        lStr = ""
+        lStr = para.Range.ListFormat.ListString
+        If Err.Number <> 0 Then lStr = "": Err.Clear
+        If Len(lStr) > 0 And Len(paraText) > Len(lStr) Then
+            If Left$(paraText, Len(lStr)) = lStr Then
+                listPrefixLen = Len(lStr)
+            End If
+        End If
+
+        ' Cancellation check every 50 paragraphs
+        paraCount = paraCount + 1
+        If paraCount Mod 50 = 0 Then
+            DoEvents
+            If gCancelRun Then
+                Err.Raise ERR_RUN_CANCELLED, "RunParagraphRules", "Run cancelled"
+            End If
+        End If
+
+        ' -- Dispatch to each enabled handler --------------------
+        For h = 0 To hCount - 1
+            Err.Clear
+            Application.Run handlers(h), doc, paraRange, paraText, _
+                paraStart, listPrefixLen, paraIssues
+            If Err.Number <> 0 Then
+                ' Handler not available or errored - skip silently
+                If Err.Number <> ERR_RUN_CANCELLED Then
+                    DebugLogError "RunParagraphRules", handlers(h), Err.Number, Err.Description
+                    Err.Clear
+                Else
+                    ' Re-raise cancellation
+                    Dim cancelErr As Long
+                    cancelErr = Err.Number
+                    On Error GoTo 0
+                    Err.Raise cancelErr, "RunParagraphRules", "Run cancelled"
+                End If
+            End If
+        Next h
+
+NextParaRP:
+    Next para
+    On Error GoTo 0
+
+    ' -- Merge paragraph issues into master collection -----------
+    Dim pi As Long
+    For pi = 1 To paraIssues.Count
+        allIssues.Add paraIssues(pi)
+    Next pi
+
+    PerfTimerEnd "paragraph_rules_combined"
+    PerfCount "paragraph_rules_paragraphs", paraCount
+    TraceStep "RunParagraphRules", "completed: " & paraCount & " paragraphs, " & _
+              paraIssues.Count & " issues from " & hCount & " handlers"
+End Sub
 
 ' ============================================================
 '  APPLICATION.RUN DISPATCHER
@@ -531,6 +1395,9 @@ Public Function RunAllPleadingsRules(doc As Document, _
     ' -- Initialise profiling --
     ResetProfiling
 
+    ' -- Initialise grouped report / comment suppression state --
+    InitGroupedReportState
+
     ' -- Capture and suppress screen redraws for performance ----
     Dim wasScreenUpdating As Boolean
     wasScreenUpdating = Application.ScreenUpdating
@@ -541,6 +1408,9 @@ Public Function RunAllPleadingsRules(doc As Document, _
     ' -- Build paragraph position cache (one scan, enables O(log N) lookups) --
     BuildParagraphCache doc
 
+    ' -- Precompute page-range character boundaries (one-time, cheap thereafter) --
+    InitPageFilter doc
+
     ' -- Whitelist rule first (populates whitelistDict) --
     If IsRuleEnabled(config, "custom_term_whitelist") Then
         PerfTimerStart "custom_term_whitelist"
@@ -548,125 +1418,30 @@ Public Function RunAllPleadingsRules(doc As Document, _
             TryRunRule("Rules_Terms.Check_CustomTermWhitelist", doc)
         PerfTimerEnd "custom_term_whitelist"
     End If
-    DoEvents
+    CheckCancellation
 
-    ' -- Spelling (bidirectional UK/US) --
-    If IsRuleEnabled(config, "spelling") Then
-        PerfTimerStart "spelling"
+    ' -- Spellchecker (spelling + licence/license + check/cheque) --
+    If IsRuleEnabled(config, "spellchecker") Then
+        PerfTimerStart "spellchecker"
         AddIssuesToCollection allIssues, _
             TryRunRule("Rules_Spelling.Check_Spelling", doc)
-        PerfTimerEnd "spelling"
+        AddIssuesToCollection allIssues, _
+            TryRunRule("Rules_Spelling.Check_LicenceLicense", doc)
+        AddIssuesToCollection allIssues, _
+            TryRunRule("Rules_Spelling.Check_CheckCheque", doc)
+        PerfTimerEnd "spellchecker"
     End If
 
-    DoEvents
-    ' -- Text scanning rules --
-    If IsRuleEnabled(config, "repeated_words") Then
-        PerfTimerStart "repeated_words"
-        AddIssuesToCollection allIssues, _
-            TryRunRule("Rules_TextScan.Check_RepeatedWords", doc)
-        PerfTimerEnd "repeated_words"
-    End If
+    CheckCancellation
+    ' -- Consolidated paragraph-level rules (single pass) ----------
+    ' Handles: repeated_words, spell_out_under_ten, double_spaces,
+    '          triplicate_punctuation, dash_usage, bracket_integrity,
+    '          double_commas, missing_space_after_dot,
+    '          always_capitalise_terms, non_english_terms (anglicised + foreign)
+    RunParagraphRules doc, config, allIssues
 
-    If IsRuleEnabled(config, "spell_out_under_ten") Then
-        PerfTimerStart "spell_out_under_ten"
-        AddIssuesToCollection allIssues, _
-            TryRunRule("Rules_TextScan.Check_SpellOutUnderTen", doc)
-        PerfTimerEnd "spell_out_under_ten"
-    End If
-
-    DoEvents
-    ' -- Spacing rules --
-    If IsRuleEnabled(config, "double_spaces") Then
-        PerfTimerStart "double_spaces"
-        AddIssuesToCollection allIssues, _
-            TryRunRule("Rules_Spacing.Check_DoubleSpaces", doc)
-        PerfTimerEnd "double_spaces"
-    End If
-
-    If IsRuleEnabled(config, "double_commas") Then
-        PerfTimerStart "double_commas"
-        AddIssuesToCollection allIssues, _
-            TryRunRule("Rules_Spacing.Check_DoubleCommas", doc)
-        PerfTimerEnd "double_commas"
-    End If
-
-    If IsRuleEnabled(config, "space_before_punct") Then
-        PerfTimerStart "space_before_punct"
-        AddIssuesToCollection allIssues, _
-            TryRunRule("Rules_Spacing.Check_SpaceBeforePunct", doc)
-        PerfTimerEnd "space_before_punct"
-    End If
-
-    If IsRuleEnabled(config, "missing_space_after_dot") Then
-        PerfTimerStart "missing_space_after_dot"
-        AddIssuesToCollection allIssues, _
-            TryRunRule("Rules_Spacing.Check_MissingSpaceAfterDot", doc)
-        PerfTimerEnd "missing_space_after_dot"
-    End If
-
-    If IsRuleEnabled(config, "trailing_spaces") Then
-        PerfTimerStart "trailing_spaces"
-        AddIssuesToCollection allIssues, _
-            TryRunRule("Rules_Spacing.Check_TrailingSpaces", doc)
-        PerfTimerEnd "trailing_spaces"
-    End If
-
-    DoEvents
-    ' -- Numbering rules --
-    If IsRuleEnabled(config, "sequential_numbering") Then
-        PerfTimerStart "sequential_numbering"
-        AddIssuesToCollection allIssues, _
-            TryRunRule("Rules_Numbering.Check_SequentialNumbering", doc)
-        PerfTimerEnd "sequential_numbering"
-    End If
-
-    If IsRuleEnabled(config, "clause_number_format") Then
-        PerfTimerStart "clause_number_format"
-        AddIssuesToCollection allIssues, _
-            TryRunRule("Rules_Numbering.Check_ClauseNumberFormat", doc)
-        PerfTimerEnd "clause_number_format"
-    End If
-
-    DoEvents
-    ' -- Heading rules --
-    If IsRuleEnabled(config, "heading_capitalisation") Then
-        PerfTimerStart "heading_capitalisation"
-        AddIssuesToCollection allIssues, _
-            TryRunRule("Rules_Headings.Check_HeadingCapitalisation", doc)
-        PerfTimerEnd "heading_capitalisation"
-    End If
-
-    If IsRuleEnabled(config, "title_formatting") Then
-        PerfTimerStart "title_formatting"
-        AddIssuesToCollection allIssues, _
-            TryRunRule("Rules_Headings.Check_TitleFormatting", doc)
-        PerfTimerEnd "title_formatting"
-    End If
-
-    DoEvents
-    ' -- Term rules --
-    If IsRuleEnabled(config, "defined_terms") Then
-        PerfTimerStart "defined_terms"
-        AddIssuesToCollection allIssues, _
-            TryRunRule("Rules_Terms.Check_DefinedTerms", doc)
-        PerfTimerEnd "defined_terms"
-    End If
-
-    DoEvents
-    ' -- Formatting consistency (combined: paragraph breaks, font, colour) --
-    If IsRuleEnabled(config, "formatting_consistency") Then
-        PerfTimerStart "formatting_consistency"
-        AddIssuesToCollection allIssues, _
-            TryRunRule("Rules_Formatting.Check_ParagraphBreakConsistency", doc)
-        AddIssuesToCollection allIssues, _
-            TryRunRule("Rules_Formatting.Check_FontConsistency", doc)
-        AddIssuesToCollection allIssues, _
-            TryRunRule("Rules_Spelling.Check_ColourFormatting", doc)
-        PerfTimerEnd "formatting_consistency"
-    End If
-
-    DoEvents
-    ' -- Number format rules --
+    CheckCancellation
+    ' -- Number format rules (Range.Find based, not paragraph-level) --
     If IsRuleEnabled(config, "date_time_format") Then
         PerfTimerStart "date_time_format"
         AddIssuesToCollection allIssues, _
@@ -681,115 +1456,18 @@ Public Function RunAllPleadingsRules(doc As Document, _
         PerfTimerEnd "currency_number_format"
     End If
 
-    DoEvents
-    ' -- List rules (combined: inline format, punctuation) --
-    If IsRuleEnabled(config, "list_rules") Then
-        PerfTimerStart "list_rules"
-        AddIssuesToCollection allIssues, _
-            TryRunRule("Rules_Lists.Check_InlineListFormat", doc)
-        AddIssuesToCollection allIssues, _
-            TryRunRule("Rules_Lists.Check_ListPunctuation", doc)
-        PerfTimerEnd "list_rules"
-    End If
-
-    DoEvents
-    ' -- UK/US variant rules (in Rules_Spelling) --
-    If IsRuleEnabled(config, "licence_license") Then
-        PerfTimerStart "licence_license"
-        AddIssuesToCollection allIssues, _
-            TryRunRule("Rules_Spelling.Check_LicenceLicense", doc)
-        PerfTimerEnd "licence_license"
-    End If
-
-    If IsRuleEnabled(config, "check_cheque") Then
-        PerfTimerStart "check_cheque"
-        AddIssuesToCollection allIssues, _
-            TryRunRule("Rules_Spelling.Check_CheckCheque", doc)
-        PerfTimerEnd "check_cheque"
-    End If
-
-    DoEvents
-    ' -- Punctuation rules --
-    If IsRuleEnabled(config, "slash_style") Then
-        PerfTimerStart "slash_style"
+    CheckCancellation
+    ' -- Non-paragraph punctuation rules (Range.Find based) --------
+    If IsRuleEnabled(config, "punctuation") Then
+        PerfTimerStart "punctuation_find"
         AddIssuesToCollection allIssues, _
             TryRunRule("Rules_Punctuation.Check_SlashStyle", doc)
-        PerfTimerEnd "slash_style"
-    End If
-
-    If IsRuleEnabled(config, "bracket_integrity") Then
-        PerfTimerStart "bracket_integrity"
         AddIssuesToCollection allIssues, _
-            TryRunRule("Rules_Punctuation.Check_BracketIntegrity", doc)
-        PerfTimerEnd "bracket_integrity"
+            TryRunRule("Rules_Spacing.Check_SpaceBeforePunct", doc)
+        PerfTimerEnd "punctuation_find"
     End If
 
-    If IsRuleEnabled(config, "dash_usage") Then
-        PerfTimerStart "dash_usage"
-        AddIssuesToCollection allIssues, _
-            TryRunRule("Rules_Punctuation.Check_DashUsage", doc)
-        PerfTimerEnd "dash_usage"
-    End If
-
-    DoEvents
-    ' -- Quote rules --
-    If IsRuleEnabled(config, "quotation_mark_consistency") Then
-        PerfTimerStart "quotation_mark_consistency"
-        AddIssuesToCollection allIssues, _
-            TryRunRule("Rules_Quotes.Check_QuotationMarkConsistency", doc)
-        PerfTimerEnd "quotation_mark_consistency"
-    End If
-
-    If IsRuleEnabled(config, "single_quotes_default") Then
-        PerfTimerStart "single_quotes_default"
-        AddIssuesToCollection allIssues, _
-            TryRunRule("Rules_Quotes.Check_SingleQuotesDefault", doc)
-        PerfTimerEnd "single_quotes_default"
-    End If
-
-    If IsRuleEnabled(config, "smart_quote_consistency") Then
-        PerfTimerStart "smart_quote_consistency"
-        AddIssuesToCollection allIssues, _
-            TryRunRule("Rules_Quotes.Check_SmartQuoteConsistency", doc)
-        PerfTimerEnd "smart_quote_consistency"
-    End If
-
-    ' -- Dedupe overlapping quote-rule findings --
-    ' The three quote rules can flag the same character position independently.
-    ' Keep the first finding per RangeStart+RangeEnd and discard later duplicates.
-    If allIssues.Count > 0 Then
-        Dim quoteRules As Object
-        Set quoteRules = CreateObject("Scripting.Dictionary")
-        quoteRules.Add "quotation_mark_consistency", True
-        quoteRules.Add "single_quotes_default", True
-        quoteRules.Add "smart_quote_consistency", True
-
-        Dim seenQuoteKeys As Object
-        Set seenQuoteKeys = CreateObject("Scripting.Dictionary")
-        Dim dedupedIssues As New Collection
-        Dim iss As Variant
-        Dim posKey As String
-
-        For Each iss In allIssues
-            If quoteRules.Exists(GetIssueProp(iss, "RuleName")) Then
-                posKey = GetIssueProp(iss, "RangeStart") & "|" & _
-                         GetIssueProp(iss, "RangeEnd")
-                If Not seenQuoteKeys.Exists(posKey) Then
-                    seenQuoteKeys.Add posKey, GetIssueProp(iss, "RuleName")
-                    dedupedIssues.Add iss
-                End If
-                ' If posKey already seen (from a different quote rule), skip
-            Else
-                dedupedIssues.Add iss
-            End If
-        Next iss
-
-        Set allIssues = dedupedIssues
-        Set seenQuoteKeys = Nothing
-        Set quoteRules = Nothing
-    End If
-
-    DoEvents
+    CheckCancellation
     ' -- Footnote rules (combined: integrity, not-endnotes, Hart's rules) --
     If IsRuleEnabled(config, "footnote_rules") Then
         PerfTimerStart "footnote_rules"
@@ -806,7 +1484,16 @@ Public Function RunAllPleadingsRules(doc As Document, _
         PerfTimerEnd "footnote_rules"
     End If
 
-    DoEvents
+    CheckCancellation
+    ' -- Duplicate footnotes (separate toggle, final-pass check) --
+    If IsRuleEnabled(config, "duplicate_footnotes") Then
+        PerfTimerStart "duplicate_footnotes"
+        AddIssuesToCollection allIssues, _
+            TryRunRule("Rules_FootnoteIntegrity.Check_DuplicateFootnotes", doc)
+        PerfTimerEnd "duplicate_footnotes"
+    End If
+
+    CheckCancellation
     ' -- Brand names --
     If IsRuleEnabled(config, "brand_name_enforcement") Then
         PerfTimerStart "brand_name_enforcement"
@@ -815,8 +1502,8 @@ Public Function RunAllPleadingsRules(doc As Document, _
         PerfTimerEnd "brand_name_enforcement"
     End If
 
-    DoEvents
-    ' -- Legal term rules --
+    CheckCancellation
+    ' -- Mandated legal term forms (Range.Find based, not paragraph-level) --
     If IsRuleEnabled(config, "mandated_legal_term_forms") Then
         PerfTimerStart "mandated_legal_term_forms"
         AddIssuesToCollection allIssues, _
@@ -824,35 +1511,22 @@ Public Function RunAllPleadingsRules(doc As Document, _
         PerfTimerEnd "mandated_legal_term_forms"
     End If
 
-    If IsRuleEnabled(config, "always_capitalise_terms") Then
-        PerfTimerStart "always_capitalise_terms"
-        AddIssuesToCollection allIssues, _
-            TryRunRule("Rules_LegalTerms.Check_AlwaysCapitaliseTerms", doc)
-        PerfTimerEnd "always_capitalise_terms"
-    End If
-
-    DoEvents
-    ' -- Italic rules --
-    If IsRuleEnabled(config, "known_anglicised_terms_not_italic") Then
-        PerfTimerStart "anglicised_terms_not_italic"
-        AddIssuesToCollection allIssues, _
-            TryRunRule("Rules_Italics.Check_AnglicisedTermsNotItalic", doc)
-        PerfTimerEnd "anglicised_terms_not_italic"
-    End If
-
-    If IsRuleEnabled(config, "foreign_names_not_italic") Then
-        PerfTimerStart "foreign_names_not_italic"
-        AddIssuesToCollection allIssues, _
-            TryRunRule("Rules_Italics.Check_ForeignNamesNotItalic", doc)
-        PerfTimerEnd "foreign_names_not_italic"
-    End If
-
 RunnerCleanup:
+    ' -- Check if we got here via cancellation --
+    Dim wasCancelled As Boolean
+    wasCancelled = (Err.Number = ERR_RUN_CANCELLED)
+    If wasCancelled Then Err.Clear
+
     ' -- Restore application state (always runs) ----------------
     On Error Resume Next
     Application.ScreenUpdating = wasScreenUpdating
     Application.StatusBar = False   ' restore default status bar
     On Error GoTo 0
+
+    ' -- Re-raise cancellation so caller can handle it --
+    If wasCancelled Then
+        Err.Raise ERR_RUN_CANCELLED, "PleadingsEngine", "Run cancelled"
+    End If
 
     ' -- Filter out issues inside block quotes / quoted text -----
     On Error Resume Next
@@ -867,12 +1541,19 @@ RunnerCleanup:
     PerfTimerEnd "FilterBlockQuoteIssues"
     On Error GoTo 0
 
+    ' -- Build grouped report data (must happen after all filtering) --
+    BuildSpellingGroups allIssues
+    BuildFootnoteGroups allIssues
+
     ' -- Print performance summary --------------------------------
     If ENABLE_PROFILING Then
         Dim perfSummary As String
         perfSummary = GetPerformanceSummary()
         Debug.Print perfSummary
     End If
+
+    ' -- Print debug summary --------------------------------
+    PrintDebugSummary allIssues
 
     TraceStep "RunAllPleadingsRules", "total issues: " & allIssues.Count & _
               ", rule errors: " & ruleErrorCount
@@ -883,22 +1564,9 @@ End Function
 
 ' ============================================================
 '  FILTER: Remove issues inside block quotes, cover pages,
-'  and contents/table-of-contents pages
+'  and contents/table-of-contents pages.
 '
-'  Block quotes detected by:
-'    1. Style name containing "quote", "block", or "extract"
-'    2. Significant left indentation (> 36pt) with smaller font
-'    3. Paragraph text wrapped in quotation marks
-'
-'  Cover pages detected by:
-'    - Content before the first section break, OR
-'    - All page-1 content when the document has > 1 page and
-'      page 1 contains no numbered paragraphs
-'
-'  Contents pages detected by:
-'    - Word's built-in TOC field ranges
-'    - Paragraphs styled with "TOC" styles
-'    - Paragraphs containing dot/tab leaders followed by numbers
+'  Uses pre-built region arrays from BuildParagraphCache.
 ' ============================================================
 Private Function FilterBlockQuoteIssues(doc As Document, _
                                          issues As Collection) As Collection
@@ -907,287 +1575,7 @@ Private Function FilterBlockQuoteIssues(doc As Document, _
     Dim filtered As New Collection
     Dim i As Long
 
-    ' -- Determine cover page end position -------------------------
-    ' Skip all content before the first "body text" paragraph,
-    ' defined as the first paragraph whose plain text (without line
-    ' breaks) exceeds BODY_TEXT_MIN_LEN characters.  Everything
-    ' before that is treated as cover / title page.
-    Const BODY_TEXT_MIN_LEN As Long = 200
-    Dim coverPageEnd As Long
-    coverPageEnd = -1  ' -1 means no cover page detected
-
-    On Error Resume Next
-    Dim coverPara As Paragraph
-    For Each coverPara In doc.Paragraphs
-        Err.Clear
-        Dim cpText As String
-        cpText = ""
-        cpText = coverPara.Range.Text
-        If Err.Number <> 0 Then Err.Clear: GoTo NextCoverPara
-        ' Strip paragraph mark
-        If Len(cpText) > 0 Then
-            If Right$(cpText, 1) = vbCr Or Right$(cpText, 1) = Chr(13) Then
-                cpText = Left$(cpText, Len(cpText) - 1)
-            End If
-        End If
-        ' Strip any internal line breaks (vbLf, vertical tab, manual line break)
-        Dim cleanCpText As String
-        cleanCpText = Replace(Replace(Replace(cpText, vbLf, ""), vbVerticalTab, ""), Chr(11), "")
-        If Len(cleanCpText) > BODY_TEXT_MIN_LEN Then
-            ' This paragraph is the start of body text
-            coverPageEnd = coverPara.Range.Start
-            Exit For
-        End If
-NextCoverPara:
-    Next coverPara
-    On Error GoTo 0
-
-    ' -- Determine TOC / contents page ranges -----------------------
-    Dim tocStarts() As Long, tocEnds() As Long
-    Dim tocCount As Long, tocCap As Long
-    tocCap = 16
-    ReDim tocStarts(0 To tocCap - 1)
-    ReDim tocEnds(0 To tocCap - 1)
-    tocCount = 0
-
-    On Error Resume Next
-
-    ' Method 1: Word's built-in TOC fields
-    Dim toc As TableOfContents
-    For Each toc In doc.TablesOfContents
-        Err.Clear
-        Dim tocRng As Range
-        Set tocRng = toc.Range
-        If Err.Number = 0 Then
-            If tocCount >= tocCap Then
-                tocCap = tocCap * 2
-                ReDim Preserve tocStarts(0 To tocCap - 1)
-                ReDim Preserve tocEnds(0 To tocCap - 1)
-            End If
-            tocStarts(tocCount) = tocRng.Start
-            tocEnds(tocCount) = tocRng.End
-            tocCount = tocCount + 1
-        Else
-            Err.Clear
-        End If
-    Next toc
-
-    ' Method 2: Scan for TOC-styled paragraphs (catches manual TOCs)
-    Dim tocPara As Paragraph
-    For Each tocPara In doc.Paragraphs
-        Err.Clear
-        Dim tocSn As String
-        tocSn = ""
-        tocSn = LCase(tocPara.Style.NameLocal)
-        If Err.Number <> 0 Then tocSn = "": Err.Clear
-
-        Dim isTocPara As Boolean
-        isTocPara = False
-
-        ' Check style name for TOC indicators
-        If InStr(tocSn, "toc") > 0 Or InStr(tocSn, "table of contents") > 0 Or _
-           InStr(tocSn, "contents") > 0 Then
-            isTocPara = True
-        End If
-
-        ' Check for dot/tab leader pattern: text followed by dots/tabs then page number
-        If Not isTocPara Then
-            Dim tocParaText As String
-            tocParaText = ""
-            tocParaText = tocPara.Range.Text
-            If Err.Number <> 0 Then tocParaText = "": Err.Clear
-            If Len(tocParaText) > 3 Then
-                ' Pattern: dots or tabs followed by digits at end of line
-                If tocParaText Like "*[." & vbTab & "][." & vbTab & "]*#" & vbCr Or _
-                   tocParaText Like "*[." & vbTab & "][." & vbTab & "]*#" Then
-                    isTocPara = True
-                End If
-            End If
-        End If
-
-        If isTocPara Then
-            Dim tpStart As Long, tpEnd As Long
-            tpStart = tocPara.Range.Start
-            tpEnd = tocPara.Range.End
-            If Err.Number = 0 Then
-                If tocCount >= tocCap Then
-                    tocCap = tocCap * 2
-                    ReDim Preserve tocStarts(0 To tocCap - 1)
-                    ReDim Preserve tocEnds(0 To tocCap - 1)
-                End If
-                tocStarts(tocCount) = tpStart
-                tocEnds(tocCount) = tpEnd
-                tocCount = tocCount + 1
-            Else
-                Err.Clear
-            End If
-        End If
-    Next tocPara
-    On Error GoTo 0
-
-    ' -- Build list of block-quote paragraph ranges ----------------
-    ' Detects block quotes via style name, indentation+smaller font,
-    ' or multi-paragraph smart-quote spans (open " on first para,
-    ' close " on last para — all paras in between are block-quoted).
-    Dim bqStarts() As Long, bqEnds() As Long
-    Dim bqCount As Long, bqCap As Long
-    bqCap = 64
-    ReDim bqStarts(0 To bqCap - 1)
-    ReDim bqEnds(0 To bqCap - 1)
-    bqCount = 0
-
-    Dim insideMultiParaQuote As Boolean
-    insideMultiParaQuote = False
-
-    On Error Resume Next
-    Dim para As Paragraph
-    For Each para In doc.Paragraphs
-        Err.Clear
-        Dim pStart As Long, pEnd As Long
-        pStart = para.Range.Start
-        pEnd = para.Range.End
-        If Err.Number <> 0 Then Err.Clear: GoTo NxtBQ
-
-        Dim isBQ As Boolean
-        isBQ = False
-
-        ' Check 1: Style name
-        Dim sn As String
-        sn = ""
-        sn = LCase(para.Style.NameLocal)
-        If Err.Number <> 0 Then sn = "": Err.Clear
-        If InStr(sn, "quote") > 0 Or InStr(sn, "block") > 0 Or _
-           InStr(sn, "extract") > 0 Then
-            isBQ = True
-        End If
-
-        ' Check 1.5: Skip lists (mirrors IsBlockQuotePara CHECK 0)
-        If Not isBQ Then
-            Dim listLvl As Long
-            listLvl = 0
-            listLvl = para.Range.ListFormat.ListLevelNumber
-            If Err.Number <> 0 Then listLvl = 0: Err.Clear
-            If listLvl > 0 Then GoTo NxtBQ  ' Listed paragraph - not a block quote
-
-            ' Check for bullet/number prefix in text
-            Dim bqPText As String
-            bqPText = ""
-            bqPText = para.Range.Text
-            If Err.Number <> 0 Then bqPText = "": Err.Clear
-            If Len(bqPText) > 0 Then
-                Dim fc As String
-                fc = Left$(bqPText, 1)
-                ' Bullet characters
-                If fc = Chr(183) Or fc = ChrW(8226) Or fc = "-" Or fc = "*" Then GoTo NxtBQ
-                ' Numbered list pattern: digit(s) followed by . or )
-                If fc >= "0" And fc <= "9" Then
-                    If bqPText Like "#[.)]#*" Or bqPText Like "##[.)]#*" Then GoTo NxtBQ
-                End If
-            End If
-        End If
-
-        ' Check 2: Indentation + smaller font or italic
-        If Not isBQ Then
-            Dim leftInd As Single
-            leftInd = para.Format.LeftIndent
-            If Err.Number <> 0 Then leftInd = 0: Err.Clear
-            Dim fontSize As Single
-            fontSize = para.Range.Font.Size
-            If Err.Number <> 0 Then fontSize = 0: Err.Clear
-            Dim bqItalic As Boolean
-            bqItalic = False
-            Dim bqItalVal As Long
-            bqItalVal = para.Range.Font.Italic
-            If Err.Number <> 0 Then bqItalVal = 0: Err.Clear
-            If bqItalVal = -1 Then bqItalic = True  ' wdTrue = -1
-            ' Moderate indent with clearly smaller font
-            If leftInd > 18 And fontSize > 0 And fontSize < 11 Then
-                isBQ = True
-            End If
-            ' Moderate indent with italic
-            If leftInd > 18 And bqItalic Then
-                isBQ = True
-            End If
-            ' Heavy indentation: only if italic or smaller font
-            ' (plain indented body-size text = list, not quote)
-            If Not isBQ And leftInd > 72 Then
-                If bqItalic Or (fontSize > 0 And fontSize < 11) Then
-                    isBQ = True
-                End If
-            End If
-        End If
-
-        ' Check 3: Multi-paragraph smart-quote detection
-        Dim pText As String
-        pText = ""
-        pText = para.Range.Text
-        If Err.Number <> 0 Then pText = "": Err.Clear
-        ' Strip tabs, non-breaking spaces, CRs so quote marks are first/last
-        pText = Replace(Replace(Replace(pText, vbCr, ""), vbTab, ""), ChrW(160), "")
-        pText = Trim$(pText)
-        If Not isBQ Then
-            If Len(pText) > 2 Then
-                Dim firstCh As Long, lastCh As Long
-                Dim trimmed As String
-                firstCh = AscW(Left(pText, 1))
-                trimmed = pText
-                If Right(trimmed, 1) = vbCr Or Right(trimmed, 1) = vbLf Then
-                    trimmed = Left(trimmed, Len(trimmed) - 1)
-                End If
-
-                If Len(trimmed) > 1 Then
-                    lastCh = AscW(Right(trimmed, 1))
-                    ' Single-paragraph quote
-                    If (firstCh = 8220 And lastCh = 8221) Then isBQ = True
-                    If (firstCh = 34 And lastCh = 34) Then isBQ = True
-                    ' Start of multi-paragraph quote (opens but doesn't close)
-                    If Not isBQ And Not insideMultiParaQuote Then
-                        If (firstCh = 8220 And lastCh <> 8221) Or _
-                           (firstCh = 34 And lastCh <> 34) Then
-                            insideMultiParaQuote = True
-                            isBQ = True
-                        End If
-                    End If
-                End If
-            End If
-        End If
-
-        ' If inside a multi-paragraph quote, mark as block quote
-        If insideMultiParaQuote And Not isBQ Then
-            isBQ = True
-        End If
-
-        ' Check if this paragraph ends the multi-paragraph quote
-        If insideMultiParaQuote And Len(pText) > 1 Then
-            Dim endTrimmed As String
-            endTrimmed = pText
-            If Right(endTrimmed, 1) = vbCr Or Right(endTrimmed, 1) = vbLf Then
-                endTrimmed = Left(endTrimmed, Len(endTrimmed) - 1)
-            End If
-            If Len(endTrimmed) > 0 Then
-                Dim endCh As Long
-                endCh = AscW(Right(endTrimmed, 1))
-                If endCh = 8221 Or endCh = 34 Then
-                    insideMultiParaQuote = False
-                End If
-            End If
-        End If
-
-        If isBQ Then
-            If bqCount >= bqCap Then
-                bqCap = bqCap * 2
-                ReDim Preserve bqStarts(0 To bqCap - 1)
-                ReDim Preserve bqEnds(0 To bqCap - 1)
-            End If
-            bqStarts(bqCount) = pStart
-            bqEnds(bqCount) = pEnd
-            bqCount = bqCount + 1
-        End If
-NxtBQ:
-    Next para
-    On Error GoTo 0
-
-    ' -- Filter issues ---------------------------------------------
+    ' -- Early exit if no regions detected -------------------------
     If bqCount = 0 And coverPageEnd < 0 And tocCount = 0 Then
         Set FilterBlockQuoteIssues = issues
         Exit Function
@@ -1215,7 +1603,6 @@ NxtBQ:
         If inTOC Then GoTo SkipIssue
 
         ' Skip content-based issues in block quotes
-        ' (formatting rules like font_consistency still apply)
         Dim inBQ As Boolean
         inBQ = False
         Dim j As Long
@@ -1225,7 +1612,6 @@ NxtBQ:
                 Exit For
             End If
         Next j
-        ' Suppress ALL rules in block quotes
         If inBQ Then GoTo SkipIssue
 
         filtered.Add finding
@@ -1265,7 +1651,15 @@ Public Sub ApplyHighlights(doc As Document, _
     Dim hlRS As Long, hlRE As Long
 
     For i = 1 To issues.Count
+        If i Mod 20 = 0 Then CheckCancellation
         Set finding = issues(i)
+
+        ' Anchor validation gate
+        If Not ValidateIssueAnchor(finding) Then
+            TraceStep "ApplyHighlights", "INVALID ANCHOR SKIPPED i=" & i & _
+                      " rule=" & CStr(GetIssueProp(finding, "RuleName"))
+            GoTo NextHighlightIssue
+        End If
 
         ' Read range into typed locals to avoid Variant coercion issues
         On Error Resume Next
@@ -1286,8 +1680,12 @@ Public Sub ApplyHighlights(doc As Document, _
                     Err.Clear
                 End If
                 If addComments Then
-                    TryAddComment doc, rng, BuildCommentText(finding), cmtRef, _
-                        "ApplyHighlights", "comment i=" & i
+                    If ShouldCreateCommentForRule( _
+                            CStr(GetIssueProp(finding, "RuleName")), finding) Then
+                        TryAddComment doc, rng, BuildCommentText(finding), cmtRef, _
+                            "ApplyHighlights", "comment i=" & i
+                        gCommentsCreated = gCommentsCreated + 1
+                    End If
                 End If
             Else
                 DebugLogError "ApplyHighlights", "doc.Range i=" & i & _
@@ -1299,14 +1697,19 @@ Public Sub ApplyHighlights(doc As Document, _
             TraceStep "ApplyHighlights", "SKIPPED i=" & i & _
                       " -- invalid range start=" & hlRS & " end=" & hlRE
         End If
+NextHighlightIssue:
     Next i
 
 HighlightCleanup:
+    Dim hlCancelled As Boolean
+    hlCancelled = (Err.Number = ERR_RUN_CANCELLED)
+    If hlCancelled Then Err.Clear
     On Error Resume Next
     Application.ScreenUpdating = wasScreenUpdating
     Application.StatusBar = False
     On Error GoTo 0
     TraceExit "ApplyHighlights"
+    If hlCancelled Then Err.Raise ERR_RUN_CANCELLED, "PleadingsEngine", "Run cancelled"
 End Sub
 
 ' ============================================================
@@ -1348,9 +1751,23 @@ Public Sub ApplySuggestionsAsTrackedChanges(doc As Document, _
     Dim isOnlyWhitespace As Boolean
     Dim origHasPeriod As Boolean, sugHasPeriod As Boolean
 
+    ' Get document story length for anchor validation
+    Dim docStoryLen As Long
+    On Error Resume Next
+    docStoryLen = doc.Content.End
+    If Err.Number <> 0 Then docStoryLen = -1: Err.Clear
+    On Error GoTo TrackedCleanup
+
+    ' Counters for debug summary
+    Dim cntApplied As Long, cntCommentOnly As Long
+    Dim cntSkippedAnchor As Long, cntSkippedUnsafe As Long
+    cntApplied = 0: cntCommentOnly = 0
+    cntSkippedAnchor = 0: cntSkippedUnsafe = 0
+
     ' Process from end of document backwards so tracked-change
     ' insertions / deletions do not shift positions of later issues
     For i = issues.Count To 1 Step -1
+        If i Mod 20 = 0 Then CheckCancellation
         Set finding = issues(i)
 
         ' Read range/autofix into typed locals
@@ -1364,81 +1781,159 @@ Public Sub ApplySuggestionsAsTrackedChanges(doc As Document, _
         If Err.Number <> 0 Then autoFix = False: Err.Clear
         On Error GoTo TrackedCleanup
 
+        ' --- ANCHOR VALIDATION GATE ---
+        If Not ValidateIssueAnchor(finding, docStoryLen) Then
+            cntSkippedAnchor = cntSkippedAnchor + 1
+            TraceStep "ApplyTrackedChanges", "INVALID ANCHOR SKIPPED i=" & i & _
+                      " rule=" & CStr(GetIssueProp(finding, "RuleName")) & _
+                      " start=" & rsVal & " end=" & reVal
+            GoTo NextApplyIssue
+        End If
+
         If rsVal >= 0 And reVal > rsVal Then
             On Error Resume Next: Err.Clear
             Set rng = doc.Range(rsVal, reVal)
             If Err.Number = 0 Then
                 If autoFix Then
+                    Dim thisRuleName As String
+                    thisRuleName = CStr(GetIssueProp(finding, "RuleName"))
+
                     origStart = rng.Start
                     origLen = rng.End - rng.Start
+
+                    ' --- UNSAFE AUTOFIX CATEGORY GATE ---
+                    ' Rules in the unsafe category are report-only; never tracked-edit
+                    If IsUnsafeAutofixRule(thisRuleName) Then
+                        cntSkippedUnsafe = cntSkippedUnsafe + 1
+                        gEditsSkippedUnsafe = gEditsSkippedUnsafe + 1
+                        TraceStep "ApplyTrackedChanges", "SKIPPED unsafe-category i=" & i & _
+                                  " rule=" & thisRuleName
+                        If addComments And ShouldCreateCommentForRule(thisRuleName, finding) Then
+                            TryAddComment doc, rng, BuildCommentText(finding), cmtRef, _
+                                "ApplyTrackedChanges", "unsafe-category-comment i=" & i
+                            gCommentsCreated = gCommentsCreated + 1
+                        End If
+                        GoTo NextApplyIssue
+                    End If
+
                     ' Use ReplacementText only.  Suggestion is human-readable
                     ' prose and must NEVER be applied as literal replacement text.
-                    ' An empty ReplacementText means "delete the range" -- distinct
-                    ' from a MISSING key which means "no replacement available".
                     sugText = ""
                     If Not HasReplacementText(finding) Then
-                        ' No machine-safe replacement -- skip amendment, add comment
                         TraceStep "ApplyTrackedChanges", "NO ReplacementText for i=" & i & _
-                                  " rule=" & CStr(GetIssueProp(finding, "RuleName")) & "; comment-only"
-                        If addComments Then
+                                  " rule=" & thisRuleName & "; comment-only"
+                        If addComments And ShouldCreateCommentForRule(thisRuleName, finding) Then
                             TryAddComment doc, rng, BuildCommentText(finding), cmtRef, _
                                 "ApplyTrackedChanges", "no-replacement-comment i=" & i
+                            gCommentsCreated = gCommentsCreated + 1
                         End If
                         GoTo NextApplyIssue
                     End If
                     sugText = CStr(GetIssueProp(finding, "ReplacementText"))
 
-                    ' --- WHITESPACE VALIDATION GATE ---
+                    ' --- READ CURRENT TEXT AND VALIDATE ---
                     origText = ""
                     origText = rng.Text
                     If Err.Number <> 0 Then origText = "": Err.Clear
 
                     skipAmendment = False
 
+                    ' --- STRONG ANCHOR GATE ---
+                    ' Require: MatchedText non-empty, contains alphanumeric,
+                    ' current rng.Text exactly equals MatchedText
+                    Dim storedMatch As String
+                    storedMatch = CStr(GetIssueProp(finding, "MatchedText"))
+
+                    If Len(storedMatch) = 0 Then
+                        skipAmendment = True
+                        Debug.Print "STRONG_ANCHOR: Skipped -- empty MatchedText for rule=" & thisRuleName
+                    ElseIf Not IsStrongTrackedAnchor(storedMatch) Then
+                        skipAmendment = True
+                        Debug.Print "STRONG_ANCHOR: Skipped -- no alphanumeric in '" & Left$(storedMatch, 30) & "'"
+                    ElseIf Len(origText) > 0 And origText <> storedMatch Then
+                        skipAmendment = True
+                        Debug.Print "STRONG_ANCHOR: Skipped stale -- stored='" & Left$(storedMatch, 30) & "' actual='" & Left$(origText, 30) & "'"
+                    End If
+
+                    ' --- WHITESPACE-ONLY GATE ---
+                    ' Never auto-apply findings whose MatchedText is only whitespace/punctuation
+                    If Not skipAmendment And Len(origText) > 0 Then
+                        If Not IsStrongTrackedAnchor(origText) Then
+                            skipAmendment = True
+                            Debug.Print "WHITESPACE GATE: Skipped -- origText has no alphanumeric"
+                        End If
+                    End If
+
                     ' For deletions (empty suggestion = delete the range)
-                    If Len(sugText) = 0 And Len(origText) > 0 Then
-                        For chIdx = 1 To Len(origText)
-                            ch = Mid$(origText, chIdx, 1)
-                            If (ch >= "A" And ch <= "Z") Or _
-                               (ch >= "a" And ch <= "z") Or _
-                               (ch >= "0" And ch <= "9") Or _
-                               ch = "." Then
-                                skipAmendment = True
-                                Debug.Print "WHITESPACE VALIDATION: Skipped deletion of '" & origText & "' -- contains substantive character '" & ch & "'"
-                                Exit For
-                            End If
-                        Next chIdx
+                    If Not skipAmendment Then
+                        If Len(sugText) = 0 And Len(origText) > 0 Then
+                            For chIdx = 1 To Len(origText)
+                                ch = Mid$(origText, chIdx, 1)
+                                If (ch >= "A" And ch <= "Z") Or _
+                                   (ch >= "a" And ch <= "z") Or _
+                                   (ch >= "0" And ch <= "9") Or _
+                                   ch = "." Then
+                                    skipAmendment = True
+                                    Debug.Print "WHITESPACE VALIDATION: Skipped deletion of '" & origText & "'"
+                                    Exit For
+                                End If
+                            Next chIdx
+                        End If
                     End If
 
                     ' For replacements, verify we are only changing whitespace
-                    If Len(sugText) > 0 And Len(origText) > 0 Then
-                        isOnlyWhitespace = True
-                        For chIdx = 1 To Len(origText)
-                            ch = Mid$(origText, chIdx, 1)
-                            If ch <> " " And ch <> vbTab And ch <> ChrW(160) Then
-                                isOnlyWhitespace = False
-                                Exit For
-                            End If
-                        Next chIdx
+                    If Not skipAmendment Then
+                        If Len(sugText) > 0 And Len(origText) > 0 Then
+                            isOnlyWhitespace = True
+                            For chIdx = 1 To Len(origText)
+                                ch = Mid$(origText, chIdx, 1)
+                                If ch <> " " And ch <> vbTab And ch <> ChrW(160) Then
+                                    isOnlyWhitespace = False
+                                    Exit For
+                                End If
+                            Next chIdx
 
-                        If Not isOnlyWhitespace Then
-                            If Len(sugText) < Len(origText) Then
-                                origHasPeriod = (InStr(1, origText, ".") > 0)
-                                sugHasPeriod = (InStr(1, sugText, ".") > 0)
-                                If origHasPeriod And Not sugHasPeriod Then
-                                    skipAmendment = True
-                                    Debug.Print "WHITESPACE VALIDATION: Skipped replacement '" & origText & "' -> '" & sugText & "' -- would remove period"
+                            ' Whitespace-only origText: never tracked-change
+                            If isOnlyWhitespace Then
+                                skipAmendment = True
+                                Debug.Print "WHITESPACE GATE: Skipped whitespace-only origText"
+                            End If
+
+                            If Not skipAmendment And Not isOnlyWhitespace Then
+                                If Len(sugText) < Len(origText) Then
+                                    origHasPeriod = (InStr(1, origText, ".") > 0)
+                                    sugHasPeriod = (InStr(1, sugText, ".") > 0)
+                                    If origHasPeriod And Not sugHasPeriod Then
+                                        skipAmendment = True
+                                        Debug.Print "WHITESPACE VALIDATION: Skipped -- would remove period"
+                                    End If
                                 End If
                             End If
                         End If
                     End If
 
                     If skipAmendment Then
+                        cntSkippedUnsafe = cntSkippedUnsafe + 1
+                        gEditsSkippedUnsafe = gEditsSkippedUnsafe + 1
                         TraceStep "ApplyTrackedChanges", "SKIPPED amendment i=" & i & _
                                   " orig=""" & Left$(origText, 30) & """ sug=""" & Left$(sugText, 30) & """"
-                        If addComments Then
+                        If addComments And ShouldCreateCommentForRule(thisRuleName, finding) Then
                             TryAddComment doc, rng, BuildCommentText(finding), cmtRef, _
                                 "ApplyTrackedChanges", "skip-comment i=" & i
+                            gCommentsCreated = gCommentsCreated + 1
+                        End If
+                        GoTo NextApplyIssue
+                    End If
+
+                    ' --- UNICODE SAFETY: reject replacement char U+FFFD ---
+                    If Not IsReplacementSafe(sugText) Then
+                        cntSkippedUnsafe = cntSkippedUnsafe + 1
+                        gEditsSkippedUnsafe = gEditsSkippedUnsafe + 1
+                        TraceStep "ApplyTrackedChanges", "SKIPPED UNSAFE REPLACEMENT (U+FFFD) i=" & i
+                        If addComments And ShouldCreateCommentForRule(thisRuleName, finding) Then
+                            TryAddComment doc, rng, BuildCommentText(finding), cmtRef, _
+                                "ApplyTrackedChanges", "unsafe-replacement-comment i=" & i
+                            gCommentsCreated = gCommentsCreated + 1
                         End If
                         GoTo NextApplyIssue
                     End If
@@ -1449,10 +1944,15 @@ Public Sub ApplySuggestionsAsTrackedChanges(doc As Document, _
                               " orig=""" & Left$(origText, 30) & """ -> """ & Left$(sugText, 30) & """"
                     TrySetRangeText rng, sugText, _
                         "ApplyTrackedChanges", "apply i=" & i
+                    cntApplied = cntApplied + 1
+                    gTrackedEditsApplied = gTrackedEditsApplied + 1
                 Else
-                    If addComments Then
+                    cntCommentOnly = cntCommentOnly + 1
+                    If addComments And ShouldCreateCommentForRule( _
+                            CStr(GetIssueProp(finding, "RuleName")), finding) Then
                         TryAddComment doc, rng, BuildCommentText(finding), cmtRef, _
                             "ApplyTrackedChanges", "comment-only i=" & i
+                        gCommentsCreated = gCommentsCreated + 1
                     End If
                 End If
             Else
@@ -1469,13 +1969,23 @@ NextApplyIssue:
     Next i
 
 TrackedCleanup:
+    Dim tcCancelled As Boolean
+    tcCancelled = (Err.Number = ERR_RUN_CANCELLED)
+    If tcCancelled Then Err.Clear
     ' Single cleanup path: always restore document and application state.
     On Error Resume Next
     doc.TrackRevisions = wasTrackingChanges
     Application.ScreenUpdating = wasScreenUpdating
     Application.StatusBar = False
     On Error GoTo 0
+    TraceStep "ApplyTrackedChanges", "SUMMARY: applied=" & cntApplied & _
+              " comment_only=" & cntCommentOnly & " skipped_anchor=" & cntSkippedAnchor & _
+              " skipped_unsafe=" & cntSkippedUnsafe
+    Debug.Print "ApplyTrackedChanges SUMMARY: applied=" & cntApplied & _
+                " comment_only=" & cntCommentOnly & " skipped_anchor=" & cntSkippedAnchor & _
+                " skipped_unsafe=" & cntSkippedUnsafe
     TraceExit "ApplyTrackedChanges"
+    If tcCancelled Then Err.Raise ERR_RUN_CANCELLED, "PleadingsEngine", "Run cancelled"
 End Sub
 
 ' ============================================================
@@ -1484,6 +1994,33 @@ End Sub
 Private Function BuildCommentText(ByVal finding As Object) As String
     Dim txt As String
     txt = GetIssueProp(finding, "Issue")
+
+    Dim rn As String
+    rn = LCase$(GetIssueProp(finding, "RuleName"))
+
+    ' Repeated word: clean to "Repeated word 'X'" only
+    If rn = "repeated_words" Then
+        ' Strip " -- review context" and any trailing suggestion
+        Dim dashPos As Long
+        dashPos = InStr(1, txt, " -- ")
+        If dashPos > 0 Then txt = Left$(txt, dashPos - 1)
+        BuildCommentText = txt
+        Exit Function
+    End If
+
+    ' Spacing rules: first sentence only, no suggestion tail
+    If rn = "space_before_punct" Or rn = "double_spaces" Or _
+       rn = "missing_space_after_dot" Then
+        ' Truncate after first sentence-ending period
+        Dim dotEnd As Long
+        dotEnd = InStr(1, txt, ".")
+        If dotEnd > 0 And dotEnd < Len(txt) Then
+            txt = Left$(txt, dotEnd)
+        End If
+        BuildCommentText = txt
+        Exit Function
+    End If
+
     Dim sug As String
     sug = GetIssueProp(finding, "Suggestion")
     ' Only append suggestion text if it's human-readable (not a literal replacement)
@@ -1506,15 +2043,22 @@ Public Function GenerateReport(issues As Collection, _
     Dim finding As Object
     Dim i As Long
 
-    ' Resolve document name: prefer explicit doc, fall back to ActiveDocument
+    ' Resolve document name and full path from explicit doc parameter
     Dim docName As String
+    Dim docFullPath As String
     On Error Resume Next
     If Not doc Is Nothing Then
         docName = doc.Name
+        If Len(doc.Path) > 0 Then
+            docFullPath = doc.FullName
+        Else
+            docFullPath = doc.Name
+        End If
     Else
-        docName = ActiveDocument.Name
+        docName = "(no document)"
+        docFullPath = "(no document)"
     End If
-    If Err.Number <> 0 Then docName = "(unknown)": Err.Clear
+    If Err.Number <> 0 Then docName = "(unknown)": docFullPath = "(unknown)": Err.Clear
     On Error GoTo 0
 
     ' Open file with error handling
@@ -1534,8 +2078,15 @@ Public Function GenerateReport(issues As Collection, _
 
     On Error GoTo ReportWriteErr
 
+    ' Build page-range label for report
+    Dim prStr As String
+    prStr = pageRangeString
+    If Len(prStr) = 0 Then prStr = "all"
+
     Print #fileNum, "{"
     Print #fileNum, "  ""document"": """ & EscJSON(docName) & ""","
+    Print #fileNum, "  ""document_path"": """ & EscJSON(docFullPath) & ""","
+    Print #fileNum, "  ""page_range"": """ & EscJSON(prStr) & ""","
     Print #fileNum, "  ""timestamp"": """ & Format(Now, "yyyy-mm-ddThh:nn:ss") & ""","
     Print #fileNum, "  ""total_issues"": " & issues.Count & ","
 
@@ -1561,6 +2112,27 @@ Public Function GenerateReport(issues As Collection, _
         End If
     Next i
 
+    ' Count by confidence
+    Dim confDict As Object
+    Set confDict = CreateObject("Scripting.Dictionary")
+    Dim invalidAnchorCount As Long
+    invalidAnchorCount = 0
+    For i = 1 To issues.Count
+        Set finding = issues(i)
+        Dim confLbl As String
+        confLbl = CStr(GetIssueProp(finding, "ConfidenceLabel"))
+        If Len(confLbl) = 0 Then confLbl = "unknown"
+        If confDict.Exists(confLbl) Then
+            confDict(confLbl) = confDict(confLbl) + 1
+        Else
+            confDict.Add confLbl, 1
+        End If
+        ' Check anchor validity
+        If Not ValidateIssueAnchor(finding) Then
+            invalidAnchorCount = invalidAnchorCount + 1
+        End If
+    Next i
+
     Print #fileNum, "  ""summary"": {"
     Print #fileNum, "    ""counts_per_rule"": {"
     Dim keys As Variant
@@ -1573,8 +2145,53 @@ Public Function GenerateReport(issues As Collection, _
             Print #fileNum, "      """ & EscJSON(CStr(keys(k))) & """: " & countDict(keys(k))
         End If
     Next k
-    Print #fileNum, "    }"
-    Print #fileNum, "  }"
+    Print #fileNum, "    },"
+    Print #fileNum, "    ""counts_per_confidence"": {"
+    Dim cKeys As Variant
+    cKeys = confDict.keys
+    For k = 0 To confDict.Count - 1
+        If k < confDict.Count - 1 Then
+            Print #fileNum, "      """ & EscJSON(CStr(cKeys(k))) & """: " & confDict(cKeys(k)) & ","
+        Else
+            Print #fileNum, "      """ & EscJSON(CStr(cKeys(k))) & """: " & confDict(cKeys(k))
+        End If
+    Next k
+    Print #fileNum, "    },"
+    Print #fileNum, "    ""invalid_anchor_count"": " & invalidAnchorCount & ","
+    Print #fileNum, "    ""grouped_spelling_count"": " & gGroupedSpellingCount & ","
+    Print #fileNum, "    ""grouped_footnote_count"": " & gGroupedFootnoteCount & ","
+    Print #fileNum, "    ""comments_created"": " & gCommentsCreated & ","
+    Print #fileNum, "    ""tracked_edits_applied"": " & gTrackedEditsApplied & ","
+    Print #fileNum, "    ""edits_skipped_unsafe"": " & gEditsSkippedUnsafe
+    Print #fileNum, "  },"
+
+    ' -- Grouped spelling pairs --
+    Print #fileNum, "  ""grouped_spelling"": ["
+    If Not gSpellingGroups Is Nothing Then
+        If gSpellingGroups.Count > 0 Then
+            Dim spGKeys As Variant
+            spGKeys = gSpellingGroups.keys
+            Dim spIdx As Long
+            For spIdx = 0 To gSpellingGroups.Count - 1
+                Dim spParts() As String
+                spParts = Split(CStr(spGKeys(spIdx)), "|")
+                Dim spFrom As String, spTo As String
+                spFrom = spParts(0)
+                If UBound(spParts) >= 1 Then spTo = spParts(1) Else spTo = ""
+                Dim spExLoc As String
+                spExLoc = ""
+                If gSpellingExamples.Exists(CStr(spGKeys(spIdx))) Then
+                    spExLoc = CStr(gSpellingExamples(spGKeys(spIdx)))
+                End If
+                Print #fileNum, "    {""from"": """ & EscJSON(spFrom) & """, ""to"": """ & _
+                                EscJSON(spTo) & """, ""count"": " & gSpellingGroups(spGKeys(spIdx)) & _
+                                ", ""examples"": """ & EscJSON(spExLoc) & """}" & _
+                                IIf(spIdx < gSpellingGroups.Count - 1, ",", "")
+            Next spIdx
+        End If
+    End If
+    Print #fileNum, "  ]"
+
     Print #fileNum, "}"
 
     Close #fileNum
@@ -1599,40 +2216,88 @@ End Function
 '  HUMAN-READABLE ISSUE SUMMARY
 ' ============================================================
 Public Function GetIssueSummary(issues As Collection) As String
-    Dim countDict As Object
-    Set countDict = CreateObject("Scripting.Dictionary")
-    Dim finding As Object
-    Dim i As Long
-
-    For i = 1 To issues.Count
-        Set finding = issues(i)
-        If countDict.Exists(GetIssueProp(finding, "RuleName")) Then
-            countDict(GetIssueProp(finding, "RuleName")) = countDict(GetIssueProp(finding, "RuleName")) + 1
-        Else
-            countDict.Add GetIssueProp(finding, "RuleName"), 1
-        End If
-    Next i
-
-    Dim result As String
-    Dim keys As Variant
-    Dim k As Long
-
-    If countDict.Count = 0 Then
+    If issues.Count = 0 Then
         GetIssueSummary = "No issues found."
         Exit Function
     End If
 
-    keys = countDict.keys
-    For k = 0 To countDict.Count - 1
-        Dim cnt As Long
-        cnt = countDict(keys(k))
-        result = result & CStr(keys(k)) & ": " & cnt & " finding"
-        If cnt <> 1 Then result = result & "s"
-        result = result & vbCrLf
+    ' Aggregate counts by UI label (not raw internal rule name)
+    Dim uiCounts As Object
+    Set uiCounts = CreateObject("Scripting.Dictionary")
+    Dim finding As Object
+    Dim i As Long
+    Dim uiLbl As String
+
+    For i = 1 To issues.Count
+        Set finding = issues(i)
+        uiLbl = GetUILabel(CStr(GetIssueProp(finding, "RuleName")))
+        If uiCounts.Exists(uiLbl) Then
+            uiCounts(uiLbl) = uiCounts(uiLbl) + 1
+        Else
+            uiCounts.Add uiLbl, 1
+        End If
+    Next i
+
+    ' Sort by descending count using simple insertion sort
+    Dim n As Long
+    n = uiCounts.Count
+    Dim sortLabels() As String
+    Dim sortCounts() As Long
+    ReDim sortLabels(0 To n - 1)
+    ReDim sortCounts(0 To n - 1)
+    Dim keys As Variant
+    keys = uiCounts.keys
+    Dim k As Long
+    For k = 0 To n - 1
+        sortLabels(k) = CStr(keys(k))
+        sortCounts(k) = CLng(uiCounts(keys(k)))
     Next k
 
-    result = result & vbCrLf & "Total: " & issues.Count & " finding"
-    If issues.Count <> 1 Then result = result & "s"
+    Dim j As Long
+    Dim tmpLbl As String
+    Dim tmpCnt As Long
+    For i = 0 To n - 2
+        For j = i + 1 To n - 1
+            If sortCounts(j) > sortCounts(i) Then
+                tmpCnt = sortCounts(i): sortCounts(i) = sortCounts(j): sortCounts(j) = tmpCnt
+                tmpLbl = sortLabels(i): sortLabels(i) = sortLabels(j): sortLabels(j) = tmpLbl
+            End If
+        Next j
+    Next i
+
+    ' Build output
+    Dim result As String
+    result = "Found " & issues.Count & " issue(s)." & vbCrLf & vbCrLf
+    result = result & "By type:" & vbCrLf
+    Dim maxShow As Long
+    maxShow = 12
+    If n < maxShow Then maxShow = n
+    For k = 0 To maxShow - 1
+        result = result & "  - " & sortLabels(k) & ": " & sortCounts(k) & vbCrLf
+    Next k
+    If n > maxShow Then
+        result = result & "  + " & (n - maxShow) & " more" & vbCrLf
+    End If
+
+    ' Grouped spelling summary
+    If gGroupedSpellingCount > SPELLING_COMMENT_THRESHOLD Then
+        result = result & vbCrLf & "Spelling: " & gGroupedSpellingCount & _
+                 " findings (" & gSpellingGroups.Count & " unique pairs) -- grouped in report" & vbCrLf
+    End If
+
+    ' Grouped footnote summary
+    If gGroupedFootnoteCount > FOOTNOTE_COMMENT_THRESHOLD Then
+        result = result & "Footnotes: " & gGroupedFootnoteCount & _
+                 " findings -- grouped in report" & vbCrLf
+    End If
+
+    ' Append slowest rules from profiler
+    Dim slowest As String
+    slowest = GetTopSlowestRules(3)
+    If Len(slowest) > 0 Then
+        result = result & vbCrLf & "Slowest: " & slowest
+    End If
+
     GetIssueSummary = result
 End Function
 
@@ -1643,47 +2308,145 @@ Public Function GetRuleDisplayNames() As Object
     Dim d As Object
     Set d = CreateObject("Scripting.Dictionary")
 
-    d.Add "spelling", "Spelling Enforcement (UK/US)"
-    d.Add "repeated_words", "Repeated Word Detection"
-    d.Add "sequential_numbering", "Sequential Numbering"
-    d.Add "heading_capitalisation", "Heading Capitalisation"
+    d.Add "spellchecker", "Spellchecker"
+    d.Add "repeated_words", "Repeated Words"
     d.Add "custom_term_whitelist", "Custom Term Whitelist"
-    d.Add "defined_terms", "Defined Term Checker"
-    d.Add "clause_number_format", "Clause Number Format"
-    d.Add "date_time_format", "Date/Time Format Consistency"
-    d.Add "list_rules", "List Format & Punctuation"
-    d.Add "formatting_consistency", "Formatting Consistency"
-    d.Add "licence_license", "Licence/License Rule"
-    d.Add "check_cheque", "Check/Cheque Rule"
-    d.Add "slash_style", "Slash Style Checker"
-    d.Add "dash_usage", "En-dash/Em-dash/Hyphen"
-    d.Add "bracket_integrity", "Bracket Integrity"
-    d.Add "quotation_mark_consistency", "Quotation Mark Consistency"
+    d.Add "date_time_format", "Date/Time Format"
+    d.Add "punctuation", "Punctuation Checker"
     d.Add "currency_number_format", "Currency/Number Formatting"
     d.Add "footnote_rules", "Footnote Rules"
-    d.Add "title_formatting", "Title Formatting Consistency"
-    d.Add "brand_name_enforcement", "Brand Name Enforcement"
-    d.Add "mandated_legal_term_forms", "Mandated Legal Term Forms"
+    d.Add "duplicate_footnotes", "Duplicate Footnotes"
+    d.Add "brand_name_enforcement", "Custom Rules"
+    d.Add "mandated_legal_term_forms", "Mandated Legal Terms"
     d.Add "always_capitalise_terms", "Always Capitalise Terms"
-    d.Add "known_anglicised_terms_not_italic", "Anglicised Terms Not Italic"
-    d.Add "foreign_names_not_italic", "Foreign Names Not Italic"
-    d.Add "single_quotes_default", "Single Quotes Default"
-    d.Add "smart_quote_consistency", "Smart Quote Consistency"
+    d.Add "non_english_terms", "Non-English Terms"
     d.Add "spell_out_under_ten", "Spell Out Numbers Under 10"
     d.Add "double_spaces", "Double Spaces"
-    d.Add "double_commas", "Double Commas"
-    d.Add "space_before_punct", "Space Before Punctuation"
-    d.Add "missing_space_after_dot", "Missing Space After Full Stop"
-    d.Add "trailing_spaces", "Trailing Spaces"
 
     Set GetRuleDisplayNames = d
 End Function
 
 ' ============================================================
-'  CONFIG DRIFT VALIDATION (development helper)
+'  MAP INTERNAL RULE NAME TO USER-FACING LABEL
+'  Sub-rules that belong to a combined bucket are mapped to
+'  their parent UI label.  Unknown names are title-cased.
+' ============================================================
+Public Function GetUILabel(ByVal ruleName As String) As String
+    Dim rn As String
+    rn = LCase$(ruleName)
+
+    ' Punctuation sub-rules -> "Punctuation"
+    Select Case rn
+        Case "slash_style", "bracket_integrity", "hyphens", "dash_usage", _
+             "double_commas", "space_before_punct", "missing_space_after_dot", _
+             "triplicate_punctuation", "punctuation"
+            GetUILabel = "Punctuation Checker"
+            Exit Function
+        Case "spellchecker", "spelling", "licence_license", "check_cheque"
+            GetUILabel = "Spellchecker"
+            Exit Function
+        Case "non_english_terms", "known_anglicised_terms_not_italic", _
+             "foreign_names_not_italic"
+            GetUILabel = "Non-English Terms"
+            Exit Function
+        Case "repeated_words"
+            GetUILabel = "Repeated Words"
+            Exit Function
+        Case "double_spaces"
+            GetUILabel = "Double Spaces"
+            Exit Function
+    End Select
+
+    ' Fall back to display names dictionary
+    Dim disp As Object
+    Set disp = GetRuleDisplayNames()
+    If disp.Exists(rn) Then
+        GetUILabel = CStr(disp(rn))
+    Else
+        ' Title-case the rule name (replace underscores with spaces)
+        Dim cleaned As String
+        cleaned = Replace(rn, "_", " ")
+        If Len(cleaned) > 0 Then
+            Mid$(cleaned, 1, 1) = UCase$(Left$(cleaned, 1))
+        End If
+        GetUILabel = cleaned
+    End If
+End Function
+
+' ============================================================
+'  COMMENT SUPPRESSION: returns True if a comment bubble should
+'  be created for this rule.  Returns False for:
+'  - all spacing rules (always suppressed)
+'  - all dash/hyphen rules (always suppressed)
+'  - spelling when total spelling count > threshold (grouped report mode)
+'  - footnote rules when total footnote count > threshold (grouped report mode)
+' ============================================================
+Public Function ShouldCreateCommentForRule(ByVal ruleName As String, _
+                                           Optional ByVal finding As Object = Nothing) As Boolean
+    Dim rn As String
+    rn = LCase$(ruleName)
+    Dim bucket As String
+    bucket = GetRuleBucket(rn)
+
+    ' Spacing rules: always suppress comments
+    If bucket = "spacing" Then
+        ShouldCreateCommentForRule = False
+        Exit Function
+    End If
+
+    ' Dash/hyphen rules: always suppress comments
+    If bucket = "dash" Then
+        ShouldCreateCommentForRule = False
+        Exit Function
+    End If
+
+    ' Trailing spaces: always suppress
+    If rn = "trailing_spaces" Or rn = "trailing_space" Then
+        ShouldCreateCommentForRule = False
+        Exit Function
+    End If
+
+    ' Spelling: suppress if over threshold
+    If bucket = "spelling" Then
+        If gGroupedSpellingCount > SPELLING_COMMENT_THRESHOLD Then
+            ShouldCreateCommentForRule = False
+            Exit Function
+        End If
+    End If
+
+    ' Footnotes: suppress if over threshold
+    If bucket = "footnote" Then
+        If gGroupedFootnoteCount > FOOTNOTE_COMMENT_THRESHOLD Then
+            ShouldCreateCommentForRule = False
+            Exit Function
+        End If
+    End If
+
+    ' Check issue text for spacing sub-types emitted under other rule names
+    If Not finding Is Nothing Then
+        On Error Resume Next
+        Dim issText As String
+        issText = ""
+        If TypeName(finding) = "Dictionary" Then
+            If finding.Exists("Issue") Then issText = LCase$(finding("Issue"))
+        End If
+        On Error GoTo 0
+        If InStr(issText, "missing second space") > 0 Or _
+           InStr(issText, "double space") > 0 Then
+            ShouldCreateCommentForRule = False
+            Exit Function
+        End If
+    End If
+
+    ShouldCreateCommentForRule = True
+End Function
+
+' ============================================================
+'  CONFIG DRIFT VALIDATION (development helper -- not user-facing)
 '  Call from Immediate window: PleadingsEngine.ValidateConfigDrift
-'  Prints any keys present in config but missing from display
-'  names, or vice versa.
+'  Compares config keys (InitRuleConfig) against display-name
+'  keys (GetRuleDisplayNames) and prints mismatches.  Useful
+'  after adding or renaming a rule to verify everything is wired.
 ' ============================================================
 Public Sub ValidateConfigDrift()
     Dim cfg As Object
@@ -1722,26 +2485,144 @@ End Sub
 '    "1,3-5,8"   - mixed
 '    ""          - all pages (no filter)
 ' ============================================================
+' ============================================================
+'  PRECOMPUTED PAGE FILTER
+'  Called once per run after SetPageRangeFromString.
+'  Translates page numbers into main-story character positions
+'  so that rule inner loops need only cheap integer comparisons.
+' ============================================================
+Public Sub InitPageFilter(doc As Document)
+    gPageFilterEnabled = False
+    gPageFilterStartPos = 0
+    gPageFilterEndPos = 0
+
+    ' Nothing to filter?
+    If pageRangeSet Is Nothing Then Exit Sub
+    If pageRangeSet.Count = 0 Then Exit Sub
+
+    ' Find min and max selected page numbers
+    Dim minPage As Long, maxPage As Long
+    Dim firstKey As Boolean
+    firstKey = True
+    Dim k As Variant
+    For Each k In pageRangeSet.keys
+        Dim pg As Long
+        pg = CLng(k)
+        If firstKey Then
+            minPage = pg: maxPage = pg: firstKey = False
+        Else
+            If pg < minPage Then minPage = pg
+            If pg > maxPage Then maxPage = pg
+        End If
+    Next k
+
+    If minPage < 1 Then minPage = 1
+
+    ' Determine total document pages
+    Dim totalPages As Long
+    On Error Resume Next
+    totalPages = doc.ComputeStatistics(wdStatisticPages)
+    If Err.Number <> 0 Then
+        Err.Clear
+        On Error GoTo 0
+        ' Cannot determine page count -- disable filter to be safe
+        Exit Sub
+    End If
+    On Error GoTo 0
+
+    ' Clamp maxPage to actual document length
+    If maxPage > totalPages Then maxPage = totalPages
+    If minPage > totalPages Then Exit Sub  ' selected pages beyond document
+
+    ' Get start position: beginning of minPage
+    Dim startRng As Range
+    On Error Resume Next
+    Set startRng = doc.GoTo(What:=wdGoToPage, Which:=wdGoToAbsolute, Count:=minPage)
+    If Err.Number <> 0 Then
+        Err.Clear
+        On Error GoTo 0
+        Exit Sub
+    End If
+    On Error GoTo 0
+    gPageFilterStartPos = startRng.Start
+
+    ' Get end position: beginning of page after maxPage, or end of main story
+    If maxPage >= totalPages Then
+        ' Last page -- use end of main story
+        gPageFilterEndPos = doc.Content.End
+    Else
+        Dim endRng As Range
+        On Error Resume Next
+        Set endRng = doc.GoTo(What:=wdGoToPage, Which:=wdGoToAbsolute, Count:=maxPage + 1)
+        If Err.Number <> 0 Then
+            Err.Clear
+            On Error GoTo 0
+            gPageFilterEndPos = doc.Content.End
+        Else
+            On Error GoTo 0
+            gPageFilterEndPos = endRng.Start
+        End If
+    End If
+
+    gPageFilterEnabled = True
+    DebugLog "Page filter enabled: pages " & minPage & "-" & maxPage & _
+             ", positions " & gPageFilterStartPos & "-" & gPageFilterEndPos
+End Sub
+
+' ============================================================
+'  CHEAP OVERLAP HELPERS (integer comparisons only)
+' ============================================================
+
+' Returns True if a range overlaps the selected main-story span
+' (or if page filtering is disabled).
 Public Function IsInPageRange(rng As Range) As Boolean
-    If pageRangeSet Is Nothing Then
+    If Not gPageFilterEnabled Then
         IsInPageRange = True
         Exit Function
     End If
-    If pageRangeSet.Count = 0 Then
+    ' Overlap test: range intersects [startPos, endPos)
+    If rng.End <= gPageFilterStartPos Then
+        IsInPageRange = False
+    ElseIf rng.Start >= gPageFilterEndPos Then
+        IsInPageRange = False
+    Else
         IsInPageRange = True
+    End If
+End Function
+
+' Position-based overlap check (no Range object needed)
+Public Function IsInPageRangeByPos(ByVal startPos As Long, ByVal endPos As Long) As Boolean
+    If Not gPageFilterEnabled Then
+        IsInPageRangeByPos = True
         Exit Function
     End If
-    Dim pageNum As Long
-    pageNum = rng.Information(wdActiveEndAdjustedPageNumber)
-    IsInPageRange = pageRangeSet.Exists(pageNum)
+    If endPos <= gPageFilterStartPos Then
+        IsInPageRangeByPos = False
+    ElseIf startPos >= gPageFilterEndPos Then
+        IsInPageRangeByPos = False
+    Else
+        IsInPageRangeByPos = True
+    End If
+End Function
+
+' Returns True when startPos is past the end of the selected range.
+' Rules iterating paragraphs in document order can use this to exit early.
+Public Function IsPastPageFilter(ByVal startPos As Long) As Boolean
+    If Not gPageFilterEnabled Then
+        IsPastPageFilter = False
+        Exit Function
+    End If
+    IsPastPageFilter = (startPos >= gPageFilterEndPos)
 End Function
 
 Public Sub SetPageRange(startPage As Long, endPage As Long)
     ' Legacy compatibility: convert start/end to page set
     If startPage = 0 And endPage = 0 Then
         Set pageRangeSet = Nothing
+        pageRangeString = ""
         Exit Sub
     End If
+    pageRangeString = CStr(startPage) & "-" & CStr(endPage)
     Set pageRangeSet = CreateObject("Scripting.Dictionary")
     Dim pg As Long
     For pg = startPage To endPage
@@ -1749,57 +2630,39 @@ Public Sub SetPageRange(startPage As Long, endPage As Long)
     Next pg
 End Sub
 
+' ============================================================
+'  PAGE-RANGE PARSING (Word-safe)
+'  Supports:  5 | 3-7 | 3:7 | 1,3,5 | 1,3-5,8 | 5, 7-8, 9:30
+'  Normalises en dash, em dash, minus sign to hyphen.
+'  Colons also treated as range separators.
+'  Parsed once per run -- not inside rule loops.
+' ============================================================
 Public Sub SetPageRangeFromString(ByVal spec As String)
-    ' Parse flexible page range specification
     spec = Trim(spec)
+    pageRangeString = spec  ' Preserve original for report metadata
     If Len(spec) = 0 Then
         Set pageRangeSet = Nothing
         Exit Sub
     End If
 
+    ' Normalise input
+    spec = NormalizePageRangeInput(spec)
+    If Len(spec) = 0 Then
+        Set pageRangeSet = Nothing
+        Exit Sub
+    End If
+
+    ' Parse into page-number array
+    Dim pages() As Long
+    pages = ParsePageList(spec)
+
+    ' Build dictionary from array
     Set pageRangeSet = CreateObject("Scripting.Dictionary")
-
-    ' Normalise separators: en-dash (8211) and colon to hyphen
-    spec = Replace(spec, ChrW(8211), "-")
-    spec = Replace(spec, ":", "-")
-
-    ' Split on comma
-    Dim parts() As String
-    parts = Split(spec, ",")
-
     Dim i As Long
-    For i = LBound(parts) To UBound(parts)
-        Dim part As String
-        part = Trim(parts(i))
-        If Len(part) = 0 Then GoTo NextPart
-
-        Dim dashPos As Long
-        dashPos = InStr(1, part, "-")
-
-        If dashPos > 0 Then
-            ' Range: "3-7"
-            Dim rangeStart As Long
-            Dim rangeEnd As Long
-            Dim leftPart As String
-            Dim rightPart As String
-            leftPart = Trim(Left$(part, dashPos - 1))
-            rightPart = Trim(Mid$(part, dashPos + 1))
-
-            If IsNumeric(leftPart) And IsNumeric(rightPart) Then
-                rangeStart = CLng(leftPart)
-                rangeEnd = CLng(rightPart)
-                Dim pg As Long
-                For pg = rangeStart To rangeEnd
-                    pageRangeSet(pg) = True
-                Next pg
-            End If
-        Else
-            ' Single page: "5"
-            If IsNumeric(part) Then
-                pageRangeSet(CLng(part)) = True
-            End If
+    For i = LBound(pages) To UBound(pages)
+        If pages(i) > 0 Then
+            pageRangeSet(pages(i)) = True
         End If
-NextPart:
     Next i
 
     ' If nothing valid was parsed, clear the set
@@ -1807,6 +2670,137 @@ NextPart:
         Set pageRangeSet = Nothing
     End If
 End Sub
+
+' ============================================================
+'  Normalise a page-range string for safe VBA parsing.
+'  Strips control characters, collapses whitespace, normalises
+'  en dash / em dash / minus sign to ASCII hyphen.
+' ============================================================
+Public Function NormalizePageRangeInput(ByVal s As String) As String
+    s = CStr(s)
+    s = Replace$(s, vbCr, "")
+    s = Replace$(s, vbLf, "")
+    s = Replace$(s, vbTab, "")
+    s = Replace$(s, Chr$(160), " ")         ' non-breaking space
+    s = Replace$(s, ChrW$(8211), "-")       ' en dash
+    s = Replace$(s, ChrW$(8212), "-")       ' em dash
+    s = Replace$(s, ChrW$(8722), "-")       ' minus sign
+    s = Trim$(s)
+    Do While InStr(s, "  ") > 0
+        s = Replace$(s, "  ", " ")
+    Loop
+    Do While InStr(s, ",,") > 0
+        s = Replace$(s, ",,", ",")
+    Loop
+    NormalizePageRangeInput = s
+End Function
+
+' ============================================================
+'  Parse a normalised page-range string into an array of page
+'  numbers.  Supports comma-separated tokens where each token
+'  is either a single number or a range separated by hyphen or
+'  colon (inclusive).  Returns a 0-based Long array; element 0
+'  is 0 when input is empty/invalid.
+' ============================================================
+Public Function ParsePageList(ByVal inputText As String) As Long()
+    Dim parts() As String
+    Dim subParts() As String
+    Dim token As String
+    Dim tmpList As Collection
+    Dim arr() As Long
+    Dim i As Long
+    Dim p As Long
+    Dim startPage As Long
+    Dim endPage As Long
+    Dim sepPos As Long
+    Set tmpList = New Collection
+
+    inputText = NormalizePageRangeInput(inputText)
+    If Len(inputText) = 0 Then GoTo EmptyExit
+
+    parts = Split(inputText, ",")
+    For i = LBound(parts) To UBound(parts)
+        token = Trim$(parts(i))
+        If Len(token) = 0 Then GoTo NextPageToken
+
+        ' Support both hyphen and colon as range separators
+        sepPos = InStr(1, token, "-", vbBinaryCompare)
+        If sepPos = 0 Then sepPos = InStr(1, token, ":", vbBinaryCompare)
+
+        If sepPos > 0 Then
+            ' Reject double separators inside a single token
+            If InStr(sepPos + 1, token, "-", vbBinaryCompare) > 0 _
+               Or InStr(sepPos + 1, token, ":", vbBinaryCompare) > 0 Then
+                GoTo NextPageToken
+            End If
+
+            If Mid$(token, sepPos, 1) = "-" Then
+                subParts = Split(token, "-")
+            Else
+                subParts = Split(token, ":")
+            End If
+
+            If UBound(subParts) = 1 Then
+                If IsNumeric(Trim$(subParts(0))) And IsNumeric(Trim$(subParts(1))) Then
+                    startPage = CLng(Trim$(subParts(0)))
+                    endPage = CLng(Trim$(subParts(1)))
+                    If startPage > 0 And endPage > 0 Then
+                        If endPage < startPage Then
+                            p = startPage
+                            startPage = endPage
+                            endPage = p
+                        End If
+                        For p = startPage To endPage
+                            tmpList.Add p
+                        Next p
+                    End If
+                End If
+            End If
+        Else
+            ' Single page number
+            If IsNumeric(token) Then
+                p = CLng(token)
+                If p > 0 Then tmpList.Add p
+            End If
+        End If
+NextPageToken:
+    Next i
+
+    If tmpList.Count = 0 Then GoTo EmptyExit
+
+    ReDim arr(0 To tmpList.Count - 1)
+    For i = 1 To tmpList.Count
+        arr(i - 1) = CLng(tmpList(i))
+    Next i
+    ParsePageList = arr
+    Exit Function
+
+EmptyExit:
+    ReDim arr(0 To 0)
+    arr(0) = 0
+    ParsePageList = arr
+End Function
+
+' ============================================================
+'  Check whether a page number is in a parsed page-number array.
+'  Used by modules that need per-item page checks.
+' ============================================================
+Public Function IsPageSelected(ByVal pageNum As Long, ByRef selectedPages() As Long) As Boolean
+    Dim i As Long
+    If pageNum <= 0 Then Exit Function
+    On Error GoTo SafeExit
+    For i = LBound(selectedPages) To UBound(selectedPages)
+        If selectedPages(i) = pageNum Then
+            IsPageSelected = True
+            Exit Function
+        End If
+    Next i
+SafeExit:
+End Function
+
+Public Function GetPageRangeString() As String
+    GetPageRangeString = pageRangeString
+End Function
 
 Public Function GetRuleErrorCount() As Long
     GetRuleErrorCount = ruleErrorCount
@@ -1871,6 +2865,7 @@ Private Sub AddIssuesToCollection(master As Collection, _
     Next i
 End Sub
 
+
 Private Function EscJSON(ByVal txt As String) As String
     txt = Replace(txt, "\", "\\")
     txt = Replace(txt, """", "\""")
@@ -1880,31 +2875,52 @@ Private Function EscJSON(ByVal txt As String) As String
     EscJSON = txt
 End Function
 
+
 ' ================================================================
-'  PUBLIC: Factory function to create a dictionary-based finding
-'  Called by rule modules via Application.Run
+'  PUBLIC: Validate an issue anchor.  Returns True if the anchor
+'  is plausible; False if the issue should be skipped or repaired.
 ' ================================================================
-Public Function CreateIssue(ByVal ruleName_ As String, _
-                            ByVal location_ As String, _
-                            ByVal issue_ As String, _
-                            ByVal suggestion_ As String, _
-                            ByVal rangeStart_ As Long, _
-                            ByVal rangeEnd_ As Long, _
-                            Optional ByVal severity_ As String = "error", _
-                            Optional ByVal autoFixSafe_ As Boolean = False, _
-                            Optional ByVal replacementText_ As String = "") As Object
-    Dim d As Object
-    Set d = CreateObject("Scripting.Dictionary")
-    d("RuleName") = ruleName_
-    d("Location") = location_
-    d("Issue") = issue_
-    d("Suggestion") = suggestion_
-    d("RangeStart") = rangeStart_
-    d("RangeEnd") = rangeEnd_
-    d("Severity") = severity_
-    d("AutoFixSafe") = autoFixSafe_
-    d("ReplacementText") = replacementText_
-    Set CreateIssue = d
+Public Function ValidateIssueAnchor(ByVal finding As Object, _
+                                     Optional ByVal docStoryLen As Long = -1) As Boolean
+    ValidateIssueAnchor = False
+    On Error Resume Next
+    Dim rs As Long, re As Long
+    rs = CLng(GetIssueProp(finding, "RangeStart"))
+    If Err.Number <> 0 Then rs = -1: Err.Clear
+    re = CLng(GetIssueProp(finding, "RangeEnd"))
+    If Err.Number <> 0 Then re = -1: Err.Clear
+    On Error GoTo 0
+
+    ' Basic validity
+    If rs < 0 Then Exit Function
+    If re <= rs Then Exit Function
+    If docStoryLen > 0 And re > docStoryLen Then Exit Function
+
+    ' Suspicious 1-char anchor for multi-word finding
+    Dim issueLen As Long
+    issueLen = re - rs
+    If issueLen = 1 Then
+        Dim issueText As String
+        issueText = CStr(GetIssueProp(finding, "Issue"))
+        Dim ak As String
+        ak = CStr(GetIssueProp(finding, "AnchorKind"))
+        ' Single-char anchor is OK for exact_text / token on a single char
+        ' (e.g. a single quote or a single digit)
+        ' but suspicious for paragraph-span issues
+        If ak = "paragraph_span" Or ak = "paragraph_end" Then
+            Debug.Print "ANCHOR_WARN: 1-char anchor for " & ak & " issue: " & Left$(issueText, 60)
+        End If
+    End If
+
+    ValidateIssueAnchor = True
+End Function
+
+' ================================================================
+'  PUBLIC: Check whether a replacement text contains the Unicode
+'  replacement character U+FFFD.  If so, the replacement is unsafe.
+' ================================================================
+Public Function IsReplacementSafe(ByVal repText As String) As Boolean
+    IsReplacementSafe = (InStr(1, repText, ChrW$(65533)) = 0)
 End Function
 
 ' ================================================================
@@ -1965,7 +2981,29 @@ Private Function IssueToJSON(ByVal finding As Object) As String
         repText = CStr(GetIssueProp(finding, "ReplacementText"))
         s = s & "      ""replacement_text"": """ & EscJSON(repText) & """," & vbCrLf
     End If
-    s = s & "      ""auto_fix_safe"": " & IIf(CBool(GetIssueProp(finding, "AutoFixSafe")), "true", "false") & vbCrLf
+    s = s & "      ""auto_fix_safe"": " & IIf(CBool(GetIssueProp(finding, "AutoFixSafe")), "true", "false") & "," & vbCrLf
+    ' Enriched metadata
+    Dim mt As String: mt = CStr(GetIssueProp(finding, "MatchedText"))
+    If Len(mt) > 0 Then s = s & "      ""matched_text"": """ & EscJSON(Left$(mt, 80)) & """," & vbCrLf
+    Dim ak As String: ak = CStr(GetIssueProp(finding, "AnchorKind"))
+    If Len(ak) > 0 Then s = s & "      ""anchor_kind"": """ & EscJSON(ak) & """," & vbCrLf
+    Dim cl As String: cl = CStr(GetIssueProp(finding, "ConfidenceLabel"))
+    If Len(cl) > 0 Then s = s & "      ""confidence"": """ & EscJSON(cl) & """," & vbCrLf
+    Dim spi As Long
+    On Error Resume Next
+    spi = CLng(GetIssueProp(finding, "SourceParagraphIndex"))
+    If Err.Number <> 0 Then spi = 0: Err.Clear
+    On Error GoTo 0
+    If spi > 0 Then s = s & "      ""source_paragraph_index"": " & spi & "," & vbCrLf
+    Dim rs As Long, re As Long
+    On Error Resume Next
+    rs = CLng(GetIssueProp(finding, "RangeStart"))
+    If Err.Number <> 0 Then rs = 0: Err.Clear
+    re = CLng(GetIssueProp(finding, "RangeEnd"))
+    If Err.Number <> 0 Then re = 0: Err.Clear
+    On Error GoTo 0
+    s = s & "      ""range_start"": " & rs & "," & vbCrLf
+    s = s & "      ""range_end"": " & re & vbCrLf
     s = s & "    }"
     IssueToJSON = s
 End Function
