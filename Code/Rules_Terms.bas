@@ -59,7 +59,7 @@ Public Function Check_CustomTermWhitelist(doc As Document) As Collection
     End If
 
     ' -- Store in the engine for other rules to query -------
-    EngineSetWhitelist dict
+    TextAnchoring.SetWhitelist dict
 
     On Error GoTo 0
 
@@ -169,18 +169,6 @@ Private Sub EnsureUserWhitelist()
     End If
 End Sub
 
-' ----------------------------------------------------------------
-'  Late-bound wrapper: PleadingsEngine.SetWhitelist
-' ----------------------------------------------------------------
-Private Sub EngineSetWhitelist(dict As Object)
-    On Error Resume Next
-    Application.Run "PleadingsEngine.SetWhitelist", dict
-    If Err.Number <> 0 Then
-        Debug.Print "EngineSetWhitelist: fallback (Err " & Err.Number & ": " & Err.Description & ")"
-        Err.Clear
-    End If
-    On Error GoTo 0
-End Sub
 
 ' ----------------------------------------------------------------
 '  Merge 2 Variant arrays into one flat Variant array

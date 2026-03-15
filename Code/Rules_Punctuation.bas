@@ -8,7 +8,8 @@ Attribute VB_Name = "Rules_Punctuation"
 '     unmatched, and improperly nested brackets: (), [], {}.
 '
 ' Dependencies:
-'   - PleadingsEngine.bas (IsInPageRange, GetLocationString)
+'   - TextAnchoring.bas (IsInPageRange, GetLocationString,
+'     IsPastPageFilter, CreateIssueDict)
 ' ============================================================
 Option Explicit
 
@@ -182,16 +183,16 @@ Private Sub FlagSpacedSlashes(doc As Document, ByRef issues As Collection)
         If rng.Start <= lastPos Then Exit Do   ' stall guard
         lastPos = rng.Start
 
-        If Not EngineIsInPageRange(rng) Then GoTo ContinueSpaced
+        If Not TextAnchoring.IsInPageRange(rng) Then GoTo ContinueSpaced
         If IsURLContext(rng, doc) Then GoTo ContinueSpaced
 
-        locStr = EngineGetLocationString(rng, doc)
+        locStr = TextAnchoring.GetLocationString(rng, doc)
         If Err.Number <> 0 Then
             locStr = "unknown location"
             Err.Clear
         End If
 
-        Set finding = CreateIssueDict(RULE_NAME_SLASH, locStr, "Spaced slash '" & rng.Text & "' differs from dominant tight style", "Remove spaces around slash for consistency", rng.Start, rng.End, "possible_error")
+        Set finding = TextAnchoring.CreateIssueDict(RULE_NAME_SLASH, locStr, "Spaced slash '" & rng.Text & "' differs from dominant tight style", "Remove spaces around slash for consistency", rng.Start, rng.End, "possible_error")
         issues.Add finding
 
 ContinueSpaced:
@@ -233,18 +234,18 @@ Private Sub FlagTightSlashes(doc As Document, ByRef issues As Collection)
         If rng.Start <= lastPos2 Then Exit Do   ' stall guard
         lastPos2 = rng.Start
 
-        If Not EngineIsInPageRange(rng) Then GoTo ContinueTight
+        If Not TextAnchoring.IsInPageRange(rng) Then GoTo ContinueTight
         If IsURLContext(rng, doc) Then GoTo ContinueTight
         If IsDateSlash(rng) Then GoTo ContinueTight
         If IsConventionalTightSlash(rng, doc) Then GoTo ContinueTight
 
-        locStr = EngineGetLocationString(rng, doc)
+        locStr = TextAnchoring.GetLocationString(rng, doc)
         If Err.Number <> 0 Then
             locStr = "unknown location"
             Err.Clear
         End If
 
-        Set finding = CreateIssueDict(RULE_NAME_SLASH, locStr, "Tight slash '" & rng.Text & "' differs from dominant spaced style", "Add spaces around slash for consistency", rng.Start, rng.End, "possible_error")
+        Set finding = TextAnchoring.CreateIssueDict(RULE_NAME_SLASH, locStr, "Tight slash '" & rng.Text & "' differs from dominant spaced style", "Add spaces around slash for consistency", rng.Start, rng.End, "possible_error")
         issues.Add finding
 
 ContinueTight:
@@ -288,7 +289,7 @@ Private Sub FlagBackslashes(doc As Document, ByRef issues As Collection)
         If rng.Start <= lastPos3 Then Exit Do   ' stall guard
         lastPos3 = rng.Start
 
-        If Not EngineIsInPageRange(rng) Then GoTo ContinueBackslash
+        If Not TextAnchoring.IsInPageRange(rng) Then GoTo ContinueBackslash
 
         ' Get surrounding context for skip checks
         Dim contextStart As Long
@@ -330,13 +331,13 @@ Private Sub FlagBackslashes(doc As Document, ByRef issues As Collection)
         End If
 
         ' Flag the backslash
-        locStr = EngineGetLocationString(rng, doc)
+        locStr = TextAnchoring.GetLocationString(rng, doc)
         If Err.Number <> 0 Then
             locStr = "unknown location"
             Err.Clear
         End If
 
-        Set finding = CreateIssueDict(RULE_NAME_SLASH, locStr, "Unexpected backslash -- did you mean forward slash?", "Replace '\' with '/'", rng.Start, rng.End, "possible_error")
+        Set finding = TextAnchoring.CreateIssueDict(RULE_NAME_SLASH, locStr, "Unexpected backslash -- did you mean forward slash?", "Replace '\' with '/'", rng.Start, rng.End, "possible_error")
         issues.Add finding
 
 ContinueBackslash:
@@ -584,8 +585,8 @@ Public Function Check_BracketIntegrity(doc As Document) As Collection
         On Error GoTo 0
 
         ' Page-range filter: skip paragraphs outside selected pages
-        If EngineIsPastPageFilter(paraStart) Then Exit For
-        If Not EngineIsInPageRange(para.Range) Then GoTo NxtPara
+        If TextAnchoring.IsPastPageFilter(paraStart) Then Exit For
+        If Not TextAnchoring.IsInPageRange(para.Range) Then GoTo NxtPara
 
         If LenB(paraText) = 0 Then GoTo NxtPara
 
@@ -721,12 +722,12 @@ Private Sub CreateBracketIssue(doc As Document, _
     End If
 
     ' Skip if outside page range
-    If Not EngineIsInPageRange(rng) Then
+    If Not TextAnchoring.IsInPageRange(rng) Then
         On Error GoTo 0
         Exit Sub
     End If
 
-    locStr = EngineGetLocationString(rng, doc)
+    locStr = TextAnchoring.GetLocationString(rng, doc)
     If Err.Number <> 0 Then
         locStr = "unknown location"
         Err.Clear
@@ -746,7 +747,7 @@ Private Sub CreateBracketIssue(doc As Document, _
             suggestion = "Review bracket pairing"
     End Select
 
-    Set finding = CreateIssueDict(RULE_NAME_BRACKET, locStr, issueText, suggestion, pos, pos + 1, "error")
+    Set finding = TextAnchoring.CreateIssueDict(RULE_NAME_BRACKET, locStr, issueText, suggestion, pos, pos + 1, "error")
     issues.Add finding
 End Sub
 
@@ -784,9 +785,6 @@ Private Function GetDashListPrefixLen(para As Paragraph, ByVal paraText As Strin
     On Error GoTo 0
 End Function
 
-' ----------------------------------------------------------------
-'  PRIVATE: Create a dictionary-based finding (no class dependency)
-' ----------------------------------------------------------------
 ' ============================================================
 '  TRIPLICATE PUNCTUATION
 '  Flags three or more consecutive identical punctuation marks:
@@ -815,8 +813,8 @@ Public Function Check_TriplicatePunctuation(doc As Document) As Collection
         If Len(paraText) < 3 Then GoTo NextTriPara
 
         ' Check page range
-        If EngineIsPastPageFilter(para.Range.Start) Then Exit For
-        If Not EngineIsInPageRange(para.Range) Then GoTo NextTriPara
+        If TextAnchoring.IsPastPageFilter(para.Range.Start) Then Exit For
+        If Not TextAnchoring.IsInPageRange(para.Range) Then GoTo NextTriPara
 
         i = 1
         Do While i <= Len(paraText) - 2
@@ -828,10 +826,10 @@ Public Function Check_TriplicatePunctuation(doc As Document) As Collection
                     runLen = runLen + 1
                 Loop
                 If runLen >= 3 Then
-                    locStr = EngineGetLocationString(para.Range, doc)
+                    locStr = TextAnchoring.GetLocationString(para.Range, doc)
                     Dim matched As String
                     matched = String$(runLen, ch)
-                    Set finding = CreateIssueDict( _
+                    Set finding = TextAnchoring.CreateIssueDict( _
                         RULE_NAME_TRIPLICATE, locStr, _
                         "Triplicate punctuation: '" & matched & "'", _
                         "Remove repeated punctuation", _
@@ -852,37 +850,6 @@ NextTriPara:
     On Error GoTo 0
 
     Set Check_TriplicatePunctuation = issues
-End Function
-
-Private Function CreateIssueDict(ByVal ruleName_ As String, _
-                                 ByVal location_ As String, _
-                                 ByVal issue_ As String, _
-                                 ByVal suggestion_ As String, _
-                                 ByVal rangeStart_ As Long, _
-                                 ByVal rangeEnd_ As Long, _
-                                 Optional ByVal severity_ As String = "error", _
-                                 Optional ByVal autoFixSafe_ As Boolean = False, _
-                                 Optional ByVal replacementText_ As String = "", _
-                                 Optional ByVal matchedText_ As String = "", _
-                                 Optional ByVal anchorKind_ As String = "exact_text", _
-                                 Optional ByVal confidenceLabel_ As String = "high", _
-                                 Optional ByVal sourceParagraphIndex_ As Long = 0) As Object
-    Dim d As Object
-    Set d = CreateObject("Scripting.Dictionary")
-    d("RuleName") = ruleName_
-    d("Location") = location_
-    d("Issue") = issue_
-    d("Suggestion") = suggestion_
-    d("RangeStart") = rangeStart_
-    d("RangeEnd") = rangeEnd_
-    d("Severity") = severity_
-    d("AutoFixSafe") = autoFixSafe_
-    If autoFixSafe_ Then d("ReplacementText") = replacementText_
-    d("MatchedText") = matchedText_
-    d("AnchorKind") = anchorKind_
-    d("ConfidenceLabel") = confidenceLabel_
-    d("SourceParagraphIndex") = sourceParagraphIndex_
-    Set CreateIssueDict = d
 End Function
 
 
@@ -927,8 +894,8 @@ Public Function Check_DashUsage(doc As Document) As Collection
         Set paraRange = para.Range
         If Err.Number <> 0 Then Err.Clear: GoTo NextParaDash
 
-        If EngineIsPastPageFilter(paraRange.Start) Then Exit For
-        If Not EngineIsInPageRange(paraRange) Then GoTo NextParaDash
+        If TextAnchoring.IsPastPageFilter(paraRange.Start) Then Exit For
+        If Not TextAnchoring.IsInPageRange(paraRange) Then GoTo NextParaDash
 
         paraText = paraRange.Text
         If Err.Number <> 0 Then Err.Clear: GoTo NextParaDash
@@ -965,10 +932,10 @@ Public Function Check_DashUsage(doc As Document) As Collection
                 locStr = "unknown location"
                 Err.Clear
             Else
-                locStr = EngineGetLocationString(hrRng, doc)
+                locStr = TextAnchoring.GetLocationString(hrRng, doc)
             End If
 
-            Set finding = CreateIssueDict(RULE_NAME_DASH, locStr, _
+            Set finding = TextAnchoring.CreateIssueDict(RULE_NAME_DASH, locStr, _
                 "Hyphen used in number range. Use an en-dash (" & enDash & ") for ranges.", _
                 "Replace hyphen with en-dash", hyphenPos, hrEnd, "error", True, enDash)
             issues.Add finding
@@ -991,10 +958,10 @@ Public Function Check_DashUsage(doc As Document) As Collection
                 locStr = "unknown location"
                 Err.Clear
             Else
-                locStr = EngineGetLocationString(dhRng, doc)
+                locStr = TextAnchoring.GetLocationString(dhRng, doc)
             End If
 
-            Set finding = CreateIssueDict(RULE_NAME_DASH, locStr, _
+            Set finding = TextAnchoring.CreateIssueDict(RULE_NAME_DASH, locStr, _
                 "Double-hyphen found. Use an em-dash (" & emDash & ") instead.", _
                 "Replace with em-dash", dhStart, dhEnd, "error", True, emDash)
             issues.Add finding
@@ -1031,10 +998,10 @@ Public Function Check_DashUsage(doc As Document) As Collection
                         locStr = "unknown location"
                         Err.Clear
                     Else
-                        locStr = EngineGetLocationString(enRng, doc)
+                        locStr = TextAnchoring.GetLocationString(enRng, doc)
                     End If
 
-                    Set finding = CreateIssueDict(RULE_NAME_DASH, locStr, _
+                    Set finding = TextAnchoring.CreateIssueDict(RULE_NAME_DASH, locStr, _
                         "En-dash (" & enDash & ") used between words. Use a hyphen (-) for compound words.", _
                         "Replace en-dash with hyphen", enStart, enEnd, "error", True, "-")
                     issues.Add finding
@@ -1074,10 +1041,10 @@ Public Function Check_DashUsage(doc As Document) As Collection
                         locStr = "unknown location"
                         Err.Clear
                     Else
-                        locStr = EngineGetLocationString(snRng, doc)
+                        locStr = TextAnchoring.GetLocationString(snRng, doc)
                     End If
 
-                    Set finding = CreateIssueDict(RULE_NAME_DASH, locStr, _
+                    Set finding = TextAnchoring.CreateIssueDict(RULE_NAME_DASH, locStr, _
                         "Spaced en-dash (" & enDash & ") found. Consider using an em-dash (" & emDash & ") for parenthetical interruptions.", _
                         emDash, snStart, snEnd, "warning", False)
                     issues.Add finding
@@ -1093,45 +1060,4 @@ NextParaDash:
     On Error GoTo 0
 
     Set Check_DashUsage = issues
-End Function
-
-' ----------------------------------------------------------------
-'  Late-bound wrapper: PleadingsEngine.IsInPageRange
-' ----------------------------------------------------------------
-Private Function EngineIsInPageRange(rng As Object) As Boolean
-    On Error Resume Next
-    EngineIsInPageRange = Application.Run("PleadingsEngine.IsInPageRange", rng)
-    If Err.Number <> 0 Then
-        Debug.Print "EngineIsInPageRange: fallback (Err " & Err.Number & ": " & Err.Description & ")"
-        EngineIsInPageRange = True
-        Err.Clear
-    End If
-    On Error GoTo 0
-End Function
-
-' ----------------------------------------------------------------
-'  Late-bound wrapper: PleadingsEngine.GetLocationString
-' ----------------------------------------------------------------
-Private Function EngineGetLocationString(rng As Object, doc As Document) As String
-    On Error Resume Next
-    EngineGetLocationString = Application.Run("PleadingsEngine.GetLocationString", rng, doc)
-    If Err.Number <> 0 Then
-        Debug.Print "EngineGetLocationString: fallback (Err " & Err.Number & ": " & Err.Description & ")"
-        EngineGetLocationString = "unknown location"
-        Err.Clear
-    End If
-    On Error GoTo 0
-End Function
-
-' ----------------------------------------------------------------
-'  Late-bound wrapper: PleadingsEngine.IsPastPageFilter
-' ----------------------------------------------------------------
-Private Function EngineIsPastPageFilter(ByVal startPos As Long) As Boolean
-    On Error Resume Next
-    EngineIsPastPageFilter = Application.Run("PleadingsEngine.IsPastPageFilter", startPos)
-    If Err.Number <> 0 Then
-        EngineIsPastPageFilter = False
-        Err.Clear
-    End If
-    On Error GoTo 0
 End Function

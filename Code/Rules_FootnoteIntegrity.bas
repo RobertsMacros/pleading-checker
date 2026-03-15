@@ -11,7 +11,8 @@ Attribute VB_Name = "Rules_FootnoteIntegrity"
 '   4. Duplicate content -- two footnotes with identical text
 '
 ' Dependencies:
-'   - PleadingsEngine.bas (IsInPageRange, GetLocationString)
+'   - TextAnchoring.bas (IsInPageRange, GetLocationString,
+'                        CreateIssueDict, IsPunctuation)
 ' ============================================================
 Option Explicit
 
@@ -78,7 +79,7 @@ Private Sub CheckNoteSequence(doc As Document, _
         Set fn = notes(i)
 
         On Error Resume Next
-        If Not EngineIsInPageRange(fn.Reference) Then
+        If Not TextAnchoring.IsInPageRange(fn.Reference) Then
             expectedIdx = expectedIdx + 1
             On Error GoTo 0
             GoTo NextFootnote
@@ -87,11 +88,11 @@ Private Sub CheckNoteSequence(doc As Document, _
 
         If fn.Index <> expectedIdx Then
             On Error Resume Next
-            locStr = EngineGetLocationString(fn.Reference, doc)
+            locStr = TextAnchoring.GetLocationString(fn.Reference, doc)
             If Err.Number <> 0 Then locStr = "unknown location": Err.Clear
             On Error GoTo 0
 
-            Set finding = CreateIssueDict(RULE_NAME, locStr, noteType & " numbering gap: expected " & expectedIdx & ", found " & fn.Index, "Renumber " & LCase(noteType) & "s sequentially", fn.Reference.Start, fn.Reference.End, "error")
+            Set finding = TextAnchoring.CreateIssueDict(RULE_NAME, locStr, noteType & " numbering gap: expected " & expectedIdx & ", found " & fn.Index, "Renumber " & LCase(noteType) & "s sequentially", fn.Reference.Start, fn.Reference.End, "error")
             issues.Add finding
         End If
 
@@ -120,7 +121,7 @@ Private Sub CheckEndnoteSequence(doc As Document, _
         Set en = notes(i)
 
         On Error Resume Next
-        If Not EngineIsInPageRange(en.Reference) Then
+        If Not TextAnchoring.IsInPageRange(en.Reference) Then
             expectedIdx = expectedIdx + 1
             On Error GoTo 0
             GoTo NextEndnoteSeq
@@ -129,11 +130,11 @@ Private Sub CheckEndnoteSequence(doc As Document, _
 
         If en.Index <> expectedIdx Then
             On Error Resume Next
-            locStr = EngineGetLocationString(en.Reference, doc)
+            locStr = TextAnchoring.GetLocationString(en.Reference, doc)
             If Err.Number <> 0 Then locStr = "unknown location": Err.Clear
             On Error GoTo 0
 
-            Set finding = CreateIssueDict(RULE_NAME, locStr, noteType & " numbering gap: expected " & expectedIdx & ", found " & en.Index, "Renumber " & LCase(noteType) & "s sequentially", en.Reference.Start, en.Reference.End, "error")
+            Set finding = TextAnchoring.CreateIssueDict(RULE_NAME, locStr, noteType & " numbering gap: expected " & expectedIdx & ", found " & en.Index, "Renumber " & LCase(noteType) & "s sequentially", en.Reference.Start, en.Reference.End, "error")
             issues.Add finding
         End If
 
@@ -161,7 +162,7 @@ Private Sub CheckNotePlacement(doc As Document, _
         Set fn = notes(i)
 
         On Error Resume Next
-        If Not EngineIsInPageRange(fn.Reference) Then
+        If Not TextAnchoring.IsInPageRange(fn.Reference) Then
             On Error GoTo 0
             GoTo NextFnPlace
         End If
@@ -180,13 +181,13 @@ Private Sub CheckNotePlacement(doc As Document, _
             End If
             On Error GoTo 0
 
-            If Not IsPunctuation(charBefore) Then
+            If Not TextAnchoring.IsPunctuation(charBefore) Then
                 On Error Resume Next
-                locStr = EngineGetLocationString(fn.Reference, doc)
+                locStr = TextAnchoring.GetLocationString(fn.Reference, doc)
                 If Err.Number <> 0 Then locStr = "unknown location": Err.Clear
                 On Error GoTo 0
 
-                Set finding = CreateIssueDict(RULE_NAME, locStr, noteType & " " & fn.Index & " reference not placed after punctuation", "Place " & LCase(noteType) & " reference after punctuation mark", fn.Reference.Start, fn.Reference.End, "error")
+                Set finding = TextAnchoring.CreateIssueDict(RULE_NAME, locStr, noteType & " " & fn.Index & " reference not placed after punctuation", "Place " & LCase(noteType) & " reference after punctuation mark", fn.Reference.Start, fn.Reference.End, "error")
                 issues.Add finding
             End If
         End If
@@ -213,7 +214,7 @@ Private Sub CheckEndnotePlacement(doc As Document, _
         Set en = notes(i)
 
         On Error Resume Next
-        If Not EngineIsInPageRange(en.Reference) Then
+        If Not TextAnchoring.IsInPageRange(en.Reference) Then
             On Error GoTo 0
             GoTo NextEnPlace
         End If
@@ -231,13 +232,13 @@ Private Sub CheckEndnotePlacement(doc As Document, _
             End If
             On Error GoTo 0
 
-            If Not IsPunctuation(charBefore) Then
+            If Not TextAnchoring.IsPunctuation(charBefore) Then
                 On Error Resume Next
-                locStr = EngineGetLocationString(en.Reference, doc)
+                locStr = TextAnchoring.GetLocationString(en.Reference, doc)
                 If Err.Number <> 0 Then locStr = "unknown location": Err.Clear
                 On Error GoTo 0
 
-                Set finding = CreateIssueDict(RULE_NAME, locStr, noteType & " " & en.Index & " reference not placed after punctuation", "Place " & LCase(noteType) & " reference after punctuation mark", en.Reference.Start, en.Reference.End, "error")
+                Set finding = TextAnchoring.CreateIssueDict(RULE_NAME, locStr, noteType & " " & en.Index & " reference not placed after punctuation", "Place " & LCase(noteType) & " reference after punctuation mark", en.Reference.Start, en.Reference.End, "error")
                 issues.Add finding
             End If
         End If
@@ -263,7 +264,7 @@ Private Sub CheckEmptyNotes(doc As Document, _
         Set fn = notes(i)
 
         On Error Resume Next
-        If Not EngineIsInPageRange(fn.Reference) Then
+        If Not TextAnchoring.IsInPageRange(fn.Reference) Then
             On Error GoTo 0
             GoTo NextFnEmpty
         End If
@@ -279,11 +280,11 @@ Private Sub CheckEmptyNotes(doc As Document, _
 
         If Len(noteText) = 0 Then
             On Error Resume Next
-            locStr = EngineGetLocationString(fn.Reference, doc)
+            locStr = TextAnchoring.GetLocationString(fn.Reference, doc)
             If Err.Number <> 0 Then locStr = "unknown location": Err.Clear
             On Error GoTo 0
 
-            Set finding = CreateIssueDict(RULE_NAME, locStr, noteType & " " & fn.Index & " has empty content", "Add content or remove the empty " & LCase(noteType), fn.Reference.Start, fn.Reference.End, "error")
+            Set finding = TextAnchoring.CreateIssueDict(RULE_NAME, locStr, noteType & " " & fn.Index & " has empty content", "Add content or remove the empty " & LCase(noteType), fn.Reference.Start, fn.Reference.End, "error")
             issues.Add finding
         End If
 
@@ -308,7 +309,7 @@ Private Sub CheckEmptyEndnotes(doc As Document, _
         Set en = notes(i)
 
         On Error Resume Next
-        If Not EngineIsInPageRange(en.Reference) Then
+        If Not TextAnchoring.IsInPageRange(en.Reference) Then
             On Error GoTo 0
             GoTo NextEnEmpty
         End If
@@ -324,11 +325,11 @@ Private Sub CheckEmptyEndnotes(doc As Document, _
 
         If Len(noteText) = 0 Then
             On Error Resume Next
-            locStr = EngineGetLocationString(en.Reference, doc)
+            locStr = TextAnchoring.GetLocationString(en.Reference, doc)
             If Err.Number <> 0 Then locStr = "unknown location": Err.Clear
             On Error GoTo 0
 
-            Set finding = CreateIssueDict(RULE_NAME, locStr, noteType & " " & en.Index & " has empty content", "Add content or remove the empty " & LCase(noteType), en.Reference.Start, en.Reference.End, "error")
+            Set finding = TextAnchoring.CreateIssueDict(RULE_NAME, locStr, noteType & " " & en.Index & " has empty content", "Add content or remove the empty " & LCase(noteType), en.Reference.Start, en.Reference.End, "error")
             issues.Add finding
         End If
 
@@ -357,7 +358,7 @@ Private Sub CheckDuplicateNotes(doc As Document, _
         Set fn = notes(i)
 
         On Error Resume Next
-        If Not EngineIsInPageRange(fn.Reference) Then
+        If Not TextAnchoring.IsInPageRange(fn.Reference) Then
             On Error GoTo 0
             GoTo NextFnDup
         End If
@@ -380,11 +381,11 @@ Private Sub CheckDuplicateNotes(doc As Document, _
             firstIdx = CLng(contentDict(cleanText))
 
             On Error Resume Next
-            locStr = EngineGetLocationString(fn.Reference, doc)
+            locStr = TextAnchoring.GetLocationString(fn.Reference, doc)
             If Err.Number <> 0 Then locStr = "unknown location": Err.Clear
             On Error GoTo 0
 
-            Set finding = CreateIssueDict(RULE_NAME, locStr, noteType & " " & fn.Index & " has identical content to " & LCase(noteType) & " " & firstIdx, "Remove duplicate or differentiate content", fn.Reference.Start, fn.Reference.End, "possible_error")
+            Set finding = TextAnchoring.CreateIssueDict(RULE_NAME, locStr, noteType & " " & fn.Index & " has identical content to " & LCase(noteType) & " " & firstIdx, "Remove duplicate or differentiate content", fn.Reference.Start, fn.Reference.End, "possible_error")
             issues.Add finding
         Else
             contentDict.Add cleanText, fn.Index
@@ -415,7 +416,7 @@ Private Sub CheckDuplicateEndnotes(doc As Document, _
         Set en = notes(i)
 
         On Error Resume Next
-        If Not EngineIsInPageRange(en.Reference) Then
+        If Not TextAnchoring.IsInPageRange(en.Reference) Then
             On Error GoTo 0
             GoTo NextEnDup
         End If
@@ -436,11 +437,11 @@ Private Sub CheckDuplicateEndnotes(doc As Document, _
             firstEnIdx = CLng(contentDict(cleanText))
 
             On Error Resume Next
-            locStr = EngineGetLocationString(en.Reference, doc)
+            locStr = TextAnchoring.GetLocationString(en.Reference, doc)
             If Err.Number <> 0 Then locStr = "unknown location": Err.Clear
             On Error GoTo 0
 
-            Set finding = CreateIssueDict(RULE_NAME, locStr, noteType & " " & en.Index & " has identical content to " & LCase(noteType) & " " & firstEnIdx, "Remove duplicate or differentiate content", en.Reference.Start, en.Reference.End, "possible_error")
+            Set finding = TextAnchoring.CreateIssueDict(RULE_NAME, locStr, noteType & " " & en.Index & " has identical content to " & LCase(noteType) & " " & firstEnIdx, "Remove duplicate or differentiate content", en.Reference.Start, en.Reference.End, "possible_error")
             issues.Add finding
         Else
             contentDict.Add cleanText, en.Index
@@ -449,81 +450,3 @@ Private Sub CheckDuplicateEndnotes(doc As Document, _
 NextEnDup:
     Next i
 End Sub
-
-' ============================================================
-'  PRIVATE: Check if character is punctuation
-' ============================================================
-Private Function IsPunctuation(ByVal ch As String) As Boolean
-    Select Case ch
-        Case ".", ",", ";", ":", """", "'", ")", _
-             ChrW(8221), ChrW(8217), ChrW(8220), ChrW(8216), _
-             "!", "?"
-            IsPunctuation = True
-        Case Else
-            IsPunctuation = False
-    End Select
-End Function
-
-
-' ----------------------------------------------------------------
-'  PRIVATE: Create a dictionary-based finding (no class dependency)
-' ----------------------------------------------------------------
-Private Function CreateIssueDict(ByVal ruleName_ As String, _
-                                 ByVal location_ As String, _
-                                 ByVal issue_ As String, _
-                                 ByVal suggestion_ As String, _
-                                 ByVal rangeStart_ As Long, _
-                                 ByVal rangeEnd_ As Long, _
-                                 Optional ByVal severity_ As String = "error", _
-                                 Optional ByVal autoFixSafe_ As Boolean = False, _
-                                 Optional ByVal replacementText_ As String = "", _
-                                 Optional ByVal matchedText_ As String = "", _
-                                 Optional ByVal anchorKind_ As String = "exact_text", _
-                                 Optional ByVal confidenceLabel_ As String = "high", _
-                                 Optional ByVal sourceParagraphIndex_ As Long = 0) As Object
-    Dim d As Object
-    Set d = CreateObject("Scripting.Dictionary")
-    d("RuleName") = ruleName_
-    d("Location") = location_
-    d("Issue") = issue_
-    d("Suggestion") = suggestion_
-    d("RangeStart") = rangeStart_
-    d("RangeEnd") = rangeEnd_
-    d("Severity") = severity_
-    d("AutoFixSafe") = autoFixSafe_
-    If autoFixSafe_ Then d("ReplacementText") = replacementText_
-    d("MatchedText") = matchedText_
-    d("AnchorKind") = anchorKind_
-    d("ConfidenceLabel") = confidenceLabel_
-    d("SourceParagraphIndex") = sourceParagraphIndex_
-    Set CreateIssueDict = d
-End Function
-
-
-' ----------------------------------------------------------------
-'  Late-bound wrapper: PleadingsEngine.IsInPageRange
-' ----------------------------------------------------------------
-Private Function EngineIsInPageRange(rng As Object) As Boolean
-    On Error Resume Next
-    EngineIsInPageRange = Application.Run("PleadingsEngine.IsInPageRange", rng)
-    If Err.Number <> 0 Then
-        Debug.Print "EngineIsInPageRange: fallback (Err " & Err.Number & ": " & Err.Description & ")"
-        EngineIsInPageRange = True
-        Err.Clear
-    End If
-    On Error GoTo 0
-End Function
-
-' ----------------------------------------------------------------
-'  Late-bound wrapper: PleadingsEngine.GetLocationString
-' ----------------------------------------------------------------
-Private Function EngineGetLocationString(rng As Object, doc As Document) As String
-    On Error Resume Next
-    EngineGetLocationString = Application.Run("PleadingsEngine.GetLocationString", rng, doc)
-    If Err.Number <> 0 Then
-        Debug.Print "EngineGetLocationString: fallback (Err " & Err.Number & ": " & Err.Description & ")"
-        EngineGetLocationString = "unknown location"
-        Err.Clear
-    End If
-    On Error GoTo 0
-End Function

@@ -48,7 +48,7 @@ Public Function Check_DoubleSpaces(doc As Document) As Collection
     reSingle.Pattern = "\.( )([A-Z])"
 
     Dim spaceStyle As String
-    spaceStyle = EngineGetSpaceStylePref()
+    spaceStyle = TextAnchoring.GetSpaceStylePref()
 
     Dim para As Paragraph
     Dim paraText As String
@@ -62,21 +62,21 @@ Public Function Check_DoubleSpaces(doc As Document) As Collection
         Set paraRange = para.Range
         If Err.Number <> 0 Then Err.Clear: GoTo NextParaDS
 
-        If EngineIsPastPageFilter(paraRange.Start) Then Exit For
-        If Not EngineIsInPageRange(paraRange) Then GoTo NextParaDS
+        If TextAnchoring.IsPastPageFilter(paraRange.Start) Then Exit For
+        If Not TextAnchoring.IsInPageRange(paraRange) Then GoTo NextParaDS
 
         ' Block quotes are filtered at engine level by FilterBlockQuoteIssues.
         ' Removed per-paragraph Application.Run("IsBlockQuotePara") call here
         ' to eliminate heavy object-model traffic (font/italic/text/style
         ' per paragraph via cross-module dispatch was a major regression cause).
 
-        paraText = StripParaMarkChar(paraRange.Text)
+        paraText = TextAnchoring.StripParaMarkChar(paraRange.Text)
         If Err.Number <> 0 Then Err.Clear: GoTo NextParaDS
         If Len(paraText) < 2 Then GoTo NextParaDS
 
         ' Calculate auto-number prefix offset
         Dim listPrefixLen As Long
-        listPrefixLen = GetListPrefixLen(para, paraText)
+        listPrefixLen = TextAnchoring.GetListPrefixLen(para, paraText)
 
         ' --- Pass 1: Flag runs of 2+ spaces ---
         Dim mDoubles As Object
@@ -115,7 +115,7 @@ Public Function Check_DoubleSpaces(doc As Document) As Collection
                 locStr = "unknown location"
                 Err.Clear
             Else
-                locStr = EngineGetLocationString(dsRng, doc)
+                locStr = TextAnchoring.GetLocationString(dsRng, doc)
             End If
 
             Dim dsMsg As String
@@ -129,7 +129,7 @@ Public Function Check_DoubleSpaces(doc As Document) As Collection
             ' Store the actual space characters as MatchedText
             Dim dsMatchedText As String
             dsMatchedText = String(md.Length - 1, " ")
-            Set finding = CreateIssueDict(RULE_DOUBLE_SPACES, locStr, _
+            Set finding = TextAnchoring.CreateIssueDict(RULE_DOUBLE_SPACES, locStr, _
                 dsMsg, "Remove extra space(s)", dsStart + 1, dsEnd, "error", True, "", _
                 dsMatchedText, "exact_text", "high")
             issues.Add finding
@@ -162,11 +162,11 @@ NextDoubleMatch:
                         locStr = "unknown location"
                         Err.Clear
                     Else
-                        locStr = EngineGetLocationString(msRng, doc)
+                        locStr = TextAnchoring.GetLocationString(msRng, doc)
                     End If
 
                     ' Suggestion replaces ". " with ".  " (insert extra space)
-                    Set finding = CreateIssueDict(RULE_DOUBLE_SPACES, locStr, _
+                    Set finding = TextAnchoring.CreateIssueDict(RULE_DOUBLE_SPACES, locStr, _
                         "Missing second space after sentence-ending full stop.", _
                         "Add a second space after the full stop", msStart, msEnd, _
                         "warning", True, ".  ", ". ", "exact_text", "high")
@@ -201,14 +201,14 @@ Public Function Check_DoubleCommas(doc As Document) As Collection
         Set paraRange = para.Range
         If Err.Number <> 0 Then Err.Clear: GoTo NextParaDC
 
-        If EngineIsPastPageFilter(paraRange.Start) Then Exit For
-        If Not EngineIsInPageRange(paraRange) Then GoTo NextParaDC
+        If TextAnchoring.IsPastPageFilter(paraRange.Start) Then Exit For
+        If Not TextAnchoring.IsInPageRange(paraRange) Then GoTo NextParaDC
 
         paraText = paraRange.Text
         If Err.Number <> 0 Then Err.Clear: GoTo NextParaDC
 
         Dim dcListPrefixLen As Long
-        dcListPrefixLen = GetListPrefixLen(para, paraText)
+        dcListPrefixLen = TextAnchoring.GetListPrefixLen(para, paraText)
 
         pos = InStr(1, paraText, ",,")
         Do While pos > 0
@@ -224,10 +224,10 @@ Public Function Check_DoubleCommas(doc As Document) As Collection
                 locStr = "unknown location"
                 Err.Clear
             Else
-                locStr = EngineGetLocationString(dcRng, doc)
+                locStr = TextAnchoring.GetLocationString(dcRng, doc)
             End If
 
-            Set finding = CreateIssueDict(RULE_DOUBLE_COMMAS, locStr, _
+            Set finding = TextAnchoring.CreateIssueDict(RULE_DOUBLE_COMMAS, locStr, _
                 "Double comma found.", "Replace with a single comma", _
                 dcStart, dcEnd, "error", True, ",", _
                 ",,", "exact_text", "high")
@@ -270,13 +270,13 @@ Public Function Check_SpaceBeforePunct(doc As Document) As Collection
         If rng.Start <= lastPos Then Exit Do   ' stall guard
         lastPos = rng.Start
 
-        If Not EngineIsInPageRange(rng) Then
+        If Not TextAnchoring.IsInPageRange(rng) Then
             rng.Collapse wdCollapseEnd
             GoTo NextSBP
         End If
 
         Err.Clear
-        locStr = EngineGetLocationString(rng, doc)
+        locStr = TextAnchoring.GetLocationString(rng, doc)
         If Err.Number <> 0 Then locStr = "unknown location": Err.Clear
 
         Dim punctChar As String
@@ -284,7 +284,7 @@ Public Function Check_SpaceBeforePunct(doc As Document) As Collection
 
         ' Range covers only the space (not the punctuation character)
         ' Store the space as MatchedText
-        Set finding = CreateIssueDict(RULE_SPACE_BEFORE_PUNCT, locStr, _
+        Set finding = TextAnchoring.CreateIssueDict(RULE_SPACE_BEFORE_PUNCT, locStr, _
             "Unexpected space before '" & punctChar & "'", _
             "Remove the space before punctuation", rng.Start, rng.Start + 1, "error", True, "", _
             " ", "exact_text", "high")
@@ -323,15 +323,15 @@ Public Function Check_MissingSpaceAfterDot(doc As Document) As Collection
         Set paraRange = para.Range
         If Err.Number <> 0 Then Err.Clear: GoTo NextParaMSD
 
-        If EngineIsPastPageFilter(paraRange.Start) Then Exit For
-        If Not EngineIsInPageRange(paraRange) Then GoTo NextParaMSD
+        If TextAnchoring.IsPastPageFilter(paraRange.Start) Then Exit For
+        If Not TextAnchoring.IsInPageRange(paraRange) Then GoTo NextParaMSD
 
-        paraText = StripParaMarkChar(paraRange.Text)
+        paraText = TextAnchoring.StripParaMarkChar(paraRange.Text)
         If Err.Number <> 0 Then Err.Clear: GoTo NextParaMSD
         If Len(paraText) < 2 Then GoTo NextParaMSD
 
         Dim msdListPrefixLen As Long
-        msdListPrefixLen = GetListPrefixLen(para, paraText)
+        msdListPrefixLen = TextAnchoring.GetListPrefixLen(para, paraText)
 
         Dim matches As Object
         Set matches = re.Execute(paraText)
@@ -354,10 +354,10 @@ Public Function Check_MissingSpaceAfterDot(doc As Document) As Collection
                     locStr = "unknown location"
                     Err.Clear
                 Else
-                    locStr = EngineGetLocationString(msdRng, doc)
+                    locStr = TextAnchoring.GetLocationString(msdRng, doc)
                 End If
 
-                Set finding = CreateIssueDict(RULE_MISSING_SPACE_DOT, locStr, _
+                Set finding = TextAnchoring.CreateIssueDict(RULE_MISSING_SPACE_DOT, locStr, _
                     "Missing space after full stop before '" & _
                     Mid(paraText, dotIdx + 2, 1) & "'.", _
                     "Insert a space after the full stop.", _
@@ -377,40 +377,6 @@ End Function
 ' ============================================================
 '  PRIVATE HELPERS
 ' ============================================================
-
-' Calculate the length of auto-generated list numbering text
-' that appears in Range.Text but doesn't map to document positions.
-' Returns 0 for non-list paragraphs.
-Private Function GetListPrefixLen(para As Paragraph, ByVal paraText As String) As Long
-    GetListPrefixLen = 0
-    On Error Resume Next
-    Dim lStr As String
-    lStr = para.Range.ListFormat.ListString
-    If Err.Number <> 0 Then Err.Clear: On Error GoTo 0: Exit Function
-    If Len(lStr) = 0 Then On Error GoTo 0: Exit Function
-    ' Verify the text actually starts with the list string
-    If Len(paraText) > Len(lStr) Then
-        If Left$(paraText, Len(lStr)) = lStr Then
-            GetListPrefixLen = Len(lStr)
-            ' Account for tab separator after list number
-            If Mid$(paraText, GetListPrefixLen + 1, 1) = vbTab Then
-                GetListPrefixLen = GetListPrefixLen + 1
-            End If
-        End If
-    End If
-    Err.Clear
-    On Error GoTo 0
-End Function
-
-' Strip the trailing paragraph mark (vbCr / Chr(13)) from text
-Private Function StripParaMarkChar(ByVal txt As String) As String
-    If Len(txt) > 0 Then
-        If Right$(txt, 1) = vbCr Or Right$(txt, 1) = Chr(13) Then
-            txt = Left$(txt, Len(txt) - 1)
-        End If
-    End If
-    StripParaMarkChar = txt
-End Function
 
 ' Return the word (letters only) immediately before 0-based position pos
 Private Function GetWordBeforePos(ByVal s As String, ByVal pos As Long) As String
@@ -491,94 +457,3 @@ Private Function IsLikelyAbbreviation(ByVal paraText As String, _
     End If
 End Function
 
-' ----------------------------------------------------------------
-'  Create a dictionary-based finding (no class dependency)
-' ----------------------------------------------------------------
-Private Function CreateIssueDict(ByVal ruleName_ As String, _
-                                 ByVal location_ As String, _
-                                 ByVal issue_ As String, _
-                                 ByVal suggestion_ As String, _
-                                 ByVal rangeStart_ As Long, _
-                                 ByVal rangeEnd_ As Long, _
-                                 Optional ByVal severity_ As String = "error", _
-                                 Optional ByVal autoFixSafe_ As Boolean = False, _
-                                 Optional ByVal replacementText_ As String = "", _
-                                 Optional ByVal matchedText_ As String = "", _
-                                 Optional ByVal anchorKind_ As String = "exact_text", _
-                                 Optional ByVal confidenceLabel_ As String = "high", _
-                                 Optional ByVal sourceParagraphIndex_ As Long = 0) As Object
-    Dim d As Object
-    Set d = CreateObject("Scripting.Dictionary")
-    d("RuleName") = ruleName_
-    d("Location") = location_
-    d("Issue") = issue_
-    d("Suggestion") = suggestion_
-    d("RangeStart") = rangeStart_
-    d("RangeEnd") = rangeEnd_
-    d("Severity") = severity_
-    d("AutoFixSafe") = autoFixSafe_
-    If autoFixSafe_ Then d("ReplacementText") = replacementText_
-    d("MatchedText") = matchedText_
-    d("AnchorKind") = anchorKind_
-    d("ConfidenceLabel") = confidenceLabel_
-    d("SourceParagraphIndex") = sourceParagraphIndex_
-    Set CreateIssueDict = d
-End Function
-
-' ----------------------------------------------------------------
-'  Late-bound wrapper: PleadingsEngine.IsInPageRange
-' ----------------------------------------------------------------
-Private Function EngineIsInPageRange(rng As Object) As Boolean
-    On Error Resume Next
-    EngineIsInPageRange = Application.Run("PleadingsEngine.IsInPageRange", rng)
-    If Err.Number <> 0 Then
-        Debug.Print "EngineIsInPageRange: fallback (Err " & Err.Number & ": " & Err.Description & ")"
-        EngineIsInPageRange = True
-        Err.Clear
-    End If
-    On Error GoTo 0
-End Function
-
-' ----------------------------------------------------------------
-'  Late-bound wrapper: PleadingsEngine.GetLocationString
-' ----------------------------------------------------------------
-Private Function EngineGetLocationString(rng As Object, doc As Document) As String
-    On Error Resume Next
-    EngineGetLocationString = Application.Run("PleadingsEngine.GetLocationString", rng, doc)
-    If Err.Number <> 0 Then
-        Debug.Print "EngineGetLocationString: fallback (Err " & Err.Number & ": " & Err.Description & ")"
-        EngineGetLocationString = "unknown location"
-        Err.Clear
-    End If
-    On Error GoTo 0
-End Function
-
-' ----------------------------------------------------------------
-'  Late-bound wrapper: PleadingsEngine.GetSpaceStylePref
-' ----------------------------------------------------------------
-' ----------------------------------------------------------------
-'  Late-bound wrapper: PleadingsEngine.IsPastPageFilter
-' ----------------------------------------------------------------
-Private Function EngineIsPastPageFilter(ByVal startPos As Long) As Boolean
-    On Error Resume Next
-    EngineIsPastPageFilter = Application.Run("PleadingsEngine.IsPastPageFilter", startPos)
-    If Err.Number <> 0 Then
-        EngineIsPastPageFilter = False
-        Err.Clear
-    End If
-    On Error GoTo 0
-End Function
-
-' ----------------------------------------------------------------
-'  Late-bound wrapper: PleadingsEngine.GetSpaceStylePref
-' ----------------------------------------------------------------
-Private Function EngineGetSpaceStylePref() As String
-    On Error Resume Next
-    EngineGetSpaceStylePref = Application.Run("PleadingsEngine.GetSpaceStylePref")
-    If Err.Number <> 0 Then
-        Debug.Print "EngineGetSpaceStylePref: fallback (Err " & Err.Number & ": " & Err.Description & ")"
-        EngineGetSpaceStylePref = "ONE"
-        Err.Clear
-    End If
-    On Error GoTo 0
-End Function

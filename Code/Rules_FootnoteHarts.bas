@@ -8,7 +8,7 @@ Attribute VB_Name = "Rules_FootnoteHarts"
 '   - Rule27: flags unapproved footnote abbreviation variants
 '
 ' Dependencies:
-'   - PleadingsEngine.bas (IsInPageRange, GetLocationString)
+'   - TextAnchoring.bas (IsInPageRange, GetLocationString, CreateIssueDict)
 ' ============================================================
 Option Explicit
 
@@ -45,12 +45,12 @@ Public Function Check_FootnotesNotEndnotes(doc As Document) As Collection
 
     If endCount > 0 And fnCount = 0 Then
         ' Document uses only endnotes
-        Set finding = CreateIssueDict(RULE24_NAME, "document level", "Document uses endnotes instead of footnotes.", "Use footnotes rather than endnotes.", 0, 0, "error", False)
+        Set finding = TextAnchoring.CreateIssueDict(RULE24_NAME, "document level", "Document uses endnotes instead of footnotes.", "Use footnotes rather than endnotes.", 0, 0, "error", False)
         issues.Add finding
 
     ElseIf endCount > 0 And fnCount > 0 Then
         ' Document uses both
-        Set finding = CreateIssueDict(RULE24_NAME, "document level", "Document uses both footnotes and endnotes.", "Use footnotes rather than endnotes.", 0, 0, "error", False)
+        Set finding = TextAnchoring.CreateIssueDict(RULE24_NAME, "document level", "Document uses both footnotes and endnotes.", "Use footnotes rather than endnotes.", 0, 0, "error", False)
         issues.Add finding
     End If
 
@@ -86,7 +86,7 @@ Public Function Check_FootnoteTerminalFullStop(doc As Document) As Collection
 
         ' -- Check page range on the reference mark -----------
         On Error Resume Next
-        If Not EngineIsInPageRange(fn.Reference) Then
+        If Not TextAnchoring.IsInPageRange(fn.Reference) Then
             On Error GoTo 0
             GoTo NextFootnote25
         End If
@@ -125,11 +125,11 @@ Public Function Check_FootnoteTerminalFullStop(doc As Document) As Collection
 
         ' -- Flag missing full stop ---------------------------
         On Error Resume Next
-        locStr = EngineGetLocationString(fn.Reference, doc)
+        locStr = TextAnchoring.GetLocationString(fn.Reference, doc)
         If Err.Number <> 0 Then locStr = "unknown location": Err.Clear
         On Error GoTo 0
 
-        Set finding = CreateIssueDict(RULE25_NAME, locStr, "Footnote does not end with a full stop.", "Add a full stop at the end of the footnote.", fn.Range.Start, fn.Range.End, "warning", False)
+        Set finding = TextAnchoring.CreateIssueDict(RULE25_NAME, locStr, "Footnote does not end with a full stop.", "Add a full stop at the end of the footnote.", fn.Range.Start, fn.Range.End, "warning", False)
         issues.Add finding
 
 NextFootnote25:
@@ -180,7 +180,7 @@ Public Function Check_FootnoteInitialCapital(doc As Document) As Collection
 
         ' -- Check page range on the reference mark -----------
         On Error Resume Next
-        If Not EngineIsInPageRange(fn.Reference) Then
+        If Not TextAnchoring.IsInPageRange(fn.Reference) Then
             On Error GoTo 0
             GoTo NextFootnote26
         End If
@@ -227,11 +227,11 @@ Public Function Check_FootnoteInitialCapital(doc As Document) As Collection
         If firstCharCode >= 97 And firstCharCode <= 122 Then
             ' Lower-case and not in allowed list: flag
             On Error Resume Next
-            locStr = EngineGetLocationString(fn.Reference, doc)
+            locStr = TextAnchoring.GetLocationString(fn.Reference, doc)
             If Err.Number <> 0 Then locStr = "unknown location": Err.Clear
             On Error GoTo 0
 
-            Set finding = CreateIssueDict(RULE26_NAME, locStr, "Footnote begins with lower-case text outside the approved exceptions.", "Begin the footnote with a capital letter, unless it starts with an approved lower-case abbreviation.", fn.Range.Start, fn.Range.End, "warning", False)
+            Set finding = TextAnchoring.CreateIssueDict(RULE26_NAME, locStr, "Footnote begins with lower-case text outside the approved exceptions.", "Begin the footnote with a capital letter, unless it starts with an approved lower-case abbreviation.", fn.Range.Start, fn.Range.End, "warning", False)
             issues.Add finding
         End If
 
@@ -281,7 +281,7 @@ Public Function Check_FootnoteAbbreviationDictionary(doc As Document) As Collect
 
         ' -- Check page range on the reference mark -----------
         On Error Resume Next
-        If Not EngineIsInPageRange(fn.Reference) Then
+        If Not TextAnchoring.IsInPageRange(fn.Reference) Then
             On Error GoTo 0
             GoTo NextFootnote27
         End If
@@ -411,14 +411,14 @@ Private Sub CheckFootnoteText(doc As Document, _
             preferred = unapproved(lcToken)
 
             On Error Resume Next
-            locStr = EngineGetLocationString(fn.Reference, doc)
+            locStr = TextAnchoring.GetLocationString(fn.Reference, doc)
             If Err.Number <> 0 Then locStr = "unknown location": Err.Clear
             On Error GoTo 0
 
             issueText = "Unapproved footnote abbreviation."
             suggText = "Use '" & preferred & "' instead of '" & stripped & "'."
 
-            Set finding = CreateIssueDict(RULE27_NAME, locStr, issueText, suggText, fn.Range.Start, fn.Range.End, "warning", False)
+            Set finding = TextAnchoring.CreateIssueDict(RULE27_NAME, locStr, issueText, suggText, fn.Range.Start, fn.Range.End, "warning", False)
             issues.Add finding
             GoTo NextToken
         End If
@@ -437,14 +437,14 @@ Private Sub CheckFootnoteText(doc As Document, _
                 If approvedLC.Exists(noDots) Then
                     ' This is a dotted form of an approved abbrev -- flag it
                     On Error Resume Next
-                    locStr = EngineGetLocationString(fn.Reference, doc)
+                    locStr = TextAnchoring.GetLocationString(fn.Reference, doc)
                     If Err.Number <> 0 Then locStr = "unknown location": Err.Clear
                     On Error GoTo 0
 
                     issueText = "Unapproved footnote abbreviation."
                     suggText = "Use '" & noDots & "' instead of '" & token & "'."
 
-                    Set finding = CreateIssueDict(RULE27_NAME, locStr, issueText, suggText, fn.Range.Start, fn.Range.End, "warning", False)
+                    Set finding = TextAnchoring.CreateIssueDict(RULE27_NAME, locStr, issueText, suggText, fn.Range.Start, fn.Range.End, "warning", False)
                     issues.Add finding
                     GoTo NextToken
                 End If
@@ -590,68 +590,4 @@ Private Function IsWordChar(ByVal code As Long) As Boolean
     IsWordChar = (code >= 65 And code <= 90) Or _
                  (code >= 97 And code <= 122) Or _
                  (code >= 48 And code <= 57)
-End Function
-
-
-' ----------------------------------------------------------------
-'  PRIVATE: Create a dictionary-based finding (no class dependency)
-' ----------------------------------------------------------------
-Private Function CreateIssueDict(ByVal ruleName_ As String, _
-                                 ByVal location_ As String, _
-                                 ByVal issue_ As String, _
-                                 ByVal suggestion_ As String, _
-                                 ByVal rangeStart_ As Long, _
-                                 ByVal rangeEnd_ As Long, _
-                                 Optional ByVal severity_ As String = "error", _
-                                 Optional ByVal autoFixSafe_ As Boolean = False, _
-                                 Optional ByVal replacementText_ As String = "", _
-                                 Optional ByVal matchedText_ As String = "", _
-                                 Optional ByVal anchorKind_ As String = "exact_text", _
-                                 Optional ByVal confidenceLabel_ As String = "high", _
-                                 Optional ByVal sourceParagraphIndex_ As Long = 0) As Object
-    Dim d As Object
-    Set d = CreateObject("Scripting.Dictionary")
-    d("RuleName") = ruleName_
-    d("Location") = location_
-    d("Issue") = issue_
-    d("Suggestion") = suggestion_
-    d("RangeStart") = rangeStart_
-    d("RangeEnd") = rangeEnd_
-    d("Severity") = severity_
-    d("AutoFixSafe") = autoFixSafe_
-    If autoFixSafe_ Then d("ReplacementText") = replacementText_
-    d("MatchedText") = matchedText_
-    d("AnchorKind") = anchorKind_
-    d("ConfidenceLabel") = confidenceLabel_
-    d("SourceParagraphIndex") = sourceParagraphIndex_
-    Set CreateIssueDict = d
-End Function
-
-
-' ----------------------------------------------------------------
-'  Late-bound wrapper: PleadingsEngine.IsInPageRange
-' ----------------------------------------------------------------
-Private Function EngineIsInPageRange(rng As Object) As Boolean
-    On Error Resume Next
-    EngineIsInPageRange = Application.Run("PleadingsEngine.IsInPageRange", rng)
-    If Err.Number <> 0 Then
-        Debug.Print "EngineIsInPageRange: fallback (Err " & Err.Number & ": " & Err.Description & ")"
-        EngineIsInPageRange = True
-        Err.Clear
-    End If
-    On Error GoTo 0
-End Function
-
-' ----------------------------------------------------------------
-'  Late-bound wrapper: PleadingsEngine.GetLocationString
-' ----------------------------------------------------------------
-Private Function EngineGetLocationString(rng As Object, doc As Document) As String
-    On Error Resume Next
-    EngineGetLocationString = Application.Run("PleadingsEngine.GetLocationString", rng, doc)
-    If Err.Number <> 0 Then
-        Debug.Print "EngineGetLocationString: fallback (Err " & Err.Number & ": " & Err.Description & ")"
-        EngineGetLocationString = "unknown location"
-        Err.Clear
-    End If
-    On Error GoTo 0
 End Function

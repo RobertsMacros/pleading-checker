@@ -47,7 +47,7 @@ Public Function Check_Spelling(doc As Document) As Collection
     BuildSpellingArrays usWords, ukWords
 
     ' -- Determine spelling mode -------------------------
-    spellingMode = EngineGetSpellingMode()
+    spellingMode = TextAnchoring.GetSpellingMode()
 
     If spellingMode = "US" Then
         searchWords = ukWords
@@ -62,12 +62,12 @@ Public Function Check_Spelling(doc As Document) As Collection
     End If
 
     ' -- Search main document body -----------------------
-    EnginePerfTimerStart "spelling_body"
+    TextAnchoring.PerfTimerStart "spelling_body"
     SearchRangeForSpellingIssues doc.Content, doc, searchWords, targetWords, exceptions, direction, issues
-    EnginePerfTimerEnd "spelling_body"
+    TextAnchoring.PerfTimerEnd "spelling_body"
 
     ' -- Search footnotes via story range (single pass, not per-footnote) --
-    EnginePerfTimerStart "spelling_footnotes"
+    TextAnchoring.PerfTimerStart "spelling_footnotes"
     On Error Resume Next
     If doc.Footnotes.Count > 0 Then
         Dim fnStory As Range
@@ -81,10 +81,10 @@ Public Function Check_Spelling(doc As Document) As Collection
         End If
     End If
     On Error GoTo 0
-    EnginePerfTimerEnd "spelling_footnotes"
+    TextAnchoring.PerfTimerEnd "spelling_footnotes"
 
     ' -- Search endnotes via story range (single pass) --
-    EnginePerfTimerStart "spelling_endnotes"
+    TextAnchoring.PerfTimerStart "spelling_endnotes"
     On Error Resume Next
     If doc.Endnotes.Count > 0 Then
         Dim enStory As Range
@@ -98,9 +98,9 @@ Public Function Check_Spelling(doc As Document) As Collection
         End If
     End If
     On Error GoTo 0
-    EnginePerfTimerEnd "spelling_endnotes"
+    TextAnchoring.PerfTimerEnd "spelling_endnotes"
 
-    EnginePerfCount "spelling_find_passes", CLng(UBound(searchWords) - LBound(searchWords) + 1)
+    TextAnchoring.PerfCount "spelling_find_passes", CLng(UBound(searchWords) - LBound(searchWords) + 1)
 
     Set Check_Spelling = issues
 End Function
@@ -181,18 +181,18 @@ Private Sub SearchRangeForSpellingIssues(searchRange As Range, _
             End If
 
             ' -- Skip whitelisted terms ----------------
-            If EngineIsWhitelistedTerm(foundText) Then
+            If TextAnchoring.IsWhitelistedTerm(foundText) Then
                 GoTo ContinueSearch
             End If
 
             ' -- Skip if outside configured page range -
-            If Not EngineIsInPageRange(rng) Then
+            If Not TextAnchoring.IsInPageRange(rng) Then
                 GoTo ContinueSearch
             End If
 
             ' -- Create the finding ----------------------
             On Error Resume Next
-            locStr = EngineGetLocationString(rng, doc)
+            locStr = TextAnchoring.GetLocationString(rng, doc)
             If Err.Number <> 0 Then
                 locStr = "unknown location"
                 Err.Clear
@@ -227,7 +227,7 @@ Private Sub SearchRangeForSpellingIssues(searchRange As Range, _
                 spReplacement = suggestion
             End If
 
-            Set finding = CreateIssueDict(RULE_NAME, locStr, issueText, suggestion, _
+            Set finding = TextAnchoring.CreateIssueDict(RULE_NAME, locStr, issueText, suggestion, _
                 rng.Start, rng.End, severity, spAutoFix, spReplacement, _
                 foundText, "exact_text", "high")
             issues.Add finding
@@ -733,7 +733,7 @@ Private Sub SearchSingleLicenceTerm(ByVal term As String, _
         If Not found Then Exit Do
 
         ' Skip if outside page range
-        If Not EngineIsInPageRange(rng) Then
+        If Not TextAnchoring.IsInPageRange(rng) Then
             GoTo ContinueLicenceSearch
         End If
 
@@ -753,22 +753,22 @@ Private Sub SearchSingleLicenceTerm(ByVal term As String, _
 
         If IsRangeItalic(rng) Then
             On Error Resume Next
-            locStr = EngineGetLocationString(rng, doc)
+            locStr = TextAnchoring.GetLocationString(rng, doc)
             If Err.Number <> 0 Then locStr = "unknown location": Err.Clear
             On Error GoTo 0
 
-            Set finding = CreateIssueDict(RULE_NAME_LICENCE, locStr, "'" & rng.Text & "' -- in italic text, review manually", "", rng.Start, rng.End, "possible_error")
+            Set finding = TextAnchoring.CreateIssueDict(RULE_NAME_LICENCE, locStr, "'" & rng.Text & "' -- in italic text, review manually", "", rng.Start, rng.End, "possible_error")
             issues.Add finding
             GoTo ContinueLicenceSearch
         End If
 
         If IsInsideQuotes(rng, doc) Then
             On Error Resume Next
-            locStr = EngineGetLocationString(rng, doc)
+            locStr = TextAnchoring.GetLocationString(rng, doc)
             If Err.Number <> 0 Then locStr = "unknown location": Err.Clear
             On Error GoTo 0
 
-            Set finding = CreateIssueDict(RULE_NAME_LICENCE, locStr, "'" & rng.Text & "' -- in quoted text, review manually", "", rng.Start, rng.End, "possible_error")
+            Set finding = TextAnchoring.CreateIssueDict(RULE_NAME_LICENCE, locStr, "'" & rng.Text & "' -- in quoted text, review manually", "", rng.Start, rng.End, "possible_error")
             issues.Add finding
             GoTo ContinueLicenceSearch
         End If
@@ -822,14 +822,14 @@ Private Sub SearchSingleLicenceTerm(ByVal term As String, _
         ' Only create finding if we found something to flag
         If Len(issueText) > 0 Then
             On Error Resume Next
-            locStr = EngineGetLocationString(rng, doc)
+            locStr = TextAnchoring.GetLocationString(rng, doc)
             If Err.Number <> 0 Then
                 locStr = "unknown location"
                 Err.Clear
             End If
             On Error GoTo 0
 
-            Set finding = CreateIssueDict(RULE_NAME_LICENCE, locStr, issueText, suggestion, rng.Start, rng.End, "possible_error")
+            Set finding = TextAnchoring.CreateIssueDict(RULE_NAME_LICENCE, locStr, issueText, suggestion, rng.Start, rng.End, "possible_error")
             issues.Add finding
         End If
 
@@ -1045,7 +1045,7 @@ End Function
 Public Function Check_CheckCheque(doc As Document) As Collection
     Dim issues As New Collection
     Dim spellingMode As String
-    spellingMode = EngineGetSpellingMode()
+    spellingMode = TextAnchoring.GetSpellingMode()
 
     ' Only applies in UK mode (US uses "check" for everything)
     If spellingMode <> "UK" Then
@@ -1119,7 +1119,7 @@ Private Sub SearchCheckCheque(searchRange As Range, doc As Document, _
             If rng.Start <= lastPos Then Exit Do
             lastPos = rng.Start
 
-            If Not EngineIsInPageRange(rng) Then
+            If Not TextAnchoring.IsInPageRange(rng) Then
                 rng.Collapse wdCollapseEnd
                 GoTo NextCheckMatch
             End If
@@ -1133,7 +1133,7 @@ Private Sub SearchCheckCheque(searchRange As Range, doc As Document, _
             End If
 
             On Error Resume Next
-            locStr = EngineGetLocationString(rng, doc)
+            locStr = TextAnchoring.GetLocationString(rng, doc)
             If Err.Number <> 0 Then locStr = "unknown location": Err.Clear
             On Error GoTo 0
 
@@ -1144,7 +1144,7 @@ Private Sub SearchCheckCheque(searchRange As Range, doc As Document, _
                 suggestion = "cheque"
             End If
 
-            Set finding = CreateIssueDict(RULE_NAME_CHECK, locStr, _
+            Set finding = TextAnchoring.CreateIssueDict(RULE_NAME_CHECK, locStr, _
                 "UK spelling: '" & foundText & "' appears to be a noun (financial instrument). Use '" & suggestion & "' in UK English.", _
                 suggestion, rng.Start, rng.End, "possible_error")
             issues.Add finding
@@ -1455,17 +1455,17 @@ Private Sub SearchFinancialBatch(searchRange As Range, _
             If rng.Start <= lastPos Then Exit Do
             lastPos = rng.Start
 
-            If Not EngineIsInPageRange(rng) Then
+            If Not TextAnchoring.IsInPageRange(rng) Then
                 rng.Collapse wdCollapseEnd
                 GoTo NextFinMatch
             End If
 
             On Error Resume Next
-            locStr = EngineGetLocationString(rng, doc)
+            locStr = TextAnchoring.GetLocationString(rng, doc)
             If Err.Number <> 0 Then locStr = "unknown location": Err.Clear
             On Error GoTo 0
 
-            Set finding = CreateIssueDict(RULE_NAME_CHECK, locStr, _
+            Set finding = TextAnchoring.CreateIssueDict(RULE_NAME_CHECK, locStr, _
                 "UK spelling: '" & rng.Text & "' should be '" & _
                 CStr(suggestions(ti)) & "' in UK English.", _
                 "Use '" & CStr(suggestions(ti)) & "'", rng.Start, rng.End, _
@@ -1484,114 +1484,3 @@ End Sub
 
 
 
-' ----------------------------------------------------------------
-'  PRIVATE: Create a dictionary-based finding (no class dependency)
-' ----------------------------------------------------------------
-Private Function CreateIssueDict(ByVal ruleName_ As String, _
-                                 ByVal location_ As String, _
-                                 ByVal issue_ As String, _
-                                 ByVal suggestion_ As String, _
-                                 ByVal rangeStart_ As Long, _
-                                 ByVal rangeEnd_ As Long, _
-                                 Optional ByVal severity_ As String = "error", _
-                                 Optional ByVal autoFixSafe_ As Boolean = False, _
-                                 Optional ByVal replacementText_ As String = "", _
-                                 Optional ByVal matchedText_ As String = "", _
-                                 Optional ByVal anchorKind_ As String = "exact_text", _
-                                 Optional ByVal confidenceLabel_ As String = "high", _
-                                 Optional ByVal sourceParagraphIndex_ As Long = 0) As Object
-    Dim d As Object
-    Set d = CreateObject("Scripting.Dictionary")
-    d("RuleName") = ruleName_
-    d("Location") = location_
-    d("Issue") = issue_
-    d("Suggestion") = suggestion_
-    d("RangeStart") = rangeStart_
-    d("RangeEnd") = rangeEnd_
-    d("Severity") = severity_
-    d("AutoFixSafe") = autoFixSafe_
-    If autoFixSafe_ Then d("ReplacementText") = replacementText_
-    d("MatchedText") = matchedText_
-    d("AnchorKind") = anchorKind_
-    d("ConfidenceLabel") = confidenceLabel_
-    d("SourceParagraphIndex") = sourceParagraphIndex_
-    Set CreateIssueDict = d
-End Function
-
-
-' ----------------------------------------------------------------
-'  Late-bound wrapper: PleadingsEngine.IsInPageRange
-' ----------------------------------------------------------------
-Private Function EngineIsInPageRange(rng As Object) As Boolean
-    On Error Resume Next
-    EngineIsInPageRange = Application.Run("PleadingsEngine.IsInPageRange", rng)
-    If Err.Number <> 0 Then
-        Debug.Print "EngineIsInPageRange: fallback (Err " & Err.Number & ": " & Err.Description & ")"
-        EngineIsInPageRange = True
-        Err.Clear
-    End If
-    On Error GoTo 0
-End Function
-
-' ----------------------------------------------------------------
-'  Late-bound wrapper: PleadingsEngine.GetLocationString
-' ----------------------------------------------------------------
-Private Function EngineGetLocationString(rng As Object, doc As Document) As String
-    On Error Resume Next
-    EngineGetLocationString = Application.Run("PleadingsEngine.GetLocationString", rng, doc)
-    If Err.Number <> 0 Then
-        Debug.Print "EngineGetLocationString: fallback (Err " & Err.Number & ": " & Err.Description & ")"
-        EngineGetLocationString = "unknown location"
-        Err.Clear
-    End If
-    On Error GoTo 0
-End Function
-
-' ----------------------------------------------------------------
-'  Late-bound wrapper: PleadingsEngine.IsWhitelistedTerm
-' ----------------------------------------------------------------
-Private Function EngineIsWhitelistedTerm(ByVal term As String) As Boolean
-    On Error Resume Next
-    EngineIsWhitelistedTerm = Application.Run("PleadingsEngine.IsWhitelistedTerm", term)
-    If Err.Number <> 0 Then
-        Debug.Print "EngineIsWhitelistedTerm: fallback (Err " & Err.Number & ": " & Err.Description & ")"
-        EngineIsWhitelistedTerm = False
-        Err.Clear
-    End If
-    On Error GoTo 0
-End Function
-
-' ----------------------------------------------------------------
-'  Late-bound wrapper: PleadingsEngine.GetSpellingMode
-' ----------------------------------------------------------------
-Private Function EngineGetSpellingMode() As String
-    On Error Resume Next
-    EngineGetSpellingMode = Application.Run("PleadingsEngine.GetSpellingMode")
-    If Err.Number <> 0 Then
-        Debug.Print "EngineGetSpellingMode: fallback (Err " & Err.Number & ": " & Err.Description & ")"
-        EngineGetSpellingMode = "UK"
-        Err.Clear
-    End If
-    On Error GoTo 0
-End Function
-
-Private Sub EnginePerfTimerStart(ByVal label As String)
-    On Error Resume Next
-    Application.Run "PleadingsEngine.PerfTimerStart", label
-    If Err.Number <> 0 Then Err.Clear
-    On Error GoTo 0
-End Sub
-
-Private Sub EnginePerfTimerEnd(ByVal label As String)
-    On Error Resume Next
-    Application.Run "PleadingsEngine.PerfTimerEnd", label
-    If Err.Number <> 0 Then Err.Clear
-    On Error GoTo 0
-End Sub
-
-Private Sub EnginePerfCount(ByVal label As String, Optional ByVal increment As Long = 1)
-    On Error Resume Next
-    Application.Run "PleadingsEngine.PerfCount", label, increment
-    If Err.Number <> 0 Then Err.Clear
-    On Error GoTo 0
-End Sub

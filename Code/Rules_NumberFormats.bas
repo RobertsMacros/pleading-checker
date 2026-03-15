@@ -15,7 +15,8 @@ Attribute VB_Name = "Rules_NumberFormats"
 '   Check_CurrencyNumberFormat  (Rule19)
 '
 ' Dependencies:
-'   - PleadingsEngine.bas (IsInPageRange, GetLocationString)
+'   - TextAnchoring.bas (IsInPageRange, GetLocationString,
+'     SetPageRange, GetDateFormatPref, CreateIssueDict)
 ' ============================================================
 Option Explicit
 
@@ -76,7 +77,7 @@ Private Sub FindWithWildcard(doc As Document, ByVal pattern As String, _
     Do While rng.Find.Execute
         If rng.Start <= lastPos Then Exit Do  ' stall guard
         lastPos = rng.Start
-        If EngineIsInPageRange(rng) Then
+        If TextAnchoring.IsInPageRange(rng) Then
             ReDim info(0 To 3)
             info(0) = formatType
             info(1) = rng.Text
@@ -241,7 +242,7 @@ Private Sub CheckSymbolConsistency(doc As Document, _
         Dim matchText As String
         matchText = LCase(rng.Text)
         If IsMagnitudeWord(matchText) Then
-            If EngineIsInPageRange(rng) Then
+            If TextAnchoring.IsInPageRange(rng) Then
                 wordsCount = wordsCount + 1
                 wordsRanges.Add doc.Range(rng.Start, rng.End)
             End If
@@ -279,7 +280,7 @@ Private Sub CheckSymbolConsistency(doc As Document, _
         If rng.Start <= lastPos Then Exit Do   ' stall guard
         lastPos = rng.Start
 
-        If EngineIsInPageRange(rng) Then
+        If TextAnchoring.IsInPageRange(rng) Then
             abbrCount = abbrCount + 1
             abbrRanges.Add doc.Range(rng.Start, rng.End)
         End If
@@ -320,7 +321,7 @@ Private Sub CheckSymbolConsistency(doc As Document, _
         Dim numText As String
         numText = rng.Text
         If InStr(numText, ",") > 0 And Len(numText) >= 5 Then
-            If EngineIsInPageRange(rng) Then
+            If TextAnchoring.IsInPageRange(rng) Then
                 numericCount = numericCount + 1
                 numericRanges.Add doc.Range(rng.Start, rng.End)
             End If
@@ -405,17 +406,17 @@ Private Sub CheckISOCodeFormat(doc As Document, _
         If rng.Start <= isoLastPos Then Exit Do   ' stall guard
         isoLastPos = rng.Start
 
-        If EngineIsInPageRange(rng) Then
+        If TextAnchoring.IsInPageRange(rng) Then
             isoCount = isoCount + 1
 
             ' Flag ISO prefix usage as informational (possible_error)
             ' since mixing ISO codes with symbol notation is inconsistent
             On Error Resume Next
-            locStr = EngineGetLocationString(rng, doc)
+            locStr = TextAnchoring.GetLocationString(rng, doc)
             If Err.Number <> 0 Then locStr = "unknown location": Err.Clear
             On Error GoTo 0
 
-            Set finding = CreateIssueDict(RULE_NAME_CURRENCY, locStr, "ISO code format used: '" & rng.Text & "'", "Consider using symbol notation for consistency", rng.Start, rng.End, "possible_error")
+            Set finding = TextAnchoring.CreateIssueDict(RULE_NAME_CURRENCY, locStr, "ISO code format used: '" & rng.Text & "'", "Consider using symbol notation for consistency", rng.Start, rng.End, "possible_error")
             issues.Add finding
         End If
 
@@ -442,11 +443,11 @@ Private Sub FlagMinorityRanges(doc As Document, _
         Set rng = ranges(i)
 
         On Error Resume Next
-        locStr = EngineGetLocationString(rng, doc)
+        locStr = TextAnchoring.GetLocationString(rng, doc)
         If Err.Number <> 0 Then locStr = "unknown location": Err.Clear
         On Error GoTo 0
 
-        Set finding = CreateIssueDict(RULE_NAME_CURRENCY, locStr, symLabel & " amount uses '" & minorityFmt & "' format: '" & rng.Text & "'", "Use '" & dominantFmt & "' format for consistency (dominant style)", rng.Start, rng.End, "error")
+        Set finding = TextAnchoring.CreateIssueDict(RULE_NAME_CURRENCY, locStr, symLabel & " amount uses '" & minorityFmt & "' format: '" & rng.Text & "'", "Use '" & dominantFmt & "' format for consistency (dominant style)", rng.Start, rng.End, "error")
         issues.Add finding
     Next i
 End Sub
@@ -550,7 +551,7 @@ Public Function Check_DateTimeFormat(doc As Document) As Collection
 
     ' Check user preference first
     Dim datePref As String
-    datePref = EngineGetDateFormatPref()
+    datePref = TextAnchoring.GetDateFormatPref()
 
     If datePref = "UK" Or datePref = "US" Then
         ' User has set a preference -- use it as dominant
@@ -591,7 +592,7 @@ Public Function Check_DateTimeFormat(doc As Document) As Collection
                     Set rngD = doc.Range(CLng(dInfo(2)), CLng(dInfo(3)))
                     If Err.Number <> 0 Then Err.Clear: On Error GoTo 0: GoTo NextDateFind
                     Dim locD As String
-                    locD = EngineGetLocationString(rngD, doc)
+                    locD = TextAnchoring.GetLocationString(rngD, doc)
                     If Err.Number <> 0 Then locD = "unknown location": Err.Clear
                     On Error GoTo 0
 
@@ -605,7 +606,7 @@ Public Function Check_DateTimeFormat(doc As Document) As Collection
                             suggestion = "Reformat to numeric style (e.g., '01/01/2024')"
                     End Select
 
-                    Set findingD = CreateIssueDict(RULE_NAME_DATE_TIME, locD, "Inconsistent date format: '" & CStr(dInfo(1)) & "' uses " & dType & " format but dominant is " & dominantDate, suggestion, CLng(dInfo(2)), CLng(dInfo(3)), "error")
+                    Set findingD = TextAnchoring.CreateIssueDict(RULE_NAME_DATE_TIME, locD, "Inconsistent date format: '" & CStr(dInfo(1)) & "' uses " & dType & " format but dominant is " & dominantDate, suggestion, CLng(dInfo(2)), CLng(dInfo(3)), "error")
                     issues.Add findingD
                 End If
 NextDateFind:
@@ -775,7 +776,7 @@ NextDateFind:
                     Set rngT = doc.Range(CLng(tInfo(2)), CLng(tInfo(3)))
                     If Err.Number <> 0 Then Err.Clear: On Error GoTo 0: GoTo NextTimeFind
                     Dim locT As String
-                    locT = EngineGetLocationString(rngT, doc)
+                    locT = TextAnchoring.GetLocationString(rngT, doc)
                     If Err.Number <> 0 Then locT = "unknown location": Err.Clear
                     On Error GoTo 0
 
@@ -786,7 +787,7 @@ NextDateFind:
                         timeSugg = "Use 24-hour format (e.g., '14:30') for consistency"
                     End If
 
-                    Set findingT = CreateIssueDict(RULE_NAME_DATE_TIME, locT, "Inconsistent time format: '" & CStr(tInfo(1)) & "' uses " & tType & " format but dominant is " & dominantTime, timeSugg, CLng(tInfo(2)), CLng(tInfo(3)), "error")
+                    Set findingT = TextAnchoring.CreateIssueDict(RULE_NAME_DATE_TIME, locT, "Inconsistent time format: '" & CStr(tInfo(1)) & "' uses " & tType & " format but dominant is " & dominantTime, timeSugg, CLng(tInfo(2)), CLng(tInfo(3)), "error")
                     issues.Add findingT
                 End If
 NextTimeFind:
@@ -826,7 +827,7 @@ Public Function Check_PageRange(doc As Document) As Collection
     On Error Resume Next
 
     ' Push the stored page range into the engine
-    EngineSetPageRange mStartPage, mEndPage
+    TextAnchoring.SetPageRange mStartPage, mEndPage
 
     On Error GoTo 0
 
@@ -865,95 +866,4 @@ Public Function Check_CurrencyNumberFormat(doc As Document) As Collection
     Next i
 
     Set Check_CurrencyNumberFormat = issues
-End Function
-
-
-' ----------------------------------------------------------------
-'  PRIVATE: Create a dictionary-based finding (no class dependency)
-' ----------------------------------------------------------------
-Private Function CreateIssueDict(ByVal ruleName_ As String, _
-                                 ByVal location_ As String, _
-                                 ByVal issue_ As String, _
-                                 ByVal suggestion_ As String, _
-                                 ByVal rangeStart_ As Long, _
-                                 ByVal rangeEnd_ As Long, _
-                                 Optional ByVal severity_ As String = "error", _
-                                 Optional ByVal autoFixSafe_ As Boolean = False, _
-                                 Optional ByVal replacementText_ As String = "", _
-                                 Optional ByVal matchedText_ As String = "", _
-                                 Optional ByVal anchorKind_ As String = "exact_text", _
-                                 Optional ByVal confidenceLabel_ As String = "high", _
-                                 Optional ByVal sourceParagraphIndex_ As Long = 0) As Object
-    Dim d As Object
-    Set d = CreateObject("Scripting.Dictionary")
-    d("RuleName") = ruleName_
-    d("Location") = location_
-    d("Issue") = issue_
-    d("Suggestion") = suggestion_
-    d("RangeStart") = rangeStart_
-    d("RangeEnd") = rangeEnd_
-    d("Severity") = severity_
-    d("AutoFixSafe") = autoFixSafe_
-    If autoFixSafe_ Then d("ReplacementText") = replacementText_
-    d("MatchedText") = matchedText_
-    d("AnchorKind") = anchorKind_
-    d("ConfidenceLabel") = confidenceLabel_
-    d("SourceParagraphIndex") = sourceParagraphIndex_
-    Set CreateIssueDict = d
-End Function
-
-
-' ----------------------------------------------------------------
-'  Late-bound wrapper: PleadingsEngine.IsInPageRange
-' ----------------------------------------------------------------
-Private Function EngineIsInPageRange(rng As Object) As Boolean
-    On Error Resume Next
-    EngineIsInPageRange = Application.Run("PleadingsEngine.IsInPageRange", rng)
-    If Err.Number <> 0 Then
-        Debug.Print "EngineIsInPageRange: fallback (Err " & Err.Number & ": " & Err.Description & ")"
-        EngineIsInPageRange = True
-        Err.Clear
-    End If
-    On Error GoTo 0
-End Function
-
-' ----------------------------------------------------------------
-'  Late-bound wrapper: PleadingsEngine.GetLocationString
-' ----------------------------------------------------------------
-Private Function EngineGetLocationString(rng As Object, doc As Document) As String
-    On Error Resume Next
-    EngineGetLocationString = Application.Run("PleadingsEngine.GetLocationString", rng, doc)
-    If Err.Number <> 0 Then
-        Debug.Print "EngineGetLocationString: fallback (Err " & Err.Number & ": " & Err.Description & ")"
-        EngineGetLocationString = "unknown location"
-        Err.Clear
-    End If
-    On Error GoTo 0
-End Function
-
-' ----------------------------------------------------------------
-'  Late-bound wrapper: PleadingsEngine.SetPageRange
-' ----------------------------------------------------------------
-Private Sub EngineSetPageRange(ByVal startPg As Long, ByVal endPg As Long)
-    On Error Resume Next
-    Application.Run "PleadingsEngine.SetPageRange", startPg, endPg
-    If Err.Number <> 0 Then
-        Debug.Print "EngineSetPageRange: fallback (Err " & Err.Number & ": " & Err.Description & ")"
-        Err.Clear
-    End If
-    On Error GoTo 0
-End Sub
-
-' ----------------------------------------------------------------
-'  Late-bound wrapper: PleadingsEngine.GetDateFormatPref
-' ----------------------------------------------------------------
-Private Function EngineGetDateFormatPref() As String
-    On Error Resume Next
-    EngineGetDateFormatPref = Application.Run("PleadingsEngine.GetDateFormatPref")
-    If Err.Number <> 0 Then
-        Debug.Print "EngineGetDateFormatPref: fallback (Err " & Err.Number & ": " & Err.Description & ")"
-        EngineGetDateFormatPref = "UK"
-        Err.Clear
-    End If
-    On Error GoTo 0
 End Function

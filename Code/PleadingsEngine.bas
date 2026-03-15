@@ -2975,40 +2975,6 @@ Private Function EscJSON(ByVal txt As String) As String
     EscJSON = txt
 End Function
 
-' ================================================================
-'  PUBLIC: Factory function to create a dictionary-based finding
-'  Called by rule modules via Application.Run
-' ================================================================
-Public Function CreateIssue(ByVal ruleName_ As String, _
-                            ByVal location_ As String, _
-                            ByVal issue_ As String, _
-                            ByVal suggestion_ As String, _
-                            ByVal rangeStart_ As Long, _
-                            ByVal rangeEnd_ As Long, _
-                            Optional ByVal severity_ As String = "error", _
-                            Optional ByVal autoFixSafe_ As Boolean = False, _
-                            Optional ByVal replacementText_ As String = "", _
-                            Optional ByVal matchedText_ As String = "", _
-                            Optional ByVal anchorKind_ As String = "exact_text", _
-                            Optional ByVal confidenceLabel_ As String = "high", _
-                            Optional ByVal sourceParagraphIndex_ As Long = 0) As Object
-    Dim d As Object
-    Set d = CreateObject("Scripting.Dictionary")
-    d("RuleName") = ruleName_
-    d("Location") = location_
-    d("Issue") = issue_
-    d("Suggestion") = suggestion_
-    d("RangeStart") = rangeStart_
-    d("RangeEnd") = rangeEnd_
-    d("Severity") = severity_
-    d("AutoFixSafe") = autoFixSafe_
-    If autoFixSafe_ Then d("ReplacementText") = replacementText_
-    d("MatchedText") = matchedText_
-    d("AnchorKind") = anchorKind_
-    d("ConfidenceLabel") = confidenceLabel_
-    d("SourceParagraphIndex") = sourceParagraphIndex_
-    Set CreateIssue = d
-End Function
 
 ' ================================================================
 '  PUBLIC: Validate an issue anchor.  Returns True if the anchor

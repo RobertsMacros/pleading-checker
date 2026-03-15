@@ -20,7 +20,8 @@ Attribute VB_Name = "Rules_LegalTerms"
 '   reliable context handling.
 '
 ' Dependencies:
-'   - PleadingsEngine.bas (IsInPageRange, GetLocationString)
+'   - TextAnchoring.bas (IsInPageRange, GetLocationString,
+'     IsPastPageFilter, CreateIssueDict)
 ' ============================================================
 Option Explicit
 
@@ -107,13 +108,13 @@ Private Sub SearchAndFlag(doc As Document, _
         ' Verify it is not actually the hyphenated form by checking
         ' the surrounding context -- the Find matched with MatchCase=False
         ' and spaces, so an exact binary comparison rules out false positives
-        If EngineIsInPageRange(rng) Then
+        If TextAnchoring.IsInPageRange(rng) Then
             On Error Resume Next
-            locStr = EngineGetLocationString(rng, doc)
+            locStr = TextAnchoring.GetLocationString(rng, doc)
             If Err.Number <> 0 Then locStr = "unknown location": Err.Clear
             On Error GoTo 0
 
-            Set finding = CreateIssueDict(RULE28_NAME, locStr, "Mandatory term is not hyphenated in the approved form.", "Use '" & correctForm & "'.", rng.Start, rng.End, "warning", False)
+            Set finding = TextAnchoring.CreateIssueDict(RULE28_NAME, locStr, "Mandatory term is not hyphenated in the approved form.", "Use '" & correctForm & "'.", rng.Start, rng.End, "warning", False)
             issues.Add finding
         End If
 
@@ -187,8 +188,8 @@ Public Function Check_AlwaysCapitaliseTerms(doc As Document) As Collection
         On Error GoTo 0
 
         ' Check page range filter
-        If EngineIsPastPageFilter(paraRng.Start) Then Exit For
-        If Not EngineIsInPageRange(paraRng) Then GoTo NextPara
+        If TextAnchoring.IsPastPageFilter(paraRng.Start) Then Exit For
+        If Not TextAnchoring.IsInPageRange(paraRng) Then GoTo NextPara
 
         paraText = paraRng.Text
         paraStart = paraRng.Start
@@ -262,11 +263,11 @@ Private Sub CheckTermInParagraph(doc As Document, _
         On Error Resume Next
         Dim matchRng As Range
         Set matchRng = doc.Range(matchStart, matchEnd)
-        locStr = EngineGetLocationString(matchRng, doc)
+        locStr = TextAnchoring.GetLocationString(matchRng, doc)
         If Err.Number <> 0 Then locStr = "unknown location": Err.Clear
         On Error GoTo 0
 
-        Set finding = CreateIssueDict(RULE29_NAME, locStr, "Term should be capitalised in the approved form.", "Use '" & correctForm & "'.", matchStart, matchEnd, "warning", False)
+        Set finding = TextAnchoring.CreateIssueDict(RULE29_NAME, locStr, "Term should be capitalised in the approved form.", "Use '" & correctForm & "'.", matchStart, matchEnd, "warning", False)
         issues.Add finding
 
 NextMatch:
@@ -414,83 +415,6 @@ Private Function IsInsideQuote(paraText As String, matchPos As Long) As Boolean
     If openCount > 0 Then
         IsInsideQuote = True
     End If
-End Function
-
-
-' ----------------------------------------------------------------
-'  PRIVATE: Create a dictionary-based finding (no class dependency)
-' ----------------------------------------------------------------
-Private Function CreateIssueDict(ByVal ruleName_ As String, _
-                                 ByVal location_ As String, _
-                                 ByVal issue_ As String, _
-                                 ByVal suggestion_ As String, _
-                                 ByVal rangeStart_ As Long, _
-                                 ByVal rangeEnd_ As Long, _
-                                 Optional ByVal severity_ As String = "error", _
-                                 Optional ByVal autoFixSafe_ As Boolean = False, _
-                                 Optional ByVal replacementText_ As String = "", _
-                                 Optional ByVal matchedText_ As String = "", _
-                                 Optional ByVal anchorKind_ As String = "exact_text", _
-                                 Optional ByVal confidenceLabel_ As String = "high", _
-                                 Optional ByVal sourceParagraphIndex_ As Long = 0) As Object
-    Dim d As Object
-    Set d = CreateObject("Scripting.Dictionary")
-    d("RuleName") = ruleName_
-    d("Location") = location_
-    d("Issue") = issue_
-    d("Suggestion") = suggestion_
-    d("RangeStart") = rangeStart_
-    d("RangeEnd") = rangeEnd_
-    d("Severity") = severity_
-    d("AutoFixSafe") = autoFixSafe_
-    If autoFixSafe_ Then d("ReplacementText") = replacementText_
-    d("MatchedText") = matchedText_
-    d("AnchorKind") = anchorKind_
-    d("ConfidenceLabel") = confidenceLabel_
-    d("SourceParagraphIndex") = sourceParagraphIndex_
-    Set CreateIssueDict = d
-End Function
-
-
-' ----------------------------------------------------------------
-'  Late-bound wrapper: PleadingsEngine.IsInPageRange
-' ----------------------------------------------------------------
-Private Function EngineIsInPageRange(rng As Object) As Boolean
-    On Error Resume Next
-    EngineIsInPageRange = Application.Run("PleadingsEngine.IsInPageRange", rng)
-    If Err.Number <> 0 Then
-        Debug.Print "EngineIsInPageRange: fallback (Err " & Err.Number & ": " & Err.Description & ")"
-        EngineIsInPageRange = True
-        Err.Clear
-    End If
-    On Error GoTo 0
-End Function
-
-' ----------------------------------------------------------------
-'  Late-bound wrapper: PleadingsEngine.GetLocationString
-' ----------------------------------------------------------------
-Private Function EngineGetLocationString(rng As Object, doc As Document) As String
-    On Error Resume Next
-    EngineGetLocationString = Application.Run("PleadingsEngine.GetLocationString", rng, doc)
-    If Err.Number <> 0 Then
-        Debug.Print "EngineGetLocationString: fallback (Err " & Err.Number & ": " & Err.Description & ")"
-        EngineGetLocationString = "unknown location"
-        Err.Clear
-    End If
-    On Error GoTo 0
-End Function
-
-' ----------------------------------------------------------------
-'  Late-bound wrapper: PleadingsEngine.IsPastPageFilter
-' ----------------------------------------------------------------
-Private Function EngineIsPastPageFilter(ByVal startPos As Long) As Boolean
-    On Error Resume Next
-    EngineIsPastPageFilter = Application.Run("PleadingsEngine.IsPastPageFilter", startPos)
-    If Err.Number <> 0 Then
-        EngineIsPastPageFilter = False
-        Err.Clear
-    End If
-    On Error GoTo 0
 End Function
 
 ' ----------------------------------------------------------------
