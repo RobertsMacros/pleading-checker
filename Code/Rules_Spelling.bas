@@ -106,10 +106,10 @@ Public Function Check_Spelling(doc As Document) As Collection
 End Function
 
 ' ============================================================
-'  PRIVATE: Search a Range for spelling issues
-'  Iterates every search/target pair, uses Word's Find to
-'  locate whole-word, case-insensitive matches, then filters
-'  by page range and whitelist before creating issues.
+'  PRIVATE: Search a Range for spelling issues using a
+'  single-pass paragraph scan with dictionary lookup.
+'  Replaces the old O(N x pairs) Range.Find approach with
+'  O(N) tokenisation where N = total document text length.
 '
 '  direction = "UK" or "US" -- controls the finding text:
 '    "UK" -> "US spelling detected: '...'"
@@ -123,8 +123,6 @@ Private Sub SearchRangeForSpellingIssues(searchRange As Range, _
                                          ByVal direction As String, _
                                          ByRef issues As Collection)
     Dim i As Long
-    Dim rng As Range
-    Dim foundText As String
     Dim finding As Object
     Dim locStr As String
     Dim issueText As String
@@ -137,116 +135,190 @@ Private Sub SearchRangeForSpellingIssues(searchRange As Range, _
         sourceLabel = "UK"
     End If
 
+    ' -- Build dictionary: LCase(searchWord) -> index into arrays --
+    Dim lookupDict As Object
+    Set lookupDict = CreateObject("Scripting.Dictionary")
     For i = LBound(searchWords) To UBound(searchWords)
-
-        ' Reset a fresh range for each search term
-        On Error Resume Next
-        Set rng = searchRange.Duplicate
-        If Err.Number <> 0 Then
-            Err.Clear
-            On Error GoTo 0
-            GoTo NextWord
+        Dim lcWord As String
+        lcWord = LCase$(searchWords(i))
+        If Not lookupDict.Exists(lcWord) Then
+            lookupDict.Add lcWord, i
         End If
-        On Error GoTo 0
-
-        With rng.Find
-            .ClearFormatting
-            .Text = searchWords(i)
-            .MatchWholeWord = True
-            .MatchCase = False
-            .MatchWildcards = False
-            .Wrap = wdFindStop
-            .Forward = True
-        End With
-
-        ' Loop through all occurrences of this term
-        Do
-            On Error Resume Next
-            Dim found As Boolean
-            found = rng.Find.Execute
-            If Err.Number <> 0 Then
-                Err.Clear
-                On Error GoTo 0
-                Exit Do
-            End If
-            On Error GoTo 0
-
-            If Not found Then Exit Do
-
-            foundText = rng.Text
-
-            ' -- Skip exceptions -----------------------
-            If IsException(foundText, exceptions) Then
-                GoTo ContinueSearch
-            End If
-
-            ' -- Skip whitelisted terms ----------------
-            If TextAnchoring.IsWhitelistedTerm(foundText) Then
-                GoTo ContinueSearch
-            End If
-
-            ' -- Skip if outside configured page range -
-            If Not TextAnchoring.IsInPageRange(rng) Then
-                GoTo ContinueSearch
-            End If
-
-            ' -- Create the finding ----------------------
-            On Error Resume Next
-            locStr = TextAnchoring.GetLocationString(rng, doc)
-            If Err.Number <> 0 Then
-                locStr = "unknown location"
-                Err.Clear
-            End If
-            On Error GoTo 0
-
-            issueText = sourceLabel & " spelling detected: '" & foundText & "'"
-
-            ' -- Downgrade italic / quoted text -------
-            Dim severity As String
-            Dim suggestion As String
-            severity = "error"
-            suggestion = targetWords(i)
-
-            If IsRangeItalic(rng) Then
-                severity = "possible_error"
-                suggestion = ""
-                issueText = issueText & " (in italic text -- review manually)"
-            ElseIf IsInsideQuotes(rng, doc) Then
-                severity = "possible_error"
-                suggestion = ""
-                issueText = issueText & " (in quoted text -- review manually)"
-            End If
-
-            ' Mark as auto-fix safe when severity is "error" and we have a concrete replacement
-            Dim spAutoFix As Boolean
-            Dim spReplacement As String
-            spAutoFix = False
-            spReplacement = ""
-            If severity = "error" And Len(suggestion) > 0 Then
-                spAutoFix = True
-                spReplacement = suggestion
-            End If
-
-            Set finding = TextAnchoring.CreateIssueDict(RULE_NAME, locStr, issueText, suggestion, _
-                rng.Start, rng.End, severity, spAutoFix, spReplacement, _
-                foundText, "exact_text", "high")
-            issues.Add finding
-
-ContinueSearch:
-            ' Collapse range to end of current match to find next
-            On Error Resume Next
-            rng.Collapse wdCollapseEnd
-            If Err.Number <> 0 Then
-                Err.Clear
-                On Error GoTo 0
-                Exit Do
-            End If
-            On Error GoTo 0
-        Loop
-
-NextWord:
     Next i
+
+    ' -- Build exceptions dictionary for O(1) lookup --
+    Dim exceptDict As Object
+    Set exceptDict = CreateObject("Scripting.Dictionary")
+    For i = LBound(exceptions) To UBound(exceptions)
+        Dim lcExc As String
+        lcExc = LCase$(Trim$(exceptions(i)))
+        If Len(lcExc) > 0 And Not exceptDict.Exists(lcExc) Then
+            exceptDict.Add lcExc, True
+        End If
+    Next i
+
+    ' -- Iterate paragraphs in the search range --
+    Dim para As Paragraph
+    Dim paraText As String
+    Dim paraStart As Long
+    Dim tLen As Long
+    Dim scanPos As Long
+    Dim tokStart As Long
+    Dim sc As String
+    Dim rawToken As String
+    Dim cleanToken As String
+    Dim matchIdx As Long
+
+    On Error Resume Next
+    For Each para In searchRange.Paragraphs
+        Err.Clear
+        Dim paraRange As Range
+        Set paraRange = para.Range
+        If Err.Number <> 0 Then Err.Clear: GoTo NextSpellPara
+
+        paraStart = paraRange.Start
+
+        ' Page-range filter
+        If TextAnchoring.IsPastPageFilter(paraStart) Then Exit For
+        If Not TextAnchoring.IsInPageRange(paraRange) Then GoTo NextSpellPara
+
+        paraText = paraRange.Text
+        If Err.Number <> 0 Then Err.Clear: GoTo NextSpellPara
+        tLen = Len(paraText)
+        If tLen < 2 Then GoTo NextSpellPara
+
+        ' Calculate list prefix offset
+        Dim spListPrefixLen As Long
+        spListPrefixLen = TextAnchoring.GetListPrefixLen(para, paraText)
+
+        ' -- Tokenise by scanning character positions --
+        scanPos = 1
+        Do While scanPos <= tLen
+            sc = Mid$(paraText, scanPos, 1)
+            ' Skip non-word characters (whitespace, punctuation)
+            If Not IsWordCharSpelling(sc) Then
+                scanPos = scanPos + 1
+            Else
+                ' Found start of a token
+                tokStart = scanPos
+                Do While scanPos <= tLen
+                    sc = Mid$(paraText, scanPos, 1)
+                    If Not IsWordCharSpelling(sc) Then Exit Do
+                    scanPos = scanPos + 1
+                Loop
+                ' Extract token
+                rawToken = Mid$(paraText, tokStart, scanPos - tokStart)
+                cleanToken = LCase$(rawToken)
+
+                ' -- Look up in dictionary --
+                If lookupDict.Exists(cleanToken) Then
+                    matchIdx = CLng(lookupDict(cleanToken))
+
+                    ' -- Skip exceptions --
+                    If exceptDict.Exists(cleanToken) Then GoTo NextSpellToken
+
+                    ' -- Skip whitelisted terms --
+                    If TextAnchoring.IsWhitelistedTerm(rawToken) Then GoTo NextSpellToken
+
+                    ' -- Compute document position --
+                    Dim spRangeStart As Long, spRangeEnd As Long
+                    spRangeStart = paraStart + (tokStart - 1) - spListPrefixLen
+                    spRangeEnd = spRangeStart + Len(rawToken)
+
+                    ' Create a range for the match
+                    Dim matchRng As Range
+                    Err.Clear
+                    Set matchRng = doc.Range(spRangeStart, spRangeEnd)
+                    If Err.Number <> 0 Then Err.Clear: GoTo NextSpellToken
+
+                    ' Verify the document text matches (guard against list prefix offset issues)
+                    Dim actualText As String
+                    actualText = matchRng.Text
+                    If Err.Number <> 0 Then Err.Clear: GoTo NextSpellToken
+                    If LCase$(actualText) <> cleanToken Then GoTo NextSpellToken
+
+                    ' -- Create the finding --
+                    Dim foundText As String
+                    foundText = actualText
+
+                    locStr = TextAnchoring.GetLocationString(matchRng, doc)
+                    If Err.Number <> 0 Then locStr = "unknown location": Err.Clear
+
+                    issueText = sourceLabel & " spelling detected: '" & foundText & "'"
+
+                    ' -- Downgrade italic / quoted text --
+                    Dim severity As String
+                    Dim suggestion As String
+                    severity = "error"
+                    suggestion = targetWords(matchIdx)
+
+                    If IsRangeItalic(matchRng) Then
+                        severity = "possible_error"
+                        suggestion = ""
+                        issueText = issueText & " (in italic text -- review manually)"
+                    ElseIf IsInsideQuotes(matchRng, doc) Then
+                        severity = "possible_error"
+                        suggestion = ""
+                        issueText = issueText & " (in quoted text -- review manually)"
+                    End If
+
+                    ' Mark as auto-fix safe when severity is "error"
+                    Dim spAutoFix As Boolean
+                    Dim spReplacement As String
+                    spAutoFix = False
+                    spReplacement = ""
+                    If severity = "error" And Len(suggestion) > 0 Then
+                        spAutoFix = True
+                        spReplacement = suggestion
+                    End If
+
+                    Set finding = TextAnchoring.CreateIssueDict(RULE_NAME, locStr, issueText, suggestion, _
+                        spRangeStart, spRangeEnd, severity, spAutoFix, spReplacement, _
+                        foundText, "exact_text", "high")
+                    issues.Add finding
+                End If
+NextSpellToken:
+            End If
+        Loop
+NextSpellPara:
+    Next para
+    On Error GoTo 0
 End Sub
+
+' ============================================================
+'  PRIVATE: Check if a character is a word character for
+'  spelling tokenisation (letter, digit, apostrophe, hyphen)
+' ============================================================
+Private Function IsWordCharSpelling(ByVal ch As String) As Boolean
+    If Len(ch) <> 1 Then
+        IsWordCharSpelling = False
+        Exit Function
+    End If
+    Dim c As Long
+    c = AscW(ch)
+    ' A-Z, a-z
+    If (c >= 65 And c <= 90) Or (c >= 97 And c <= 122) Then
+        IsWordCharSpelling = True
+        Exit Function
+    End If
+    ' 0-9
+    If c >= 48 And c <= 57 Then
+        IsWordCharSpelling = True
+        Exit Function
+    End If
+    ' Apostrophe (for contractions like "don't" - these won't match spelling words)
+    ' Hyphen (for compound words)
+    If c = 39 Or c = 45 Then
+        IsWordCharSpelling = True
+        Exit Function
+    End If
+    ' Smart apostrophes
+    If c = 8217 Or c = 8216 Then
+        IsWordCharSpelling = True
+        Exit Function
+    End If
+    IsWordCharSpelling = False
+End Function
 
 ' ============================================================
 '  PRIVATE: Check if a found term is in the exceptions list

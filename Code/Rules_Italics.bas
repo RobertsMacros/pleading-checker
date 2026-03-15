@@ -112,7 +112,7 @@ Private Sub InitSeedTerms()
         "raison d'etre", "ratio decidendi", "stare decisis", _
         "terra nullius", "ultra vires", "vice versa", _
         "vis-a-vis", "viz")
-    seedTerms = MergeArrays(batch1, batch2, batch3)
+    seedTerms = TextAnchoring.MergeArrays3(batch1, batch2, batch3)
     seedInitialised = True
 End Sub
 
@@ -311,21 +311,132 @@ NextParaR31:
     Set Check_ForeignNamesNotItalic = issues
 End Function
 
-' ----------------------------------------------------------------
-'  Merge up to 3 Variant arrays into one flat Variant array
-' ----------------------------------------------------------------
-Private Function MergeArrays(a1 As Variant, a2 As Variant, a3 As Variant) As Variant
-    Dim total As Long
-    total = UBound(a1) - LBound(a1) + 1 _
-          + UBound(a2) - LBound(a2) + 1 _
-          + UBound(a3) - LBound(a3) + 1
-    Dim out() As Variant
-    ReDim out(0 To total - 1)
-    Dim idx As Long
-    idx = 0
-    Dim v As Variant
-    For Each v In a1: out(idx) = v: idx = idx + 1: Next v
-    For Each v In a2: out(idx) = v: idx = idx + 1: Next v
-    For Each v In a3: out(idx) = v: idx = idx + 1: Next v
-    MergeArrays = out
-End Function
+' ============================================================
+'  ProcessParagraph_AnglicisedTerms
+'  Extracts per-paragraph logic from Check_AnglicisedTermsNotItalic.
+' ============================================================
+Public Sub ProcessParagraph_AnglicisedTerms(doc As Document, _
+                                             paraRange As Range, _
+                                             paraText As String, _
+                                             paraStart As Long, _
+                                             listPrefixLen As Long, _
+                                             ByRef issues As Collection)
+    InitSeedTerms
+
+    Dim termIdx As Long
+    Dim term As String
+    Dim termLen As Long
+    Dim pos As Long
+    Dim charBefore As String
+    Dim charAfter As String
+    Dim rng As Range
+    Dim locStr As String
+    Dim finding As Object
+    Dim adjStart As Long
+
+    For termIdx = LBound(seedTerms) To UBound(seedTerms)
+        term = CStr(seedTerms(termIdx))
+        termLen = Len(term)
+
+        pos = InStr(1, paraText, term, vbTextCompare)
+        Do While pos > 0
+            If pos > 1 Then
+                charBefore = Mid$(paraText, pos - 1, 1)
+                If IsLetter(charBefore) Then GoTo NextMatchAT
+            End If
+
+            If pos + termLen <= Len(paraText) Then
+                charAfter = Mid$(paraText, pos + termLen, 1)
+                If IsLetter(charAfter) Then GoTo NextMatchAT
+            End If
+
+            adjStart = paraStart + listPrefixLen + pos - 1
+
+            On Error Resume Next
+            Set rng = doc.Range(adjStart, adjStart + termLen)
+            If Err.Number <> 0 Then Err.Clear: On Error GoTo 0: GoTo NextMatchAT
+            On Error GoTo 0
+
+            If IsRangeItalic(rng) Then
+                On Error Resume Next
+                locStr = TextAnchoring.GetLocationString(rng, doc)
+                If Err.Number <> 0 Then locStr = "unknown location": Err.Clear
+                On Error GoTo 0
+
+                Set finding = TextAnchoring.CreateIssueDict(RULE_NAME_ANGLICISED, locStr, "Anglicised foreign term is italicised.", "Set '" & term & "' in roman, not italics.", rng.Start, rng.End, "warning", False)
+                issues.Add finding
+            End If
+
+NextMatchAT:
+            pos = InStr(pos + 1, paraText, term, vbTextCompare)
+        Loop
+    Next termIdx
+End Sub
+
+' ============================================================
+'  ProcessParagraph_ForeignNames
+'  Extracts per-paragraph logic from Check_ForeignNamesNotItalic.
+' ============================================================
+Public Sub ProcessParagraph_ForeignNames(doc As Document, _
+                                          paraRange As Range, _
+                                          paraText As String, _
+                                          paraStart As Long, _
+                                          listPrefixLen As Long, _
+                                          ByRef issues As Collection)
+    If foreignNames Is Nothing Then
+        InitSeedNames
+    End If
+
+    Dim keys As Variant
+    Dim k As Long
+    Dim term As String
+    Dim termLen As Long
+    Dim pos As Long
+    Dim charBefore As String
+    Dim charAfter As String
+    Dim rng As Range
+    Dim locStr As String
+    Dim finding As Object
+    Dim adjStart As Long
+
+    keys = foreignNames.keys
+
+    For k = 0 To foreignNames.Count - 1
+        term = CStr(keys(k))
+        termLen = Len(term)
+
+        pos = InStr(1, paraText, term, vbTextCompare)
+        Do While pos > 0
+            If pos > 1 Then
+                charBefore = Mid$(paraText, pos - 1, 1)
+                If IsLetter(charBefore) Then GoTo NextMatchFN
+            End If
+
+            If pos + termLen <= Len(paraText) Then
+                charAfter = Mid$(paraText, pos + termLen, 1)
+                If IsLetter(charAfter) Then GoTo NextMatchFN
+            End If
+
+            adjStart = paraStart + listPrefixLen + pos - 1
+
+            On Error Resume Next
+            Set rng = doc.Range(adjStart, adjStart + termLen)
+            If Err.Number <> 0 Then Err.Clear: On Error GoTo 0: GoTo NextMatchFN
+            On Error GoTo 0
+
+            If IsRangeItalic(rng) Then
+                On Error Resume Next
+                locStr = TextAnchoring.GetLocationString(rng, doc)
+                If Err.Number <> 0 Then locStr = "unknown location": Err.Clear
+                On Error GoTo 0
+
+                Set finding = TextAnchoring.CreateIssueDict(RULE_NAME_FOREIGN, locStr, "Foreign name or institution should not be italicised.", "Set '" & term & "' in roman, not italics.", rng.Start, rng.End, "warning", False)
+                issues.Add finding
+            End If
+
+NextMatchFN:
+            pos = InStr(pos + 1, paraText, term, vbTextCompare)
+        Loop
+    Next k
+End Sub
+

@@ -88,6 +88,15 @@ Private paraStartPos()  As Long
 Private paraStartCount  As Long
 Private paraCacheValid  As Boolean
 
+' -- Block-quote / TOC / cover-page region cache (built once per run) --
+Private bqStarts()      As Long
+Private bqEnds()        As Long
+Private bqCount         As Long
+Private tocStarts()     As Long
+Private tocEnds()       As Long
+Private tocCount        As Long
+Private coverPageEnd    As Long   ' -1 = no cover page detected
+
 ' ============================================================
 '  COOPERATIVE CANCELLATION HELPERS
 ' ============================================================
@@ -941,20 +950,212 @@ Private Sub BuildParagraphCache(doc As Document)
     ReDim paraStartPos(0 To cap - 1)
     paraStartCount = 0
 
+    ' -- Region cache initialisation --
+    Const BODY_TEXT_MIN_LEN As Long = 200
+    coverPageEnd = -1
+
+    Dim bqCap As Long: bqCap = 64
+    ReDim bqStarts(0 To bqCap - 1)
+    ReDim bqEnds(0 To bqCap - 1)
+    bqCount = 0
+
+    Dim tocCap As Long: tocCap = 16
+    ReDim tocStarts(0 To tocCap - 1)
+    ReDim tocEnds(0 To tocCap - 1)
+    tocCount = 0
+
+    ' -- Collect TOC field ranges first (separate from paragraph scan) --
+    On Error Resume Next
+    Dim toc As TableOfContents
+    For Each toc In doc.TablesOfContents
+        Err.Clear
+        Dim tocRng As Range
+        Set tocRng = toc.Range
+        If Err.Number = 0 Then
+            If tocCount >= tocCap Then
+                tocCap = tocCap * 2
+                ReDim Preserve tocStarts(0 To tocCap - 1)
+                ReDim Preserve tocEnds(0 To tocCap - 1)
+            End If
+            tocStarts(tocCount) = tocRng.Start
+            tocEnds(tocCount) = tocRng.End
+            tocCount = tocCount + 1
+        Else
+            Err.Clear
+        End If
+    Next toc
+    On Error GoTo 0
+
+    ' -- Smart-quote multi-paragraph tracking --
+    Dim insideMultiParaQuote As Boolean
+    insideMultiParaQuote = False
+
+    ' -- Single pass over all paragraphs --
     On Error Resume Next
     For Each para In doc.Paragraphs
+        Err.Clear
+
+        ' Cache paragraph start position
         If paraStartCount >= cap Then
             cap = cap * 2
             ReDim Preserve paraStartPos(0 To cap - 1)
         End If
-        paraStartPos(paraStartCount) = para.Range.Start
+        Dim pStart As Long, pEnd As Long
+        pStart = para.Range.Start
+        pEnd = para.Range.End
+        If Err.Number <> 0 Then Err.Clear: GoTo NextCachePara
+        paraStartPos(paraStartCount) = pStart
         paraStartCount = paraStartCount + 1
+
+        ' -- Cover page detection --
+        If coverPageEnd < 0 Then
+            Dim cpText As String
+            cpText = ""
+            cpText = para.Range.Text
+            If Err.Number <> 0 Then cpText = "": Err.Clear
+            If Len(cpText) > 0 Then
+                If Right$(cpText, 1) = vbCr Or Right$(cpText, 1) = Chr(13) Then
+                    cpText = Left$(cpText, Len(cpText) - 1)
+                End If
+            End If
+            Dim cleanCpText As String
+            cleanCpText = Replace(Replace(Replace(cpText, vbLf, ""), vbVerticalTab, ""), Chr(11), "")
+            If Len(cleanCpText) > BODY_TEXT_MIN_LEN Then
+                coverPageEnd = pStart
+            End If
+        End If
+
+        ' -- TOC paragraph detection (style-based and pattern-based) --
+        Dim tocSn As String
+        tocSn = ""
+        tocSn = LCase(para.Style.NameLocal)
+        If Err.Number <> 0 Then tocSn = "": Err.Clear
+        Dim isTocPara As Boolean
+        isTocPara = False
+        If InStr(tocSn, "toc") > 0 Or InStr(tocSn, "table of contents") > 0 Or _
+           InStr(tocSn, "contents") > 0 Then
+            isTocPara = True
+        End If
+        If Not isTocPara Then
+            Dim tocParaText As String
+            tocParaText = ""
+            tocParaText = para.Range.Text
+            If Err.Number <> 0 Then tocParaText = "": Err.Clear
+            If Len(tocParaText) > 3 Then
+                If tocParaText Like "*[." & vbTab & "][." & vbTab & "]*#" & vbCr Or _
+                   tocParaText Like "*[." & vbTab & "][." & vbTab & "]*#" Then
+                    isTocPara = True
+                End If
+            End If
+        End If
+        If isTocPara Then
+            If tocCount >= tocCap Then
+                tocCap = tocCap * 2
+                ReDim Preserve tocStarts(0 To tocCap - 1)
+                ReDim Preserve tocEnds(0 To tocCap - 1)
+            End If
+            tocStarts(tocCount) = pStart
+            tocEnds(tocCount) = pEnd
+            tocCount = tocCount + 1
+        End If
+
+        ' -- Block-quote detection using canonical IsBlockQuotePara --
+        Dim isBQ As Boolean
+        isBQ = False
+
+        ' Try canonical IsBlockQuotePara via Application.Run
+        Dim bqResult As Boolean
+        bqResult = False
+        bqResult = Application.Run("Rules_Formatting.IsBlockQuotePara", para)
+        If Err.Number <> 0 Then
+            ' Module not imported -- fall back to style-name-only check
+            Err.Clear
+            Dim fallbackSn As String
+            fallbackSn = ""
+            fallbackSn = LCase(para.Style.NameLocal)
+            If Err.Number <> 0 Then fallbackSn = "": Err.Clear
+            If InStr(fallbackSn, "quote") > 0 Or InStr(fallbackSn, "block") > 0 Or _
+               InStr(fallbackSn, "extract") > 0 Then
+                bqResult = True
+            End If
+        End If
+        isBQ = bqResult
+
+        ' -- Multi-paragraph smart-quote detection --
+        Dim pText As String
+        pText = ""
+        pText = para.Range.Text
+        If Err.Number <> 0 Then pText = "": Err.Clear
+        pText = Replace(Replace(Replace(pText, vbCr, ""), vbTab, ""), ChrW(160), "")
+        pText = Trim$(pText)
+
+        If Not isBQ Then
+            If Len(pText) > 2 Then
+                Dim firstCh As Long, lastCh As Long
+                Dim trimmed As String
+                firstCh = AscW(Left(pText, 1))
+                trimmed = pText
+                If Right(trimmed, 1) = vbCr Or Right(trimmed, 1) = vbLf Then
+                    trimmed = Left(trimmed, Len(trimmed) - 1)
+                End If
+                If Len(trimmed) > 1 Then
+                    lastCh = AscW(Right(trimmed, 1))
+                    ' Single-paragraph quote
+                    If (firstCh = 8220 And lastCh = 8221) Then isBQ = True
+                    If (firstCh = 34 And lastCh = 34) Then isBQ = True
+                    ' Start of multi-paragraph quote (opens but doesn't close)
+                    If Not isBQ And Not insideMultiParaQuote Then
+                        If (firstCh = 8220 And lastCh <> 8221) Or _
+                           (firstCh = 34 And lastCh <> 34) Then
+                            insideMultiParaQuote = True
+                            isBQ = True
+                        End If
+                    End If
+                End If
+            End If
+        End If
+
+        ' If inside a multi-paragraph quote, mark as block quote
+        If insideMultiParaQuote And Not isBQ Then
+            isBQ = True
+        End If
+
+        ' Check if this paragraph ends the multi-paragraph quote
+        If insideMultiParaQuote And Len(pText) > 1 Then
+            Dim endTrimmed As String
+            endTrimmed = pText
+            If Right(endTrimmed, 1) = vbCr Or Right(endTrimmed, 1) = vbLf Then
+                endTrimmed = Left(endTrimmed, Len(endTrimmed) - 1)
+            End If
+            If Len(endTrimmed) > 0 Then
+                Dim endCh As Long
+                endCh = AscW(Right(endTrimmed, 1))
+                If endCh = 8221 Or endCh = 34 Then
+                    insideMultiParaQuote = False
+                End If
+            End If
+        End If
+
+        If isBQ Then
+            If bqCount >= bqCap Then
+                bqCap = bqCap * 2
+                ReDim Preserve bqStarts(0 To bqCap - 1)
+                ReDim Preserve bqEnds(0 To bqCap - 1)
+            End If
+            bqStarts(bqCount) = pStart
+            bqEnds(bqCount) = pEnd
+            bqCount = bqCount + 1
+        End If
+
+NextCachePara:
     Next para
     On Error GoTo 0
 
     paraCacheValid = True
     PerfTimerEnd "BuildParagraphCache"
     PerfCount "paragraphs_cached", paraStartCount
+    PerfCount "block_quote_regions", bqCount
+    PerfCount "toc_regions", tocCount
 End Sub
 
 Private Function FindParagraphIndex(ByVal pos As Long) As Long
@@ -992,6 +1193,156 @@ Private Function FindParagraphIndex(ByVal pos As Long) As Long
 
     FindParagraphIndex = lo + 1  ' 1-based
 End Function
+
+' ============================================================
+'  CONSOLIDATED PARAGRAPH-LEVEL RULE RUNNER
+'  Iterates doc.Paragraphs exactly once and dispatches to all
+'  paragraph-level rule handlers that are enabled in the config.
+'  Each handler receives the paragraph's Range, text, start
+'  position, and list-prefix length, and appends issues to the
+'  shared collection.
+' ============================================================
+Public Sub RunParagraphRules(doc As Document, config As Object, _
+                              ByRef allIssues As Collection)
+    PerfTimerStart "paragraph_rules_combined"
+    TraceStep "RunParagraphRules", "starting consolidated paragraph pass"
+
+    ' -- Build list of enabled handlers --------------------------
+    ' Each entry is the fully qualified name for Application.Run
+    Dim handlers() As String
+    Dim hCount As Long
+    hCount = 0
+    ReDim handlers(0 To 15)
+
+    ' Repeated words
+    If IsRuleEnabled(config, "repeated_words") Then
+        handlers(hCount) = "Rules_TextScan.ProcessParagraph_RepeatedWords"
+        hCount = hCount + 1
+    End If
+    ' Spell out under ten
+    If IsRuleEnabled(config, "spell_out_under_ten") Then
+        handlers(hCount) = "Rules_TextScan.ProcessParagraph_SpellOutUnderTen"
+        hCount = hCount + 1
+    End If
+    ' Double spaces
+    If IsRuleEnabled(config, "double_spaces") Then
+        handlers(hCount) = "Rules_Spacing.ProcessParagraph_DoubleSpaces"
+        hCount = hCount + 1
+    End If
+    ' Punctuation sub-rules (all under "punctuation" toggle)
+    If IsRuleEnabled(config, "punctuation") Then
+        handlers(hCount) = "Rules_Punctuation.ProcessParagraph_TriplicatePunctuation"
+        hCount = hCount + 1
+        handlers(hCount) = "Rules_Punctuation.ProcessParagraph_DashUsage"
+        hCount = hCount + 1
+        handlers(hCount) = "Rules_Punctuation.ProcessParagraph_BracketIntegrity"
+        hCount = hCount + 1
+        handlers(hCount) = "Rules_Spacing.ProcessParagraph_DoubleCommas"
+        hCount = hCount + 1
+        handlers(hCount) = "Rules_Spacing.ProcessParagraph_MissingSpaceAfterDot"
+        hCount = hCount + 1
+    End If
+    ' Always capitalise terms
+    If IsRuleEnabled(config, "always_capitalise_terms") Then
+        handlers(hCount) = "Rules_LegalTerms.ProcessParagraph_AlwaysCapitalise"
+        hCount = hCount + 1
+    End If
+    ' Non-English terms (italics)
+    If IsRuleEnabled(config, "non_english_terms") Then
+        handlers(hCount) = "Rules_Italics.ProcessParagraph_AnglicisedTerms"
+        hCount = hCount + 1
+        handlers(hCount) = "Rules_Italics.ProcessParagraph_ForeignNames"
+        hCount = hCount + 1
+    End If
+
+    If hCount = 0 Then
+        PerfTimerEnd "paragraph_rules_combined"
+        Exit Sub
+    End If
+
+    ' -- Iterate paragraphs once ---------------------------------
+    Dim para As Paragraph
+    Dim paraRange As Range
+    Dim paraText As String
+    Dim paraStart As Long
+    Dim listPrefixLen As Long
+    Dim paraIssues As New Collection
+    Dim h As Long
+    Dim paraCount As Long
+    paraCount = 0
+
+    On Error Resume Next
+    For Each para In doc.Paragraphs
+        Err.Clear
+
+        Set paraRange = para.Range
+        If Err.Number <> 0 Then Err.Clear: GoTo NextParaRP
+        paraStart = paraRange.Start
+
+        ' Page-range filter
+        If IsPastPageFilter(paraStart) Then Exit For
+        If Not IsInPageRange(paraRange) Then GoTo NextParaRP
+
+        paraText = paraRange.Text
+        If Err.Number <> 0 Then Err.Clear: GoTo NextParaRP
+        If Len(paraText) = 0 Then GoTo NextParaRP
+
+        ' Calculate list prefix length
+        listPrefixLen = 0
+        Dim lStr As String
+        lStr = ""
+        lStr = para.Range.ListFormat.ListString
+        If Err.Number <> 0 Then lStr = "": Err.Clear
+        If Len(lStr) > 0 And Len(paraText) > Len(lStr) Then
+            If Left$(paraText, Len(lStr)) = lStr Then
+                listPrefixLen = Len(lStr)
+            End If
+        End If
+
+        ' Cancellation check every 50 paragraphs
+        paraCount = paraCount + 1
+        If paraCount Mod 50 = 0 Then
+            DoEvents
+            If gCancelRun Then
+                Err.Raise ERR_RUN_CANCELLED, "RunParagraphRules", "Run cancelled"
+            End If
+        End If
+
+        ' -- Dispatch to each enabled handler --------------------
+        For h = 0 To hCount - 1
+            Err.Clear
+            Application.Run handlers(h), doc, paraRange, paraText, _
+                paraStart, listPrefixLen, paraIssues
+            If Err.Number <> 0 Then
+                ' Handler not available or errored - skip silently
+                If Err.Number <> ERR_RUN_CANCELLED Then
+                    DebugLogError "RunParagraphRules", handlers(h), Err.Number, Err.Description
+                    Err.Clear
+                Else
+                    ' Re-raise cancellation
+                    Dim cancelErr As Long
+                    cancelErr = Err.Number
+                    On Error GoTo 0
+                    Err.Raise cancelErr, "RunParagraphRules", "Run cancelled"
+                End If
+            End If
+        Next h
+
+NextParaRP:
+    Next para
+    On Error GoTo 0
+
+    ' -- Merge paragraph issues into master collection -----------
+    Dim pi As Long
+    For pi = 1 To paraIssues.Count
+        allIssues.Add paraIssues(pi)
+    Next pi
+
+    PerfTimerEnd "paragraph_rules_combined"
+    PerfCount "paragraph_rules_paragraphs", paraCount
+    TraceStep "RunParagraphRules", "completed: " & paraCount & " paragraphs, " & _
+              paraIssues.Count & " issues from " & hCount & " handlers"
+End Sub
 
 ' ============================================================
 '  APPLICATION.RUN DISPATCHER
@@ -1082,32 +1433,15 @@ Public Function RunAllPleadingsRules(doc As Document, _
     End If
 
     CheckCancellation
-    ' -- Text scanning rules --
-    If IsRuleEnabled(config, "repeated_words") Then
-        PerfTimerStart "repeated_words"
-        AddIssuesToCollection allIssues, _
-            TryRunRule("Rules_TextScan.Check_RepeatedWords", doc)
-        PerfTimerEnd "repeated_words"
-    End If
-
-    If IsRuleEnabled(config, "spell_out_under_ten") Then
-        PerfTimerStart "spell_out_under_ten"
-        AddIssuesToCollection allIssues, _
-            TryRunRule("Rules_TextScan.Check_SpellOutUnderTen", doc)
-        PerfTimerEnd "spell_out_under_ten"
-    End If
+    ' -- Consolidated paragraph-level rules (single pass) ----------
+    ' Handles: repeated_words, spell_out_under_ten, double_spaces,
+    '          triplicate_punctuation, dash_usage, bracket_integrity,
+    '          double_commas, missing_space_after_dot,
+    '          always_capitalise_terms, non_english_terms (anglicised + foreign)
+    RunParagraphRules doc, config, allIssues
 
     CheckCancellation
-    ' -- Spacing rules --
-    If IsRuleEnabled(config, "double_spaces") Then
-        PerfTimerStart "double_spaces"
-        AddIssuesToCollection allIssues, _
-            TryRunRule("Rules_Spacing.Check_DoubleSpaces", doc)
-        PerfTimerEnd "double_spaces"
-    End If
-
-    CheckCancellation
-    ' -- Number format rules --
+    ' -- Number format rules (Range.Find based, not paragraph-level) --
     If IsRuleEnabled(config, "date_time_format") Then
         PerfTimerStart "date_time_format"
         AddIssuesToCollection allIssues, _
@@ -1123,24 +1457,14 @@ Public Function RunAllPleadingsRules(doc As Document, _
     End If
 
     CheckCancellation
-    ' -- Punctuation rules (single combined bucket) --
+    ' -- Non-paragraph punctuation rules (Range.Find based) --------
     If IsRuleEnabled(config, "punctuation") Then
-        PerfTimerStart "punctuation"
+        PerfTimerStart "punctuation_find"
         AddIssuesToCollection allIssues, _
             TryRunRule("Rules_Punctuation.Check_SlashStyle", doc)
         AddIssuesToCollection allIssues, _
-            TryRunRule("Rules_Punctuation.Check_BracketIntegrity", doc)
-        AddIssuesToCollection allIssues, _
-            TryRunRule("Rules_Punctuation.Check_DashUsage", doc)
-        AddIssuesToCollection allIssues, _
-            TryRunRule("Rules_Punctuation.Check_TriplicatePunctuation", doc)
-        AddIssuesToCollection allIssues, _
-            TryRunRule("Rules_Spacing.Check_DoubleCommas", doc)
-        AddIssuesToCollection allIssues, _
             TryRunRule("Rules_Spacing.Check_SpaceBeforePunct", doc)
-        AddIssuesToCollection allIssues, _
-            TryRunRule("Rules_Spacing.Check_MissingSpaceAfterDot", doc)
-        PerfTimerEnd "punctuation"
+        PerfTimerEnd "punctuation_find"
     End If
 
     CheckCancellation
@@ -1179,30 +1503,12 @@ Public Function RunAllPleadingsRules(doc As Document, _
     End If
 
     CheckCancellation
-    ' -- Legal term rules --
+    ' -- Mandated legal term forms (Range.Find based, not paragraph-level) --
     If IsRuleEnabled(config, "mandated_legal_term_forms") Then
         PerfTimerStart "mandated_legal_term_forms"
         AddIssuesToCollection allIssues, _
             TryRunRule("Rules_LegalTerms.Check_MandatedLegalTermForms", doc)
         PerfTimerEnd "mandated_legal_term_forms"
-    End If
-
-    If IsRuleEnabled(config, "always_capitalise_terms") Then
-        PerfTimerStart "always_capitalise_terms"
-        AddIssuesToCollection allIssues, _
-            TryRunRule("Rules_LegalTerms.Check_AlwaysCapitaliseTerms", doc)
-        PerfTimerEnd "always_capitalise_terms"
-    End If
-
-    CheckCancellation
-    ' -- Non-English term rules (italics) --
-    If IsRuleEnabled(config, "non_english_terms") Then
-        PerfTimerStart "non_english_terms"
-        AddIssuesToCollection allIssues, _
-            TryRunRule("Rules_Italics.Check_AnglicisedTermsNotItalic", doc)
-        AddIssuesToCollection allIssues, _
-            TryRunRule("Rules_Italics.Check_ForeignNamesNotItalic", doc)
-        PerfTimerEnd "non_english_terms"
     End If
 
 RunnerCleanup:
@@ -1235,9 +1541,6 @@ RunnerCleanup:
     PerfTimerEnd "FilterBlockQuoteIssues"
     On Error GoTo 0
 
-    ' -- Hard safety guard: strip retired rule families -----------
-    Set allIssues = FilterRetiredRules(allIssues)
-
     ' -- Build grouped report data (must happen after all filtering) --
     BuildSpellingGroups allIssues
     BuildFootnoteGroups allIssues
@@ -1261,22 +1564,9 @@ End Function
 
 ' ============================================================
 '  FILTER: Remove issues inside block quotes, cover pages,
-'  and contents/table-of-contents pages
+'  and contents/table-of-contents pages.
 '
-'  Block quotes detected by:
-'    1. Style name containing "quote", "block", or "extract"
-'    2. Significant left indentation (> 36pt) with smaller font
-'    3. Paragraph text wrapped in quotation marks
-'
-'  Cover pages detected by:
-'    - Content before the first section break, OR
-'    - All page-1 content when the document has > 1 page and
-'      page 1 contains no numbered paragraphs
-'
-'  Contents pages detected by:
-'    - Word's built-in TOC field ranges
-'    - Paragraphs styled with "TOC" styles
-'    - Paragraphs containing dot/tab leaders followed by numbers
+'  Uses pre-built region arrays from BuildParagraphCache.
 ' ============================================================
 Private Function FilterBlockQuoteIssues(doc As Document, _
                                          issues As Collection) As Collection
@@ -1285,287 +1575,7 @@ Private Function FilterBlockQuoteIssues(doc As Document, _
     Dim filtered As New Collection
     Dim i As Long
 
-    ' -- Determine cover page end position -------------------------
-    ' Skip all content before the first "body text" paragraph,
-    ' defined as the first paragraph whose plain text (without line
-    ' breaks) exceeds BODY_TEXT_MIN_LEN characters.  Everything
-    ' before that is treated as cover / title page.
-    Const BODY_TEXT_MIN_LEN As Long = 200
-    Dim coverPageEnd As Long
-    coverPageEnd = -1  ' -1 means no cover page detected
-
-    On Error Resume Next
-    Dim coverPara As Paragraph
-    For Each coverPara In doc.Paragraphs
-        Err.Clear
-        Dim cpText As String
-        cpText = ""
-        cpText = coverPara.Range.Text
-        If Err.Number <> 0 Then Err.Clear: GoTo NextCoverPara
-        ' Strip paragraph mark
-        If Len(cpText) > 0 Then
-            If Right$(cpText, 1) = vbCr Or Right$(cpText, 1) = Chr(13) Then
-                cpText = Left$(cpText, Len(cpText) - 1)
-            End If
-        End If
-        ' Strip any internal line breaks (vbLf, vertical tab, manual line break)
-        Dim cleanCpText As String
-        cleanCpText = Replace(Replace(Replace(cpText, vbLf, ""), vbVerticalTab, ""), Chr(11), "")
-        If Len(cleanCpText) > BODY_TEXT_MIN_LEN Then
-            ' This paragraph is the start of body text
-            coverPageEnd = coverPara.Range.Start
-            Exit For
-        End If
-NextCoverPara:
-    Next coverPara
-    On Error GoTo 0
-
-    ' -- Determine TOC / contents page ranges -----------------------
-    Dim tocStarts() As Long, tocEnds() As Long
-    Dim tocCount As Long, tocCap As Long
-    tocCap = 16
-    ReDim tocStarts(0 To tocCap - 1)
-    ReDim tocEnds(0 To tocCap - 1)
-    tocCount = 0
-
-    On Error Resume Next
-
-    ' Method 1: Word's built-in TOC fields
-    Dim toc As TableOfContents
-    For Each toc In doc.TablesOfContents
-        Err.Clear
-        Dim tocRng As Range
-        Set tocRng = toc.Range
-        If Err.Number = 0 Then
-            If tocCount >= tocCap Then
-                tocCap = tocCap * 2
-                ReDim Preserve tocStarts(0 To tocCap - 1)
-                ReDim Preserve tocEnds(0 To tocCap - 1)
-            End If
-            tocStarts(tocCount) = tocRng.Start
-            tocEnds(tocCount) = tocRng.End
-            tocCount = tocCount + 1
-        Else
-            Err.Clear
-        End If
-    Next toc
-
-    ' Method 2: Scan for TOC-styled paragraphs (catches manual TOCs)
-    Dim tocPara As Paragraph
-    For Each tocPara In doc.Paragraphs
-        Err.Clear
-        Dim tocSn As String
-        tocSn = ""
-        tocSn = LCase(tocPara.Style.NameLocal)
-        If Err.Number <> 0 Then tocSn = "": Err.Clear
-
-        Dim isTocPara As Boolean
-        isTocPara = False
-
-        ' Check style name for TOC indicators
-        If InStr(tocSn, "toc") > 0 Or InStr(tocSn, "table of contents") > 0 Or _
-           InStr(tocSn, "contents") > 0 Then
-            isTocPara = True
-        End If
-
-        ' Check for dot/tab leader pattern: text followed by dots/tabs then page number
-        If Not isTocPara Then
-            Dim tocParaText As String
-            tocParaText = ""
-            tocParaText = tocPara.Range.Text
-            If Err.Number <> 0 Then tocParaText = "": Err.Clear
-            If Len(tocParaText) > 3 Then
-                ' Pattern: dots or tabs followed by digits at end of line
-                If tocParaText Like "*[." & vbTab & "][." & vbTab & "]*#" & vbCr Or _
-                   tocParaText Like "*[." & vbTab & "][." & vbTab & "]*#" Then
-                    isTocPara = True
-                End If
-            End If
-        End If
-
-        If isTocPara Then
-            Dim tpStart As Long, tpEnd As Long
-            tpStart = tocPara.Range.Start
-            tpEnd = tocPara.Range.End
-            If Err.Number = 0 Then
-                If tocCount >= tocCap Then
-                    tocCap = tocCap * 2
-                    ReDim Preserve tocStarts(0 To tocCap - 1)
-                    ReDim Preserve tocEnds(0 To tocCap - 1)
-                End If
-                tocStarts(tocCount) = tpStart
-                tocEnds(tocCount) = tpEnd
-                tocCount = tocCount + 1
-            Else
-                Err.Clear
-            End If
-        End If
-    Next tocPara
-    On Error GoTo 0
-
-    ' -- Build list of block-quote paragraph ranges ----------------
-    ' Detects block quotes via style name, indentation+smaller font,
-    ' or multi-paragraph smart-quote spans (open " on first para,
-    ' close " on last para — all paras in between are block-quoted).
-    Dim bqStarts() As Long, bqEnds() As Long
-    Dim bqCount As Long, bqCap As Long
-    bqCap = 64
-    ReDim bqStarts(0 To bqCap - 1)
-    ReDim bqEnds(0 To bqCap - 1)
-    bqCount = 0
-
-    Dim insideMultiParaQuote As Boolean
-    insideMultiParaQuote = False
-
-    On Error Resume Next
-    Dim para As Paragraph
-    For Each para In doc.Paragraphs
-        Err.Clear
-        Dim pStart As Long, pEnd As Long
-        pStart = para.Range.Start
-        pEnd = para.Range.End
-        If Err.Number <> 0 Then Err.Clear: GoTo NxtBQ
-
-        Dim isBQ As Boolean
-        isBQ = False
-
-        ' Check 1: Style name
-        Dim sn As String
-        sn = ""
-        sn = LCase(para.Style.NameLocal)
-        If Err.Number <> 0 Then sn = "": Err.Clear
-        If InStr(sn, "quote") > 0 Or InStr(sn, "block") > 0 Or _
-           InStr(sn, "extract") > 0 Then
-            isBQ = True
-        End If
-
-        ' Check 1.5: Skip lists (mirrors IsBlockQuotePara CHECK 0)
-        If Not isBQ Then
-            Dim listLvl As Long
-            listLvl = 0
-            listLvl = para.Range.ListFormat.ListLevelNumber
-            If Err.Number <> 0 Then listLvl = 0: Err.Clear
-            If listLvl > 0 Then GoTo NxtBQ  ' Listed paragraph - not a block quote
-
-            ' Check for bullet/number prefix in text
-            Dim bqPText As String
-            bqPText = ""
-            bqPText = para.Range.Text
-            If Err.Number <> 0 Then bqPText = "": Err.Clear
-            If Len(bqPText) > 0 Then
-                Dim fc As String
-                fc = Left$(bqPText, 1)
-                ' Bullet characters
-                If fc = Chr(183) Or fc = ChrW(8226) Or fc = "-" Or fc = "*" Then GoTo NxtBQ
-                ' Numbered list pattern: digit(s) followed by . or )
-                If fc >= "0" And fc <= "9" Then
-                    If bqPText Like "#[.)]#*" Or bqPText Like "##[.)]#*" Then GoTo NxtBQ
-                End If
-            End If
-        End If
-
-        ' Check 2: Indentation + smaller font or italic
-        If Not isBQ Then
-            Dim leftInd As Single
-            leftInd = para.Format.LeftIndent
-            If Err.Number <> 0 Then leftInd = 0: Err.Clear
-            Dim fontSize As Single
-            fontSize = para.Range.Font.Size
-            If Err.Number <> 0 Then fontSize = 0: Err.Clear
-            Dim bqItalic As Boolean
-            bqItalic = False
-            Dim bqItalVal As Long
-            bqItalVal = para.Range.Font.Italic
-            If Err.Number <> 0 Then bqItalVal = 0: Err.Clear
-            If bqItalVal = -1 Then bqItalic = True  ' wdTrue = -1
-            ' Moderate indent with clearly smaller font
-            If leftInd > 18 And fontSize > 0 And fontSize < 11 Then
-                isBQ = True
-            End If
-            ' Moderate indent with italic
-            If leftInd > 18 And bqItalic Then
-                isBQ = True
-            End If
-            ' Heavy indentation: only if italic or smaller font
-            ' (plain indented body-size text = list, not quote)
-            If Not isBQ And leftInd > 72 Then
-                If bqItalic Or (fontSize > 0 And fontSize < 11) Then
-                    isBQ = True
-                End If
-            End If
-        End If
-
-        ' Check 3: Multi-paragraph smart-quote detection
-        Dim pText As String
-        pText = ""
-        pText = para.Range.Text
-        If Err.Number <> 0 Then pText = "": Err.Clear
-        ' Strip tabs, non-breaking spaces, CRs so quote marks are first/last
-        pText = Replace(Replace(Replace(pText, vbCr, ""), vbTab, ""), ChrW(160), "")
-        pText = Trim$(pText)
-        If Not isBQ Then
-            If Len(pText) > 2 Then
-                Dim firstCh As Long, lastCh As Long
-                Dim trimmed As String
-                firstCh = AscW(Left(pText, 1))
-                trimmed = pText
-                If Right(trimmed, 1) = vbCr Or Right(trimmed, 1) = vbLf Then
-                    trimmed = Left(trimmed, Len(trimmed) - 1)
-                End If
-
-                If Len(trimmed) > 1 Then
-                    lastCh = AscW(Right(trimmed, 1))
-                    ' Single-paragraph quote
-                    If (firstCh = 8220 And lastCh = 8221) Then isBQ = True
-                    If (firstCh = 34 And lastCh = 34) Then isBQ = True
-                    ' Start of multi-paragraph quote (opens but doesn't close)
-                    If Not isBQ And Not insideMultiParaQuote Then
-                        If (firstCh = 8220 And lastCh <> 8221) Or _
-                           (firstCh = 34 And lastCh <> 34) Then
-                            insideMultiParaQuote = True
-                            isBQ = True
-                        End If
-                    End If
-                End If
-            End If
-        End If
-
-        ' If inside a multi-paragraph quote, mark as block quote
-        If insideMultiParaQuote And Not isBQ Then
-            isBQ = True
-        End If
-
-        ' Check if this paragraph ends the multi-paragraph quote
-        If insideMultiParaQuote And Len(pText) > 1 Then
-            Dim endTrimmed As String
-            endTrimmed = pText
-            If Right(endTrimmed, 1) = vbCr Or Right(endTrimmed, 1) = vbLf Then
-                endTrimmed = Left(endTrimmed, Len(endTrimmed) - 1)
-            End If
-            If Len(endTrimmed) > 0 Then
-                Dim endCh As Long
-                endCh = AscW(Right(endTrimmed, 1))
-                If endCh = 8221 Or endCh = 34 Then
-                    insideMultiParaQuote = False
-                End If
-            End If
-        End If
-
-        If isBQ Then
-            If bqCount >= bqCap Then
-                bqCap = bqCap * 2
-                ReDim Preserve bqStarts(0 To bqCap - 1)
-                ReDim Preserve bqEnds(0 To bqCap - 1)
-            End If
-            bqStarts(bqCount) = pStart
-            bqEnds(bqCount) = pEnd
-            bqCount = bqCount + 1
-        End If
-NxtBQ:
-    Next para
-    On Error GoTo 0
-
-    ' -- Filter issues ---------------------------------------------
+    ' -- Early exit if no regions detected -------------------------
     If bqCount = 0 And coverPageEnd < 0 And tocCount = 0 Then
         Set FilterBlockQuoteIssues = issues
         Exit Function
@@ -1593,7 +1603,6 @@ NxtBQ:
         If inTOC Then GoTo SkipIssue
 
         ' Skip content-based issues in block quotes
-        ' (formatting rules like font_consistency still apply)
         Dim inBQ As Boolean
         inBQ = False
         Dim j As Long
@@ -1603,7 +1612,6 @@ NxtBQ:
                 Exit For
             End If
         Next j
-        ' Suppress ALL rules in block quotes
         If inBQ Then GoTo SkipIssue
 
         filtered.Add finding
@@ -2853,118 +2861,10 @@ Private Sub AddIssuesToCollection(master As Collection, _
     Dim i As Long
     If ruleIssues Is Nothing Then Exit Sub
     For i = 1 To ruleIssues.Count
-        ' Defensive filter: drop retired rule families
-        If IsRetiredIssue(ruleIssues(i)) Then GoTo NextAddIssue
         master.Add ruleIssues(i)
-NextAddIssue:
     Next i
 End Sub
 
-' ================================================================
-'  PRIVATE: Returns True if an issue belongs to a retired rule
-'  family (trailing spaces or after-heading spacing).  Used as a
-'  belt-and-braces guard so legacy code can never emit these.
-' ================================================================
-Private Function IsRetiredIssue(ByVal item As Object) As Boolean
-    IsRetiredIssue = False
-    On Error Resume Next
-    If TypeName(item) <> "Dictionary" Then Exit Function
-    Dim rn As String
-    rn = ""
-    If item.Exists("RuleName") Then rn = LCase$(item("RuleName"))
-    If Len(rn) = 0 Then Exit Function
-
-    ' ---- Retired rule families (MVP pruning pass) ----
-
-    ' Trailing spaces
-    If rn = "trailing_spaces" Or rn = "trailing_space" Or _
-       rn = "trailing whitespace" Then
-        IsRetiredIssue = True: Exit Function
-    End If
-
-    ' Heading spacing (after/before heading)
-    If rn = "after_heading_spacing" Or rn = "heading_spacing" Or _
-       rn = "heading spacing" Or rn = "heading_spacing_consistency" Or _
-       rn = "paragraph_break_consistency" Then
-        IsRetiredIssue = True: Exit Function
-    End If
-
-    ' Font / formatting consistency
-    If rn = "font_consistency" Or rn = "colour_formatting" Or _
-       rn = "formatting_consistency" Then
-        IsRetiredIssue = True: Exit Function
-    End If
-
-    ' Heading capitalisation / title formatting
-    If rn = "heading_capitalisation" Or rn = "title_formatting" Then
-        IsRetiredIssue = True: Exit Function
-    End If
-
-    ' Sequential numbering / clause number format
-    If rn = "sequential_numbering" Or rn = "clause_number_format" Then
-        IsRetiredIssue = True: Exit Function
-    End If
-
-    ' Defined terms
-    If rn = "defined_terms" Or rn = "phrase_consistency" Then
-        IsRetiredIssue = True: Exit Function
-    End If
-
-    ' Quote rules
-    If rn = "quotation_mark_consistency" Or rn = "single_quotes_default" Or _
-       rn = "smart_quote_consistency" Then
-        IsRetiredIssue = True: Exit Function
-    End If
-
-    ' List rules
-    If rn = "inline_list_format" Or rn = "list_punctuation" Or _
-       rn = "list_rules" Then
-        IsRetiredIssue = True: Exit Function
-    End If
-
-    ' ---- Message-based catch-all for edge cases ----
-    Dim issText As String
-    issText = ""
-    If item.Exists("Issue") Then issText = LCase$(item("Issue"))
-
-    If InStr(issText, "after-heading spacing") > 0 Or _
-       InStr(issText, "after heading spacing") > 0 Or _
-       InStr(issText, "spacing after heading") > 0 Or _
-       InStr(issText, "font inconsistency") > 0 Or _
-       InStr(issText, "dominant heading font") > 0 Or _
-       InStr(issText, "dominant body font") > 0 Or _
-       InStr(issText, "heading capitalisation") > 0 Or _
-       InStr(issText, "title_case") > 0 Or _
-       InStr(issText, "sentence_case") > 0 Or _
-       InStr(issText, "numbering went backwards") > 0 Or _
-       InStr(issText, "duplicate number") > 0 Or _
-       InStr(issText, "defined term quote") > 0 Or _
-       InStr(issText, "quotation mark consistency") > 0 Or _
-       InStr(issText, "smart quote") > 0 Or _
-       InStr(issText, "single quotes default") > 0 Or _
-       InStr(issText, "double quotes default") > 0 Or _
-       InStr(issText, "quote style consistency") > 0 Or _
-       InStr(issText, "non-standard font colour") > 0 Then
-        IsRetiredIssue = True: Exit Function
-    End If
-    On Error GoTo 0
-End Function
-
-' ================================================================
-'  PRIVATE: Last-pass filter that strips any issues belonging to
-'  retired rule families.  Called at the end of RunAllPleadingsRules
-'  as a belt-and-braces guard for all downstream consumers.
-' ================================================================
-Private Function FilterRetiredRules(issues As Collection) As Collection
-    Dim cleaned As New Collection
-    Dim i As Long
-    For i = 1 To issues.Count
-        If Not IsRetiredIssue(issues(i)) Then
-            cleaned.Add issues(i)
-        End If
-    Next i
-    Set FilterRetiredRules = cleaned
-End Function
 
 Private Function EscJSON(ByVal txt As String) As String
     txt = Replace(txt, "\", "\\")

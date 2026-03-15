@@ -248,6 +248,42 @@ Public Function IsLetterChar(ByVal ch As String) As Boolean
     IsLetterChar = (c >= 65 And c <= 90) Or (c >= 97 And c <= 122)
 End Function
 
+' ============================================================
+'  ARRAY MERGE HELPERS
+' ============================================================
+
+' Merge 2 Variant arrays into one flat Variant array
+Public Function MergeArrays2(a1 As Variant, a2 As Variant) As Variant
+    Dim total As Long
+    total = UBound(a1) - LBound(a1) + 1 _
+          + UBound(a2) - LBound(a2) + 1
+    Dim out() As Variant
+    ReDim out(0 To total - 1)
+    Dim idx As Long
+    idx = 0
+    Dim v As Variant
+    For Each v In a1: out(idx) = v: idx = idx + 1: Next v
+    For Each v In a2: out(idx) = v: idx = idx + 1: Next v
+    MergeArrays2 = out
+End Function
+
+' Merge 3 Variant arrays into one flat Variant array
+Public Function MergeArrays3(a1 As Variant, a2 As Variant, a3 As Variant) As Variant
+    Dim total As Long
+    total = UBound(a1) - LBound(a1) + 1 _
+          + UBound(a2) - LBound(a2) + 1 _
+          + UBound(a3) - LBound(a3) + 1
+    Dim out() As Variant
+    ReDim out(0 To total - 1)
+    Dim idx As Long
+    idx = 0
+    Dim v As Variant
+    For Each v In a1: out(idx) = v: idx = idx + 1: Next v
+    For Each v In a2: out(idx) = v: idx = idx + 1: Next v
+    For Each v In a3: out(idx) = v: idx = idx + 1: Next v
+    MergeArrays3 = out
+End Function
+
 ' Strip trailing paragraph mark (vbCr / Chr(13)) from range text
 Public Function StripParaMarkChar(ByVal txt As String) As String
     If Len(txt) > 0 Then

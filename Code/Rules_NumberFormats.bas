@@ -5,11 +5,6 @@ Attribute VB_Name = "Rules_NumberFormats"
 '   - Rule09: Date and time format consistency
 '   - Rule19: Currency and number format consistency
 '
-' RETIRED (not engine-wired):
-'   - Rule18 page-range helpers: kept for backwards compatibility
-'     but not dispatched by RunAllPleadingsRules. The engine
-'     manages page ranges directly via SetPageRangeFromString.
-'
 ' Public functions:
 '   Check_DateTimeFormat        (Rule09)
 '   Check_CurrencyNumberFormat  (Rule19)
@@ -22,9 +17,6 @@ Option Explicit
 
 ' -- Rule name constants ---------------------------------------
 Private Const RULE_NAME_DATE_TIME As String = "date_time_format"
-' RETIRED -- DEAD CODE: page_range is not engine-wired and this constant is unused.
-' Kept only so the module compiles if an external caller references it.
-Private Const RETIRED_RULE_NAME_PAGE_RANGE As String = "page_range"
 Private Const RULE_NAME_CURRENCY As String = "currency_number_format"
 
 ' -- Currency format category constants (Rule19) ---------------
@@ -33,9 +25,6 @@ Private Const FMT_ABBREVIATED As String = "abbreviated"
 Private Const FMT_FULL_NUMERIC As String = "full_numeric"
 Private Const FMT_ISO_PREFIX As String = "iso_prefix"
 
-' -- Module-level page range state (Rule18) --------------------
-Private mStartPage As Long   ' 0 = no restriction
-Private mEndPage   As Long   ' 0 = no restriction
 
 ' ============================================================
 '  PRIVATE HELPERS  -  Rule09 (Date/Time)
@@ -798,41 +787,6 @@ NextTimeFind:
     Set Check_DateTimeFormat = issues
 End Function
 
-' ================================================================
-'  RETIRED Rule18: SetRange
-'  NOT dispatched by the engine. The engine manages page ranges
-'  directly via SetPageRangeFromString / SetPageRange.
-'  Kept ONLY for backwards compatibility if called externally.
-'  Will emit a debug warning when invoked.
-' ================================================================
-Public Sub SetRange(s As Long, e As Long)
-    Debug.Print "WARNING: Rules_NumberFormats.SetRange is RETIRED (Rule18). " & _
-                "Use PleadingsEngine.SetPageRange instead."
-    mStartPage = s
-    mEndPage = e
-End Sub
-
-' ================================================================
-'  RETIRED Rule18: Check_PageRange
-'  NOT dispatched by the engine. The engine manages page ranges
-'  directly via SetPageRangeFromString / SetPageRange.
-'  Kept ONLY for backwards compatibility if called externally.
-'  Returns an empty collection; will emit a debug warning.
-' ================================================================
-Public Function Check_PageRange(doc As Document) As Collection
-    Debug.Print "WARNING: Rules_NumberFormats.Check_PageRange is RETIRED (Rule18). " & _
-                "Not dispatched by RunAllPleadingsRules."
-    Dim issues As New Collection
-
-    On Error Resume Next
-
-    ' Push the stored page range into the engine
-    TextAnchoring.SetPageRange mStartPage, mEndPage
-
-    On Error GoTo 0
-
-    Set Check_PageRange = issues
-End Function
 
 ' ================================================================
 '  Rule19: Check_CurrencyNumberFormat

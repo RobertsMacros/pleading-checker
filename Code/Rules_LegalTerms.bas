@@ -173,7 +173,7 @@ Public Function Check_AlwaysCapitaliseTerms(doc As Document) As Collection
         "Law Lords", "their Lordships", "Lords Justices", _
         "Member States", "Parliament", "Labour Party", _
         "Prime Minister", "Vice-Chancellor")
-    terms = MergeArrays2(batch1, batch2)
+    terms = TextAnchoring.MergeArrays2(batch1, batch2)
 
     ' -- Iterate paragraphs ---------------------------------
     Dim para As Paragraph
@@ -417,19 +417,32 @@ Private Function IsInsideQuote(paraText As String, matchPos As Long) As Boolean
     End If
 End Function
 
-' ----------------------------------------------------------------
-'  Merge 2 Variant arrays into one flat Variant array
-' ----------------------------------------------------------------
-Private Function MergeArrays2(a1 As Variant, a2 As Variant) As Variant
-    Dim total As Long
-    total = UBound(a1) - LBound(a1) + 1 _
-          + UBound(a2) - LBound(a2) + 1
-    Dim out() As Variant
-    ReDim out(0 To total - 1)
-    Dim idx As Long
-    idx = 0
-    Dim v As Variant
-    For Each v In a1: out(idx) = v: idx = idx + 1: Next v
-    For Each v In a2: out(idx) = v: idx = idx + 1: Next v
-    MergeArrays2 = out
-End Function
+' ============================================================
+'  ProcessParagraph_AlwaysCapitalise
+'  Extracts per-paragraph logic from Check_AlwaysCapitaliseTerms.
+' ============================================================
+Public Sub ProcessParagraph_AlwaysCapitalise(doc As Document, _
+                                              paraRange As Range, _
+                                              paraText As String, _
+                                              paraStart As Long, _
+                                              listPrefixLen As Long, _
+                                              ByRef issues As Collection)
+    Dim terms As Variant
+    Dim batch1 As Variant, batch2 As Variant
+    batch1 = Array( _
+        "Act", "Bill", "Attorney-General", "Cabinet", _
+        "Commonwealth", "Constitution", "Crown", _
+        "Executive Council", "Governor", "Governor-General", _
+        "Her Majesty", "the Queen")
+    batch2 = Array( _
+        "his Honour", "her Honour", "their Honours", _
+        "Law Lords", "their Lordships", "Lords Justices", _
+        "Member States", "Parliament", "Labour Party", _
+        "Prime Minister", "Vice-Chancellor")
+    terms = TextAnchoring.MergeArrays2(batch1, batch2)
+
+    Dim t As Long
+    For t = LBound(terms) To UBound(terms)
+        CheckTermInParagraph doc, CStr(terms(t)), paraText, paraStart, paraRange, issues
+    Next t
+End Sub
