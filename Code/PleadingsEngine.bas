@@ -129,6 +129,7 @@ Private Sub InitGroupedReportState()
     gUnsafeAutofixRules("hyphens") = True
     gUnsafeAutofixRules("dash_usage") = True
     gUnsafeAutofixRules("footnote_integrity") = True
+    gUnsafeAutofixRules("duplicate_footnotes") = True
     gUnsafeAutofixRules("footnote_harts") = True
     gUnsafeAutofixRules("footnote_terminal_full_stop") = True
     gUnsafeAutofixRules("footnote_initial_capital") = True
@@ -145,7 +146,7 @@ Private Function GetRuleBucket(ByVal ruleName As String) As String
             GetRuleBucket = "spelling"
         Case "footnote_integrity", "footnote_harts", "footnote_terminal_full_stop", _
              "footnote_initial_capital", "footnote_abbreviation", _
-             "footnotes_not_endnotes", "footnote_rules"
+             "footnotes_not_endnotes", "footnote_rules", "duplicate_footnotes"
             GetRuleBucket = "footnote"
         Case "double_spaces", "missing_space_after_dot", "space_before_punct", _
              "double_commas", "trailing_spaces"
@@ -748,6 +749,7 @@ Public Function InitRuleConfig() As Object
     cfg.Add "punctuation", True
     cfg.Add "currency_number_format", True
     cfg.Add "footnote_rules", True
+    cfg.Add "duplicate_footnotes", False
     cfg.Add "brand_name_enforcement", True
     cfg.Add "mandated_legal_term_forms", True
     cfg.Add "always_capitalise_terms", True
@@ -1156,6 +1158,15 @@ Public Function RunAllPleadingsRules(doc As Document, _
         AddIssuesToCollection allIssues, _
             TryRunRule("Rules_FootnoteHarts.Check_FootnoteAbbreviationDictionary", doc)
         PerfTimerEnd "footnote_rules"
+    End If
+
+    CheckCancellation
+    ' -- Duplicate footnotes (separate toggle, final-pass check) --
+    If IsRuleEnabled(config, "duplicate_footnotes") Then
+        PerfTimerStart "duplicate_footnotes"
+        AddIssuesToCollection allIssues, _
+            TryRunRule("Rules_FootnoteIntegrity.Check_DuplicateFootnotes", doc)
+        PerfTimerEnd "duplicate_footnotes"
     End If
 
     CheckCancellation
@@ -2296,6 +2307,7 @@ Public Function GetRuleDisplayNames() As Object
     d.Add "punctuation", "Punctuation Checker"
     d.Add "currency_number_format", "Currency/Number Formatting"
     d.Add "footnote_rules", "Footnote Rules"
+    d.Add "duplicate_footnotes", "Duplicate Footnotes"
     d.Add "brand_name_enforcement", "Custom Rules"
     d.Add "mandated_legal_term_forms", "Mandated Legal Terms"
     d.Add "always_capitalise_terms", "Always Capitalise Terms"

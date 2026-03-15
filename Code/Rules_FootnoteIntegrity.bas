@@ -28,7 +28,6 @@ Public Function Check_FootnoteIntegrity(doc As Document) As Collection
         CheckNoteSequence doc, doc.Footnotes, "Footnote", issues
         CheckNotePlacement doc, doc.Footnotes, "Footnote", issues
         CheckEmptyNotes doc, doc.Footnotes, "Footnote", issues
-        CheckDuplicateNotes doc, doc.Footnotes, "Footnote", issues
     End If
 
     ' -- Check endnotes --------------------------------------
@@ -36,10 +35,28 @@ Public Function Check_FootnoteIntegrity(doc As Document) As Collection
         CheckEndnoteSequence doc, doc.Endnotes, "Endnote", issues
         CheckEndnotePlacement doc, doc.Endnotes, "Endnote", issues
         CheckEmptyEndnotes doc, doc.Endnotes, "Endnote", issues
-        CheckDuplicateEndnotes doc, doc.Endnotes, "Endnote", issues
     End If
 
     Set Check_FootnoteIntegrity = issues
+End Function
+
+' ============================================================
+'  PUBLIC: Check_DuplicateFootnotes
+'  Separate toggle – finds footnotes/endnotes with identical
+'  content.  Most useful as a final proofreading pass.
+' ============================================================
+Public Function Check_DuplicateFootnotes(doc As Document) As Collection
+    Dim issues As New Collection
+
+    If doc.Footnotes.Count > 0 Then
+        CheckDuplicateNotes doc, doc.Footnotes, "Footnote", issues
+    End If
+
+    If doc.Endnotes.Count > 0 Then
+        CheckDuplicateEndnotes doc, doc.Endnotes, "Endnote", issues
+    End If
+
+    Set Check_DuplicateFootnotes = issues
 End Function
 
 ' ============================================================

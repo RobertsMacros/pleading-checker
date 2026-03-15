@@ -123,6 +123,69 @@ Public Function Check_RepeatedWords(doc As Document) As Collection
 
             ' Check for repetition with previous token
             If currWord = prevWord And Len(currWord) > 0 Then
+                ' tokStart is 1-based in paraText; convert to document position
+                rangeStart = paraRange.Start + (tokStart - 1) - rwListPrefixLen
+                rangeEnd = rangeStart + (tokEnd - tokStart)
+
+                ' ── Whole-word verification ──────────────────────
+                ' paraRange.Text may include tracked-change or field-code
+                ' text that is invisible.  Verify the document ranges
+                ' for BOTH the current and previous token actually
+                ' contain the expected word; skip if they don't.
+                Err.Clear
+                Dim matchRange As Range
+                Set matchRange = doc.Range(rangeStart, rangeEnd)
+                If Err.Number <> 0 Then Err.Clear: GoTo NextScanPos_RW
+
+                Dim actualCurr As String
+                actualCurr = LCase(StripPunctuation(matchRange.Text))
+                If Err.Number <> 0 Then Err.Clear: GoTo NextScanPos_RW
+                If actualCurr <> currWord Then GoTo NextScanPos_RW
+
+                Dim prevRngStart As Long, prevRngEnd As Long
+                prevRngStart = paraRange.Start + (prevTokenStart - 1) - rwListPrefixLen
+                prevRngEnd = prevRngStart + (prevTokenEnd - prevTokenStart)
+
+                Dim prevMatchRange As Range
+                Set prevMatchRange = doc.Range(prevRngStart, prevRngEnd)
+                If Err.Number <> 0 Then Err.Clear: GoTo NextScanPos_RW
+
+                Dim actualPrev As String
+                actualPrev = LCase(StripPunctuation(prevMatchRange.Text))
+                If Err.Number <> 0 Then Err.Clear: GoTo NextScanPos_RW
+                If actualPrev <> currWord Then GoTo NextScanPos_RW
+
+                ' Also verify the gap between the two words has no
+                ' hidden content (only whitespace/punctuation).
+                If prevRngEnd < rangeStart Then
+                    Dim gapRange As Range
+                    Set gapRange = doc.Range(prevRngEnd, rangeStart)
+                    If Err.Number = 0 Then
+                        Dim gapText As String
+                        gapText = gapRange.Text
+                        If Err.Number = 0 Then
+                            Dim gIdx As Long
+                            Dim gCh As String
+                            For gIdx = 1 To Len(gapText)
+                                gCh = Mid$(gapText, gIdx, 1)
+                                If gCh <> " " And gCh <> vbTab And _
+                                   gCh <> ChrW(160) And gCh <> vbCr And _
+                                   gCh <> vbLf And gCh <> Chr(11) And _
+                                   Not IsPunctuation(gCh) Then
+                                    ' Non-whitespace content between the two
+                                    ' words – this is not a real repetition.
+                                    GoTo NextScanPos_RW
+                                End If
+                            Next gIdx
+                        Else
+                            Err.Clear
+                        End If
+                    Else
+                        Err.Clear
+                    End If
+                End If
+                ' ── End whole-word verification ──────────────────
+
                 ' Determine severity
                 If IsKnownValidRepetition(currWord, knownValid) Then
                     severity = "possible_error"
@@ -134,22 +197,10 @@ Public Function Check_RepeatedWords(doc As Document) As Collection
 
                 suggestion = "Remove the duplicate '" & currWord & "'"
 
-                ' tokStart is 1-based in paraText; convert to document position
-                rangeStart = paraRange.Start + (tokStart - 1) - rwListPrefixLen
-                rangeEnd = rangeStart + (tokEnd - tokStart)
-
-                Err.Clear
-                Dim matchRange As Range
-                Set matchRange = doc.Range(rangeStart, rangeEnd)
+                locStr = EngineGetLocationString(matchRange, doc)
                 If Err.Number <> 0 Then
                     locStr = "unknown location"
                     Err.Clear
-                Else
-                    locStr = EngineGetLocationString(matchRange, doc)
-                    If Err.Number <> 0 Then
-                        locStr = "unknown location"
-                        Err.Clear
-                    End If
                 End If
 
                 Set finding = CreateIssueDict(RULE_NAME_REPEATED, locStr, issueText, suggestion, rangeStart, rangeEnd, severity, False, "", rawToken, "token")
