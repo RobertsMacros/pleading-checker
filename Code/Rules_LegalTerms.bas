@@ -163,16 +163,10 @@ Public Function Check_AlwaysCapitaliseTerms(doc As Document) As Collection
     ' -- Seed dictionary of correct forms -------------------
     Dim terms As Variant
     Dim batch1 As Variant, batch2 As Variant
-    batch1 = Array( _
-        "Act", "Bill", "Attorney-General", "Cabinet", _
-        "Commonwealth", "Constitution", "Crown", _
-        "Executive Council", "Governor", "Governor-General", _
-        "Her Majesty", "the Queen")
-    batch2 = Array( _
-        "his Honour", "her Honour", "their Honours", _
-        "Law Lords", "their Lordships", "Lords Justices", _
-        "Member States", "Parliament", "Labour Party", _
-        "Prime Minister", "Vice-Chancellor")
+    batch1 = Array("Act", "Bill", "Attorney-General", "Cabinet", "Commonwealth", "Constitution", "Crown", _
+        "Executive Council", "Governor", "Governor-General", "Her Majesty", "the Queen")
+    batch2 = Array("his Honour", "her Honour", "their Honours", "Law Lords", "their Lordships", _
+        "Lords Justices", "Member States", "Parliament", "Labour Party", "Prime Minister", "Vice-Chancellor")
     terms = TextAnchoring.MergeArrays2(batch1, batch2)
 
     ' -- Iterate paragraphs ---------------------------------
@@ -421,24 +415,13 @@ End Function
 '  ProcessParagraph_AlwaysCapitalise
 '  Extracts per-paragraph logic from Check_AlwaysCapitaliseTerms.
 ' ============================================================
-Public Sub ProcessParagraph_AlwaysCapitalise(doc As Document, _
-                                              paraRange As Range, _
-                                              paraText As String, _
-                                              paraStart As Long, _
-                                              listPrefixLen As Long, _
-                                              ByRef issues As Collection)
+Public Sub ProcessParagraph_AlwaysCapitalise(doc As Document, paraRange As Range, paraText As String, paraStart As Long, listPrefixLen As Long, ByRef issues As Collection)
     Dim terms As Variant
     Dim batch1 As Variant, batch2 As Variant
-    batch1 = Array( _
-        "Act", "Bill", "Attorney-General", "Cabinet", _
-        "Commonwealth", "Constitution", "Crown", _
-        "Executive Council", "Governor", "Governor-General", _
-        "Her Majesty", "the Queen")
-    batch2 = Array( _
-        "his Honour", "her Honour", "their Honours", _
-        "Law Lords", "their Lordships", "Lords Justices", _
-        "Member States", "Parliament", "Labour Party", _
-        "Prime Minister", "Vice-Chancellor")
+    batch1 = Array("Act", "Bill", "Attorney-General", "Cabinet", "Commonwealth", "Constitution", "Crown", _
+        "Executive Council", "Governor", "Governor-General", "Her Majesty", "the Queen")
+    batch2 = Array("his Honour", "her Honour", "their Honours", "Law Lords", "their Lordships", _
+        "Lords Justices", "Member States", "Parliament", "Labour Party", "Prime Minister", "Vice-Chancellor")
     terms = TextAnchoring.MergeArrays2(batch1, batch2)
 
     Dim t As Long

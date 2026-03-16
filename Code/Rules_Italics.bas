@@ -315,12 +315,7 @@ End Function
 '  ProcessParagraph_AnglicisedTerms
 '  Extracts per-paragraph logic from Check_AnglicisedTermsNotItalic.
 ' ============================================================
-Public Sub ProcessParagraph_AnglicisedTerms(doc As Document, _
-                                             paraRange As Range, _
-                                             paraText As String, _
-                                             paraStart As Long, _
-                                             listPrefixLen As Long, _
-                                             ByRef issues As Collection)
+Public Sub ProcessParagraph_AnglicisedTerms(doc As Document, paraRange As Range, paraText As String, paraStart As Long, listPrefixLen As Long, ByRef issues As Collection)
     InitSeedTerms
 
     Dim termIdx As Long
@@ -377,12 +372,7 @@ End Sub
 '  ProcessParagraph_ForeignNames
 '  Extracts per-paragraph logic from Check_ForeignNamesNotItalic.
 ' ============================================================
-Public Sub ProcessParagraph_ForeignNames(doc As Document, _
-                                          paraRange As Range, _
-                                          paraText As String, _
-                                          paraStart As Long, _
-                                          listPrefixLen As Long, _
-                                          ByRef issues As Collection)
+Public Sub ProcessParagraph_ForeignNames(doc As Document, paraRange As Range, paraText As String, paraStart As Long, listPrefixLen As Long, ByRef issues As Collection)
     If foreignNames Is Nothing Then
         InitSeedNames
     End If

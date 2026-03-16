@@ -1044,9 +1044,7 @@ Public Function Check_DashUsage(doc As Document) As Collection
                         locStr = TextAnchoring.GetLocationString(snRng, doc)
                     End If
 
-                    Set finding = TextAnchoring.CreateIssueDict(RULE_NAME_DASH, locStr, _
-                        "Spaced en-dash (" & enDash & ") found. Consider using an em-dash (" & emDash & ") for parenthetical interruptions.", _
-                        emDash, snStart, snEnd, "warning", False)
+                    Set finding = TextAnchoring.CreateIssueDict(RULE_NAME_DASH, locStr, "Spaced en-dash (" & enDash & ") found. Consider using an em-dash (" & emDash & ") for parenthetical interruptions.", emDash, snStart, snEnd, "warning", False)
                     issues.Add finding
                 End If
             End If
@@ -1097,12 +1095,9 @@ Public Sub ProcessParagraph_TriplicatePunctuation(doc As Document, paraRange As 
                 locStr = TextAnchoring.GetLocationString(paraRange, doc)
                 Dim matched As String
                 matched = String$(runLen, ch)
-                Set finding = TextAnchoring.CreateIssueDict( _
-                    RULE_NAME_TRIPLICATE, locStr, _
-                    "Triplicate punctuation: '" & matched & "'", _
-                    "Remove repeated punctuation", _
-                    paraStart + i - 1 - listPrefixLen, _
-                    paraStart + i - 1 - listPrefixLen + runLen, _
+                Set finding = TextAnchoring.CreateIssueDict(RULE_NAME_TRIPLICATE, locStr, _
+                    "Triplicate punctuation: '" & matched & "'", "Remove repeated punctuation", _
+                    paraStart + i - 1 - listPrefixLen, paraStart + i - 1 - listPrefixLen + runLen, _
                     "error", False, "", matched)
                 issues.Add finding
             End If
@@ -1219,10 +1214,8 @@ Public Sub ProcessParagraph_DashUsage(doc As Document, paraRange As Range, _
 
             Dim beforeIsLetter As Boolean
             Dim afterIsLetter As Boolean
-            beforeIsLetter = (chBefore >= "A" And chBefore <= "Z") Or _
-                             (chBefore >= "a" And chBefore <= "z")
-            afterIsLetter = (chAfter >= "A" And chAfter <= "Z") Or _
-                            (chAfter >= "a" And chAfter <= "z")
+            beforeIsLetter = (chBefore >= "A" And chBefore <= "Z") Or (chBefore >= "a" And chBefore <= "z")
+            afterIsLetter = (chAfter >= "A" And chAfter <= "Z") Or (chAfter >= "a" And chAfter <= "z")
 
             If beforeIsLetter And afterIsLetter Then
                 Dim enStart As Long
@@ -1240,9 +1233,7 @@ Public Sub ProcessParagraph_DashUsage(doc As Document, paraRange As Range, _
                     locStr = TextAnchoring.GetLocationString(enRng, doc)
                 End If
 
-                Set finding = TextAnchoring.CreateIssueDict(RULE_NAME_DASH, locStr, _
-                    "En-dash (" & enDash & ") used between words. Use a hyphen (-) for compound words.", _
-                    "Replace en-dash with hyphen", enStart, enEnd, "error", True, "-")
+                Set finding = TextAnchoring.CreateIssueDict(RULE_NAME_DASH, locStr, "En-dash (" & enDash & ") used between words. Use a hyphen (-) for compound words.", "Replace en-dash with hyphen", enStart, enEnd, "error", True, "-")
                 issues.Add finding
             End If
 
@@ -1283,9 +1274,7 @@ Public Sub ProcessParagraph_DashUsage(doc As Document, paraRange As Range, _
                         locStr = TextAnchoring.GetLocationString(snRng, doc)
                     End If
 
-                    Set finding = TextAnchoring.CreateIssueDict(RULE_NAME_DASH, locStr, _
-                        "Spaced en-dash (" & enDash & ") found. Consider using an em-dash (" & emDash & ") for parenthetical interruptions.", _
-                        emDash, snStart, snEnd, "warning", False)
+                    Set finding = TextAnchoring.CreateIssueDict(RULE_NAME_DASH, locStr, "Spaced en-dash (" & enDash & ") found. Consider using an em-dash (" & emDash & ") for parenthetical interruptions.", emDash, snStart, snEnd, "warning", False)
                     issues.Add finding
                 End If
             End If
@@ -1356,25 +1345,17 @@ Public Sub ProcessParagraph_BracketIntegrity(doc As Document, paraRange As Range
 
     ' Report once per bracket type if counts don't match
     If parenOpen <> parenClose Then
-        CreateBracketIssue doc, issues, firstParenPos, "()", _
-            "Unbalanced parentheses: " & parenOpen & " opened, " & _
-            parenClose & " closed"
+        CreateBracketIssue doc, issues, firstParenPos, "()", "Unbalanced parentheses: " & parenOpen & " opened, " & parenClose & " closed"
     End If
     If sqOpen <> sqClose Then
-        CreateBracketIssue doc, issues, firstSqPos, "[]", _
-            "Unbalanced square brackets: " & sqOpen & " opened, " & _
-            sqClose & " closed"
+        CreateBracketIssue doc, issues, firstSqPos, "[]", "Unbalanced square brackets: " & sqOpen & " opened, " & sqClose & " closed"
     End If
     If curlyOpen <> curlyClose Then
-        CreateBracketIssue doc, issues, firstCurlyPos, "{}", _
-            "Unbalanced curly braces: " & curlyOpen & " opened, " & _
-            curlyClose & " closed"
+        CreateBracketIssue doc, issues, firstCurlyPos, "{}", "Unbalanced curly braces: " & curlyOpen & " opened, " & curlyClose & " closed"
     End If
 
     ' -- Stack-based nesting check (only when counts balance) --
-    If parenOpen = parenClose And sqOpen = sqClose _
-       And curlyOpen = curlyClose _
-       And (parenOpen + sqOpen + curlyOpen) > 0 Then
+    If parenOpen = parenClose And sqOpen = sqClose And curlyOpen = curlyClose And (parenOpen + sqOpen + curlyOpen) > 0 Then
         Dim stk() As Long, stkTop As Long
         stkTop = 0
         ReDim stk(1 To parenOpen + sqOpen + curlyOpen)
@@ -1402,8 +1383,7 @@ Public Sub ProcessParagraph_BracketIntegrity(doc As Document, paraRange As Range
             End Select
         Next i
         If nestBad Then
-            CreateBracketIssue doc, issues, nestPos, "()", _
-                "Improperly nested brackets (e.g. overlapping pairs)"
+            CreateBracketIssue doc, issues, nestPos, "()", "Improperly nested brackets (e.g. overlapping pairs)"
         End If
     End If
 End Sub
