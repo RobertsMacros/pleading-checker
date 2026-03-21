@@ -9,8 +9,8 @@ Attribute VB_Name = "Rules_Spacing"
 '   - Check_MissingSpaceAfterDot : Flag ".X" (missing space)
 '
 ' Dependencies:
-'   - PleadingsEngine.bas (IsInPageRange, GetLocationString,
-'                          GetSpaceStylePref)
+'   - TextAnchoring.bas (IterateParagraphs, FindAll, AddIssue,
+'                        SafeRange, CreateRegex, GetSpaceStylePref)
 ' ============================================================
 Option Explicit
 
@@ -36,150 +36,7 @@ Private Const ABBREV_LIST As String = _
 '  after sentence-ending full stops (but not after abbreviations).
 ' ============================================================
 Public Function Check_DoubleSpaces(doc As Document) As Collection
-    Dim issues As New Collection
-    Dim reDouble As Object
-    Set reDouble = CreateObject("VBScript.RegExp")
-    reDouble.Global = True
-    reDouble.Pattern = " {2,}"
-
-    Dim reSingle As Object
-    Set reSingle = CreateObject("VBScript.RegExp")
-    reSingle.Global = True
-    reSingle.Pattern = "\.( )([A-Z])"
-
-    Dim spaceStyle As String
-    spaceStyle = TextAnchoring.GetSpaceStylePref()
-
-    Dim para As Paragraph
-    Dim paraText As String
-    Dim paraRange As Range
-    Dim finding As Object
-    Dim locStr As String
-
-    On Error Resume Next
-    For Each para In doc.Paragraphs
-        Err.Clear
-        Set paraRange = para.Range
-        If Err.Number <> 0 Then Err.Clear: GoTo NextParaDS
-
-        If TextAnchoring.IsPastPageFilter(paraRange.Start) Then Exit For
-        If Not TextAnchoring.IsInPageRange(paraRange) Then GoTo NextParaDS
-
-        ' Block quotes are filtered at engine level by FilterBlockQuoteIssues.
-        ' Removed per-paragraph Application.Run("IsBlockQuotePara") call here
-        ' to eliminate heavy object-model traffic (font/italic/text/style
-        ' per paragraph via cross-module dispatch was a major regression cause).
-
-        paraText = TextAnchoring.StripParaMarkChar(paraRange.Text)
-        If Err.Number <> 0 Then Err.Clear: GoTo NextParaDS
-        If Len(paraText) < 2 Then GoTo NextParaDS
-
-        ' Calculate auto-number prefix offset
-        Dim listPrefixLen As Long
-        listPrefixLen = TextAnchoring.GetListPrefixLen(para, paraText)
-
-        ' --- Pass 1: Flag runs of 2+ spaces ---
-        Dim mDoubles As Object
-        Set mDoubles = reDouble.Execute(paraText)
-        Dim md As Object
-        For Each md In mDoubles
-            Dim mStart As Long
-            mStart = md.FirstIndex   ' 0-based
-
-            If spaceStyle = "TWO" And mStart > 0 Then
-                ' In two-space mode, exactly 2 spaces after sentence-end full stop = correct.
-                ' 3+ spaces after full stop still flagged (excess beyond the allowed 2).
-                Dim charBefore As String
-                charBefore = Mid(paraText, mStart, 1)   ' char at 0-based mStart-1
-                If charBefore = "." And md.Length = 2 Then
-                    Dim dotPos As Long
-                    dotPos = mStart - 1   ' 0-based index of the full stop
-                    Dim wb As String
-                    wb = GetWordBeforePos(paraText, dotPos)
-                    If Not IsLikelyAbbreviation(paraText, dotPos, wb) Then
-                        GoTo NextDoubleMatch   ' sentence-end + exactly 2 spaces = correct
-                    End If
-                End If
-            End If
-
-            ' Flag this double space
-            Dim dsStart As Long
-            Dim dsEnd As Long
-            dsStart = paraRange.Start + mStart - listPrefixLen
-            dsEnd = dsStart + md.Length
-
-            Err.Clear
-            Dim dsRng As Range
-            Set dsRng = doc.Range(dsStart, dsEnd)
-            If Err.Number <> 0 Then
-                locStr = "unknown location"
-                Err.Clear
-            Else
-                locStr = TextAnchoring.GetLocationString(dsRng, doc)
-            End If
-
-            Dim dsMsg As String
-            If md.Length = 2 Then
-                dsMsg = "Double space found."
-            Else
-                dsMsg = md.Length & " consecutive spaces found."
-            End If
-
-            ' Range covers only the EXTRA space(s) — keep the first one
-            ' Store the actual space characters as MatchedText
-            Dim dsMatchedText As String
-            dsMatchedText = String(md.Length - 1, " ")
-            Set finding = TextAnchoring.CreateIssueDict(RULE_DOUBLE_SPACES, locStr, _
-                dsMsg, "Remove extra space(s)", dsStart + 1, dsEnd, "error", True, "", _
-                dsMatchedText, "exact_text", "high")
-            issues.Add finding
-
-NextDoubleMatch:
-        Next md
-
-        ' --- Pass 2 (TWO mode only): Flag missing second space after sentence-end ---
-        If spaceStyle = "TWO" Then
-            Dim mSingles As Object
-            Set mSingles = reSingle.Execute(paraText)
-            Dim ms As Object
-            For Each ms In mSingles
-                Dim sdotPos As Long
-                sdotPos = ms.FirstIndex   ' 0-based index of the full stop
-                Dim swb As String
-                swb = GetWordBeforePos(paraText, sdotPos)
-                If Not IsLikelyAbbreviation(paraText, sdotPos, swb) Then
-                    ' Sentence-end with only one space -- flag it
-                    ' Anchor the issue on the full stop + single space
-                    Dim msStart As Long
-                    msStart = paraRange.Start + sdotPos - listPrefixLen
-                    Dim msEnd As Long
-                    msEnd = msStart + 2  ' full stop + space
-
-                    Err.Clear
-                    Dim msRng As Range
-                    Set msRng = doc.Range(msStart, msEnd)
-                    If Err.Number <> 0 Then
-                        locStr = "unknown location"
-                        Err.Clear
-                    Else
-                        locStr = TextAnchoring.GetLocationString(msRng, doc)
-                    End If
-
-                    ' Suggestion replaces ". " with ".  " (insert extra space)
-                    Set finding = TextAnchoring.CreateIssueDict(RULE_DOUBLE_SPACES, locStr, _
-                        "Missing second space after sentence-ending full stop.", _
-                        "Add a second space after the full stop", msStart, msEnd, _
-                        "warning", True, ".  ", ". ", "exact_text", "high")
-                    issues.Add finding
-                End If
-            Next ms
-        End If
-
-NextParaDS:
-    Next para
-    On Error GoTo 0
-
-    Set Check_DoubleSpaces = issues
+    Set Check_DoubleSpaces = TextAnchoring.IterateParagraphs(doc, "Rules_Spacing", "ProcessParagraph_DoubleSpaces")
 End Function
 
 ' ============================================================
@@ -187,60 +44,7 @@ End Function
 '  Flags ",," sequences in paragraph text.
 ' ============================================================
 Public Function Check_DoubleCommas(doc As Document) As Collection
-    Dim issues As New Collection
-    Dim para As Paragraph
-    Dim paraText As String
-    Dim paraRange As Range
-    Dim finding As Object
-    Dim locStr As String
-    Dim pos As Long
-
-    On Error Resume Next
-    For Each para In doc.Paragraphs
-        Err.Clear
-        Set paraRange = para.Range
-        If Err.Number <> 0 Then Err.Clear: GoTo NextParaDC
-
-        If TextAnchoring.IsPastPageFilter(paraRange.Start) Then Exit For
-        If Not TextAnchoring.IsInPageRange(paraRange) Then GoTo NextParaDC
-
-        paraText = paraRange.Text
-        If Err.Number <> 0 Then Err.Clear: GoTo NextParaDC
-
-        Dim dcListPrefixLen As Long
-        dcListPrefixLen = TextAnchoring.GetListPrefixLen(para, paraText)
-
-        pos = InStr(1, paraText, ",,")
-        Do While pos > 0
-            Dim dcStart As Long
-            dcStart = paraRange.Start + pos - 1 - dcListPrefixLen
-            Dim dcEnd As Long
-            dcEnd = dcStart + 2
-
-            Err.Clear
-            Dim dcRng As Range
-            Set dcRng = doc.Range(dcStart, dcEnd)
-            If Err.Number <> 0 Then
-                locStr = "unknown location"
-                Err.Clear
-            Else
-                locStr = TextAnchoring.GetLocationString(dcRng, doc)
-            End If
-
-            Set finding = TextAnchoring.CreateIssueDict(RULE_DOUBLE_COMMAS, locStr, _
-                "Double comma found.", "Replace with a single comma", _
-                dcStart, dcEnd, "error", True, ",", _
-                ",,", "exact_text", "high")
-            issues.Add finding
-
-            pos = InStr(pos + 2, paraText, ",,")
-        Loop
-
-NextParaDC:
-    Next para
-    On Error GoTo 0
-
-    Set Check_DoubleCommas = issues
+    Set Check_DoubleCommas = TextAnchoring.IterateParagraphs(doc, "Rules_Spacing", "ProcessParagraph_DoubleCommas")
 End Function
 
 ' ============================================================
@@ -249,51 +53,21 @@ End Function
 ' ============================================================
 Public Function Check_SpaceBeforePunct(doc As Document) As Collection
     Dim issues As New Collection
-    Dim rng As Range
-    Set rng = doc.Content.Duplicate
-    Dim finding As Object
-    Dim locStr As String
+    Dim results As Collection
+    Set results = TextAnchoring.FindAll(doc, " [,;:!?]", False, True, True)
 
-    On Error Resume Next
-    With rng.Find
-        .ClearFormatting
-        .Text = " [,;:!?]"
-        .MatchCase = True
-        .MatchWildcards = True
-        .Wrap = wdFindStop
-        .Forward = True
-    End With
-
-    Dim lastPos As Long
-    lastPos = -1
-    Do While rng.Find.Execute
-        If rng.Start <= lastPos Then Exit Do   ' stall guard
-        lastPos = rng.Start
-
-        If Not TextAnchoring.IsInPageRange(rng) Then
-            rng.Collapse wdCollapseEnd
-            GoTo NextSBP
-        End If
-
-        Err.Clear
-        locStr = TextAnchoring.GetLocationString(rng, doc)
-        If Err.Number <> 0 Then locStr = "unknown location": Err.Clear
-
-        Dim punctChar As String
-        punctChar = Mid(rng.Text, 2, 1)
-
-        ' Range covers only the space (not the punctuation character)
-        ' Store the space as MatchedText
-        Set finding = TextAnchoring.CreateIssueDict(RULE_SPACE_BEFORE_PUNCT, locStr, _
-            "Unexpected space before '" & punctChar & "'", _
-            "Remove the space before punctuation", rng.Start, rng.Start + 1, "error", True, "", _
-            " ", "exact_text", "high")
-        issues.Add finding
-
-        rng.Collapse wdCollapseEnd
-NextSBP:
-    Loop
-    On Error GoTo 0
+    Dim i As Long
+    For i = 1 To results.Count
+        Dim item As Variant
+        item = results(i)
+        Dim startPos As Long: startPos = CLng(item(0))
+        Dim endPos As Long: endPos = CLng(item(1))
+        Dim matchText As String: matchText = CStr(item(2))
+        Dim punctChar As String: punctChar = Mid(matchText, 2, 1)
+        Dim rng As Range
+        Set rng = TextAnchoring.SafeRange(doc, startPos, endPos)
+        TextAnchoring.AddIssue issues, RULE_SPACE_BEFORE_PUNCT, doc, rng, "Unexpected space before '" & punctChar & "'", "Remove the space before punctuation", startPos, startPos + 1, "error", True, "", " ", "exact_text", "high"
+    Next i
 
     Set Check_SpaceBeforePunct = issues
 End Function
@@ -304,73 +78,7 @@ End Function
 '  abbreviation full stop. Uses per-paragraph regex scanning.
 ' ============================================================
 Public Function Check_MissingSpaceAfterDot(doc As Document) As Collection
-    Dim issues As New Collection
-    Dim re As Object
-    Set re = CreateObject("VBScript.RegExp")
-    re.Global = True
-    re.IgnoreCase = False
-    re.Pattern = "\.([A-Z])"
-
-    Dim para As Paragraph
-    Dim paraText As String
-    Dim paraRange As Range
-    Dim finding As Object
-    Dim locStr As String
-
-    On Error Resume Next
-    For Each para In doc.Paragraphs
-        Err.Clear
-        Set paraRange = para.Range
-        If Err.Number <> 0 Then Err.Clear: GoTo NextParaMSD
-
-        If TextAnchoring.IsPastPageFilter(paraRange.Start) Then Exit For
-        If Not TextAnchoring.IsInPageRange(paraRange) Then GoTo NextParaMSD
-
-        paraText = TextAnchoring.StripParaMarkChar(paraRange.Text)
-        If Err.Number <> 0 Then Err.Clear: GoTo NextParaMSD
-        If Len(paraText) < 2 Then GoTo NextParaMSD
-
-        Dim msdListPrefixLen As Long
-        msdListPrefixLen = TextAnchoring.GetListPrefixLen(para, paraText)
-
-        Dim matches As Object
-        Set matches = re.Execute(paraText)
-        Dim m As Object
-        For Each m In matches
-            Dim dotIdx As Long
-            dotIdx = m.FirstIndex   ' 0-based position of the full stop
-            Dim wordBefore As String
-            wordBefore = GetWordBeforePos(paraText, dotIdx)
-            If Not IsLikelyAbbreviation(paraText, dotIdx, wordBefore) Then
-                Dim msdStart As Long
-                msdStart = paraRange.Start + dotIdx - msdListPrefixLen
-                Dim msdEnd As Long
-                msdEnd = msdStart + 2   ' "." + capital letter
-
-                Err.Clear
-                Dim msdRng As Range
-                Set msdRng = doc.Range(msdStart, msdEnd)
-                If Err.Number <> 0 Then
-                    locStr = "unknown location"
-                    Err.Clear
-                Else
-                    locStr = TextAnchoring.GetLocationString(msdRng, doc)
-                End If
-
-                Set finding = TextAnchoring.CreateIssueDict(RULE_MISSING_SPACE_DOT, locStr, _
-                    "Missing space after full stop before '" & _
-                    Mid(paraText, dotIdx + 2, 1) & "'.", _
-                    "Insert a space after the full stop.", _
-                    msdStart, msdEnd, "error", False)
-                issues.Add finding
-            End If
-        Next m
-
-NextParaMSD:
-    Next para
-    On Error GoTo 0
-
-    Set Check_MissingSpaceAfterDot = issues
+    Set Check_MissingSpaceAfterDot = TextAnchoring.IterateParagraphs(doc, "Rules_Spacing", "ProcessParagraph_MissingSpaceAfterDot")
 End Function
 
 
@@ -463,125 +171,47 @@ End Function
 '  Flags runs of 2+ spaces and (in TWO mode) missing second
 '  space after sentence-ending full stops.
 ' ============================================================
-Public Sub ProcessParagraph_DoubleSpaces(doc As Document, paraRange As Range, _
-        paraText As String, paraStart As Long, listPrefixLen As Long, _
-        ByRef issues As Collection)
-
-    Dim reDouble As Object
-    Set reDouble = CreateObject("VBScript.RegExp")
-    reDouble.Global = True
-    reDouble.Pattern = " {2,}"
-
-    Dim reSingle As Object
-    Set reSingle = CreateObject("VBScript.RegExp")
-    reSingle.Global = True
-    reSingle.Pattern = "\.( )([A-Z])"
-
-    Dim spaceStyle As String
-    spaceStyle = TextAnchoring.GetSpaceStylePref()
-
-    paraText = TextAnchoring.StripParaMarkChar(paraText)
-    If Len(paraText) < 2 Then Exit Sub
-
-    Dim finding As Object
-    Dim locStr As String
+Public Sub ProcessParagraph_DoubleSpaces(doc As Document, paraRange As Range, paraText As String, paraStart As Long, listPrefixLen As Long, ByRef issues As Collection)
+    Dim reDouble As Object: Set reDouble = TextAnchoring.CreateRegex(" {2,}")
+    Dim reSingle As Object: Set reSingle = TextAnchoring.CreateRegex("\.( )([A-Z])")
+    Dim spaceStyle As String: spaceStyle = TextAnchoring.GetSpaceStylePref()
 
     On Error Resume Next
 
     ' --- Pass 1: Flag runs of 2+ spaces ---
-    Dim mDoubles As Object
-    Set mDoubles = reDouble.Execute(paraText)
     Dim md As Object
-    For Each md In mDoubles
-        Dim mStart As Long
-        mStart = md.FirstIndex   ' 0-based
-
+    For Each md In reDouble.Execute(paraText)
+        Dim mStart As Long: mStart = md.FirstIndex
         If spaceStyle = "TWO" And mStart > 0 Then
-            Dim charBefore As String
-            charBefore = Mid(paraText, mStart, 1)   ' char at 0-based mStart-1
+            Dim charBefore As String: charBefore = Mid(paraText, mStart, 1)
             If charBefore = "." And md.Length = 2 Then
-                Dim dotPos As Long
-                dotPos = mStart - 1   ' 0-based index of the full stop
-                Dim wb As String
-                wb = GetWordBeforePos(paraText, dotPos)
-                If Not IsLikelyAbbreviation(paraText, dotPos, wb) Then
-                    GoTo NextDoubleMatchPP   ' sentence-end + exactly 2 spaces = correct
-                End If
+                Dim dotPos As Long: dotPos = mStart - 1
+                If Not IsLikelyAbbreviation(paraText, dotPos, GetWordBeforePos(paraText, dotPos)) Then GoTo NextDoubleMatchPP
             End If
         End If
 
-        ' Flag this double space
-        Dim dsStart As Long
-        Dim dsEnd As Long
-        dsStart = paraStart + mStart - listPrefixLen
-        dsEnd = dsStart + md.Length
-
-        Err.Clear
-        Dim dsRng As Range
-        Set dsRng = doc.Range(dsStart, dsEnd)
-        If Err.Number <> 0 Then
-            locStr = "unknown location"
-            Err.Clear
-        Else
-            locStr = TextAnchoring.GetLocationString(dsRng, doc)
-        End If
-
+        Dim dsStart As Long: dsStart = paraStart + mStart - listPrefixLen
+        Dim dsEnd As Long: dsEnd = dsStart + md.Length
         Dim dsMsg As String
-        If md.Length = 2 Then
-            dsMsg = "Double space found."
-        Else
-            dsMsg = md.Length & " consecutive spaces found."
-        End If
-
-        ' Range covers only the EXTRA space(s) -- keep the first one
-        ' Store the actual space characters as MatchedText
-        Dim dsMatchedText As String
-        dsMatchedText = String(md.Length - 1, " ")
-        Set finding = TextAnchoring.CreateIssueDict(RULE_DOUBLE_SPACES, locStr, _
-            dsMsg, "Remove extra space(s)", dsStart + 1, dsEnd, "error", True, "", _
-            dsMatchedText, "exact_text", "high")
-        issues.Add finding
-
+        If md.Length = 2 Then dsMsg = "Double space found." Else dsMsg = md.Length & " consecutive spaces found."
+        Dim dsRng As Range: Set dsRng = TextAnchoring.SafeRange(doc, dsStart, dsEnd)
+        TextAnchoring.AddIssue issues, RULE_DOUBLE_SPACES, doc, dsRng, dsMsg, "Remove extra space(s)", dsStart + 1, dsEnd, "error", True, "", String(md.Length - 1, " "), "exact_text", "high"
 NextDoubleMatchPP:
     Next md
 
     ' --- Pass 2 (TWO mode only): Flag missing second space after sentence-end ---
     If spaceStyle = "TWO" Then
-        Dim mSingles As Object
-        Set mSingles = reSingle.Execute(paraText)
         Dim ms As Object
-        For Each ms In mSingles
-            Dim sdotPos As Long
-            sdotPos = ms.FirstIndex   ' 0-based index of the full stop
-            Dim swb As String
-            swb = GetWordBeforePos(paraText, sdotPos)
-            If Not IsLikelyAbbreviation(paraText, sdotPos, swb) Then
-                ' Sentence-end with only one space -- flag it
-                Dim msStart As Long
-                msStart = paraStart + sdotPos - listPrefixLen
-                Dim msEnd As Long
-                msEnd = msStart + 2  ' full stop + space
-
-                Err.Clear
-                Dim msRng As Range
-                Set msRng = doc.Range(msStart, msEnd)
-                If Err.Number <> 0 Then
-                    locStr = "unknown location"
-                    Err.Clear
-                Else
-                    locStr = TextAnchoring.GetLocationString(msRng, doc)
-                End If
-
-                ' Suggestion replaces ". " with ".  " (insert extra space)
-                Set finding = TextAnchoring.CreateIssueDict(RULE_DOUBLE_SPACES, locStr, _
-                    "Missing second space after sentence-ending full stop.", _
-                    "Add a second space after the full stop", msStart, msEnd, _
-                    "warning", True, ".  ", ". ", "exact_text", "high")
-                issues.Add finding
+        For Each ms In reSingle.Execute(paraText)
+            Dim sdotPos As Long: sdotPos = ms.FirstIndex
+            If Not IsLikelyAbbreviation(paraText, sdotPos, GetWordBeforePos(paraText, sdotPos)) Then
+                Dim msStart As Long: msStart = paraStart + sdotPos - listPrefixLen
+                Dim msEnd As Long: msEnd = msStart + 2
+                Dim msRng As Range: Set msRng = TextAnchoring.SafeRange(doc, msStart, msEnd)
+                TextAnchoring.AddIssue issues, RULE_DOUBLE_SPACES, doc, msRng, "Missing second space after sentence-ending full stop.", "Add a second space after the full stop", msStart, msEnd, "warning", True, ".  ", ". ", "exact_text", "high"
             End If
         Next ms
     End If
-
     On Error GoTo 0
 End Sub
 
@@ -590,43 +220,16 @@ End Sub
 '  Per-paragraph handler extracted from Check_DoubleCommas.
 '  Flags ",," sequences in paragraph text.
 ' ============================================================
-Public Sub ProcessParagraph_DoubleCommas(doc As Document, paraRange As Range, _
-        paraText As String, paraStart As Long, listPrefixLen As Long, _
-        ByRef issues As Collection)
-
-    Dim finding As Object
-    Dim locStr As String
+Public Sub ProcessParagraph_DoubleCommas(doc As Document, paraRange As Range, paraText As String, paraStart As Long, listPrefixLen As Long, ByRef issues As Collection)
     Dim pos As Long
-
-    On Error Resume Next
-
     pos = InStr(1, paraText, ",,")
     Do While pos > 0
-        Dim dcStart As Long
-        dcStart = paraStart + pos - 1 - listPrefixLen
-        Dim dcEnd As Long
-        dcEnd = dcStart + 2
-
-        Err.Clear
-        Dim dcRng As Range
-        Set dcRng = doc.Range(dcStart, dcEnd)
-        If Err.Number <> 0 Then
-            locStr = "unknown location"
-            Err.Clear
-        Else
-            locStr = TextAnchoring.GetLocationString(dcRng, doc)
-        End If
-
-        Set finding = TextAnchoring.CreateIssueDict(RULE_DOUBLE_COMMAS, locStr, _
-            "Double comma found.", "Replace with a single comma", _
-            dcStart, dcEnd, "error", True, ",", _
-            ",,", "exact_text", "high")
-        issues.Add finding
-
+        Dim dcStart As Long: dcStart = paraStart + pos - 1 - listPrefixLen
+        Dim dcEnd As Long: dcEnd = dcStart + 2
+        Dim rng As Range: Set rng = TextAnchoring.SafeRange(doc, dcStart, dcEnd)
+        TextAnchoring.AddIssue issues, RULE_DOUBLE_COMMAS, doc, rng, "Double comma found.", "Replace with a single comma", dcStart, dcEnd, "error", True, ",", ",,", "exact_text", "high"
         pos = InStr(pos + 2, paraText, ",,")
     Loop
-
-    On Error GoTo 0
 End Sub
 
 ' ============================================================
@@ -635,57 +238,18 @@ End Sub
 '  Flags ".X" where X is uppercase and the dot is not an
 '  abbreviation full stop.
 ' ============================================================
-Public Sub ProcessParagraph_MissingSpaceAfterDot(doc As Document, paraRange As Range, _
-        paraText As String, paraStart As Long, listPrefixLen As Long, _
-        ByRef issues As Collection)
+Public Sub ProcessParagraph_MissingSpaceAfterDot(doc As Document, paraRange As Range, paraText As String, paraStart As Long, listPrefixLen As Long, ByRef issues As Collection)
+    Dim re As Object: Set re = TextAnchoring.CreateRegex("\.([A-Z])")
 
-    Dim re As Object
-    Set re = CreateObject("VBScript.RegExp")
-    re.Global = True
-    re.IgnoreCase = False
-    re.Pattern = "\.([A-Z])"
-
-    paraText = TextAnchoring.StripParaMarkChar(paraText)
-    If Len(paraText) < 2 Then Exit Sub
-
-    Dim finding As Object
-    Dim locStr As String
-
-    On Error Resume Next
-
-    Dim matches As Object
-    Set matches = re.Execute(paraText)
     Dim m As Object
-    For Each m In matches
-        Dim dotIdx As Long
-        dotIdx = m.FirstIndex   ' 0-based position of the full stop
-        Dim wordBefore As String
-        wordBefore = GetWordBeforePos(paraText, dotIdx)
-        If Not IsLikelyAbbreviation(paraText, dotIdx, wordBefore) Then
-            Dim msdStart As Long
-            msdStart = paraStart + dotIdx - listPrefixLen
-            Dim msdEnd As Long
-            msdEnd = msdStart + 2   ' "." + capital letter
-
-            Err.Clear
-            Dim msdRng As Range
-            Set msdRng = doc.Range(msdStart, msdEnd)
-            If Err.Number <> 0 Then
-                locStr = "unknown location"
-                Err.Clear
-            Else
-                locStr = TextAnchoring.GetLocationString(msdRng, doc)
-            End If
-
-            Set finding = TextAnchoring.CreateIssueDict(RULE_MISSING_SPACE_DOT, locStr, _
-                "Missing space after full stop before '" & _
-                Mid(paraText, dotIdx + 2, 1) & "'.", _
-                "Insert a space after the full stop.", _
-                msdStart, msdEnd, "error", False)
-            issues.Add finding
+    For Each m In re.Execute(paraText)
+        Dim dotIdx As Long: dotIdx = m.FirstIndex
+        If Not IsLikelyAbbreviation(paraText, dotIdx, GetWordBeforePos(paraText, dotIdx)) Then
+            Dim msdStart As Long: msdStart = paraStart + dotIdx - listPrefixLen
+            Dim msdEnd As Long: msdEnd = msdStart + 2
+            Dim rng As Range: Set rng = TextAnchoring.SafeRange(doc, msdStart, msdEnd)
+            TextAnchoring.AddIssue issues, RULE_MISSING_SPACE_DOT, doc, rng, "Missing space after full stop before '" & Mid(paraText, dotIdx + 2, 1) & "'.", "Insert a space after the full stop.", msdStart, msdEnd, "error", False
         End If
     Next m
-
-    On Error GoTo 0
 End Sub
 

@@ -20,8 +20,8 @@ Attribute VB_Name = "Rules_LegalTerms"
 '   reliable context handling.
 '
 ' Dependencies:
-'   - TextAnchoring.bas (IsInPageRange, GetLocationString,
-'     IsPastPageFilter, CreateIssueDict)
+'   - TextAnchoring.bas (SafeRange, SafeLocationString, AddIssue,
+'     FindAll, IterateParagraphs)
 ' ============================================================
 Option Explicit
 
@@ -72,58 +72,36 @@ Private Sub SearchAndFlag(doc As Document, _
                            searchPhrase As String, _
                            correctForm As String, _
                            ByRef issues As Collection)
+    ' Use FindAll: wholeWord=True, matchCase=False (to catch all case variants)
+    Dim matches As Collection
+    Set matches = TextAnchoring.FindAll(doc, searchPhrase, True, False)
+
+    Dim i As Long
+    Dim matchArr As Variant
+    Dim matchText As String
+    Dim startPos As Long
+    Dim endPos As Long
     Dim rng As Range
-    Dim found As Boolean
-    Dim finding As Object
-    Dim locStr As String
 
-    Set rng = doc.Content.Duplicate
-    With rng.Find
-        .ClearFormatting
-        .Text = searchPhrase
-        .MatchWholeWord = True
-        .MatchCase = False
-        .MatchWildcards = False
-        .Wrap = wdFindStop
-        .Forward = True
-    End With
-
-    Dim lastPos As Long
-    lastPos = -1
-    Do
-        On Error Resume Next
-        found = rng.Find.Execute
-        If Err.Number <> 0 Then Err.Clear: On Error GoTo 0: Exit Do
-        On Error GoTo 0
-
-        If Not found Then Exit Do
-        If rng.Start <= lastPos Then Exit Do   ' stall guard
-        lastPos = rng.Start
+    For i = 1 To matches.Count
+        matchArr = matches(i)
+        startPos = matchArr(0)
+        endPos = matchArr(1)
+        matchText = matchArr(2)
 
         ' Skip if the matched text already has the correct hyphenated form
-        If StrComp(rng.Text, correctForm, vbTextCompare) = 0 Then
-            GoTo SkipMatch
+        If StrComp(matchText, correctForm, vbTextCompare) = 0 Then
+            GoTo NextMatch
         End If
 
-        ' Verify it is not actually the hyphenated form by checking
-        ' the surrounding context -- the Find matched with MatchCase=False
-        ' and spaces, so an exact binary comparison rules out false positives
-        If TextAnchoring.IsInPageRange(rng) Then
-            On Error Resume Next
-            locStr = TextAnchoring.GetLocationString(rng, doc)
-            If Err.Number <> 0 Then locStr = "unknown location": Err.Clear
-            On Error GoTo 0
+        Set rng = TextAnchoring.SafeRange(doc, startPos, endPos)
+        TextAnchoring.AddIssue issues, RULE28_NAME, doc, rng, _
+            "Mandatory term is not hyphenated in the approved form.", _
+            "Use '" & correctForm & "'.", _
+            startPos, endPos, "warning"
 
-            Set finding = TextAnchoring.CreateIssueDict(RULE28_NAME, locStr, "Mandatory term is not hyphenated in the approved form.", "Use '" & correctForm & "'.", rng.Start, rng.End, "warning", False)
-            issues.Add finding
-        End If
-
-SkipMatch:
-        On Error Resume Next
-        rng.Collapse wdCollapseEnd
-        If Err.Number <> 0 Then Err.Clear: On Error GoTo 0: Exit Do
-        On Error GoTo 0
-    Loop
+NextMatch:
+    Next i
 End Sub
 
 ' ============================================================
@@ -158,48 +136,10 @@ End Sub
 '  RULE 29 -- MAIN ENTRY POINT
 ' ============================================================
 Public Function Check_AlwaysCapitaliseTerms(doc As Document) As Collection
-    Dim issues As New Collection
-
     ' -- Seed dictionary of correct forms -------------------
-    Dim terms As Variant
-    Dim batch1 As Variant, batch2 As Variant
-    batch1 = Array("Act", "Bill", "Attorney-General", "Cabinet", "Commonwealth", "Constitution", "Crown", _
-        "Executive Council", "Governor", "Governor-General", "Her Majesty", "the Queen")
-    batch2 = Array("his Honour", "her Honour", "their Honours", "Law Lords", "their Lordships", _
-        "Lords Justices", "Member States", "Parliament", "Labour Party", "Prime Minister", "Vice-Chancellor")
-    terms = TextAnchoring.MergeArrays2(batch1, batch2)
-
-    ' -- Iterate paragraphs ---------------------------------
-    Dim para As Paragraph
-    Dim paraRng As Range
-    Dim paraText As String
-    Dim paraStart As Long
-
-    For Each para In doc.Paragraphs
-        On Error Resume Next
-        Set paraRng = para.Range
-        If Err.Number <> 0 Then Err.Clear: On Error GoTo 0: GoTo NextPara
-        On Error GoTo 0
-
-        ' Check page range filter
-        If TextAnchoring.IsPastPageFilter(paraRng.Start) Then Exit For
-        If Not TextAnchoring.IsInPageRange(paraRng) Then GoTo NextPara
-
-        paraText = paraRng.Text
-        paraStart = paraRng.Start
-
-        If Len(paraText) = 0 Then GoTo NextPara
-
-        ' -- Check each term against this paragraph ---------
-        Dim t As Long
-        For t = LBound(terms) To UBound(terms)
-            CheckTermInParagraph doc, CStr(terms(t)), paraText, paraStart, paraRng, issues
-        Next t
-
-NextPara:
-    Next para
-
-    Set Check_AlwaysCapitaliseTerms = issues
+    ' (kept here for documentation; the actual per-paragraph
+    '  work re-builds the same array inside ProcessParagraph_AlwaysCapitalise)
+    Set Check_AlwaysCapitaliseTerms = TextAnchoring.IterateParagraphs(doc, "Rules_LegalTerms", "ProcessParagraph_AlwaysCapitalise")
 End Function
 
 ' ============================================================
@@ -216,8 +156,6 @@ Private Sub CheckTermInParagraph(doc As Document, _
     Dim actualText As String
     Dim matchStart As Long
     Dim matchEnd As Long
-    Dim finding As Object
-    Dim locStr As String
     Dim charBefore As String
     Dim charAfter As String
 
@@ -254,15 +192,12 @@ Private Sub CheckTermInParagraph(doc As Document, _
         matchStart = paraStart + pos - 1
         matchEnd = matchStart + termLen
 
-        On Error Resume Next
-        Dim matchRng As Range
-        Set matchRng = doc.Range(matchStart, matchEnd)
-        locStr = TextAnchoring.GetLocationString(matchRng, doc)
-        If Err.Number <> 0 Then locStr = "unknown location": Err.Clear
-        On Error GoTo 0
-
-        Set finding = TextAnchoring.CreateIssueDict(RULE29_NAME, locStr, "Term should be capitalised in the approved form.", "Use '" & correctForm & "'.", matchStart, matchEnd, "warning", False)
-        issues.Add finding
+        Dim rng As Range
+        Set rng = TextAnchoring.SafeRange(doc, matchStart, matchEnd)
+        TextAnchoring.AddIssue issues, RULE29_NAME, doc, rng, _
+            "Term should be capitalised in the approved form.", _
+            "Use '" & correctForm & "'.", _
+            matchStart, matchEnd, "warning"
 
 NextMatch:
         ' Search for next occurrence after current position

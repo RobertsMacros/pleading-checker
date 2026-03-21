@@ -187,6 +187,166 @@ Public Sub PerfCount(ByVal label As String, Optional ByVal increment As Long = 1
 End Sub
 
 ' ============================================================
+'  SHARED HELPERS  (eliminate boilerplate in rule modules)
+' ============================================================
+
+' Get location string with built-in error handling.
+' Returns "unknown location" on any failure.
+Public Function SafeLocationString(rng As Object, doc As Document) As String
+    On Error Resume Next
+    SafeLocationString = PleadingsEngine.GetLocationString(rng, doc)
+    If Err.Number <> 0 Then SafeLocationString = "unknown location": Err.Clear
+    On Error GoTo 0
+End Function
+
+' Create a Range with error handling. Returns Nothing on failure.
+Public Function SafeRange(doc As Document, ByVal startPos As Long, ByVal endPos As Long) As Range
+    On Error Resume Next
+    Set SafeRange = doc.Range(startPos, endPos)
+    If Err.Number <> 0 Then Set SafeRange = Nothing: Err.Clear
+    On Error GoTo 0
+End Function
+
+' Check if a character is whitespace (space, tab, NBSP, CR, LF, vertical tab).
+Public Function IsWhitespaceChar(ByVal ch As String) As Boolean
+    IsWhitespaceChar = (ch = " " Or ch = vbTab Or ch = ChrW(160) Or ch = vbCr Or ch = vbLf Or ch = Chr(11))
+End Function
+
+' Factory for VBScript.RegExp objects.
+Public Function CreateRegex(ByVal pattern As String, Optional ByVal isGlobal As Boolean = True, Optional ByVal ignoreCase As Boolean = False) As Object
+    Set CreateRegex = CreateObject("VBScript.RegExp")
+    CreateRegex.Global = isGlobal
+    CreateRegex.IgnoreCase = ignoreCase
+    CreateRegex.pattern = pattern
+End Function
+
+' One-call issue creation: fetches location string, builds issue dict, adds to collection.
+' Pass rng = Nothing and supply locStr via the overload if you already have a location string.
+Public Sub AddIssue(ByRef issues As Collection, ByVal ruleName As String, doc As Document, rng As Object, ByVal msg As String, ByVal suggestion As String, ByVal startPos As Long, ByVal endPos As Long, Optional ByVal severity As String = "error", Optional ByVal autoFixSafe As Boolean = False, Optional ByVal replacementText As String = "", Optional ByVal matchedText As String = "", Optional ByVal anchorKind As String = "exact_text", Optional ByVal confidence As String = "high")
+    Dim locStr As String
+    If rng Is Nothing Then
+        locStr = "unknown location"
+    Else
+        locStr = SafeLocationString(rng, doc)
+    End If
+    Dim d As Object
+    Set d = CreateIssueDict(ruleName, locStr, msg, suggestion, startPos, endPos, severity, autoFixSafe, replacementText, matchedText, anchorKind, confidence)
+    issues.Add d
+End Sub
+
+' Generic paragraph iterator.  Calls the named ProcessParagraph_ sub
+' via Application.Run with the standard signature:
+'   (doc, paraRange, paraText, paraStart, listPrefixLen, issues)
+' Returns the populated issues collection.
+Public Function IterateParagraphs(doc As Document, ByVal moduleName As String, ByVal procName As String) As Collection
+    Dim issues As New Collection
+    Dim para As Paragraph
+    Dim paraRange As Range
+    Dim paraText As String
+    Dim paraStart As Long
+    Dim listPrefixLen As Long
+
+    On Error Resume Next
+    For Each para In doc.Paragraphs
+        Err.Clear
+        Set paraRange = para.Range
+        If Err.Number <> 0 Then Err.Clear: GoTo NextPara_IP
+        If IsPastPageFilter(paraRange.Start) Then Exit For
+        If Not IsInPageRange(paraRange) Then GoTo NextPara_IP
+
+        paraText = StripParaMarkChar(paraRange.Text)
+        If Err.Number <> 0 Then Err.Clear: GoTo NextPara_IP
+        If Len(paraText) < 2 Then GoTo NextPara_IP
+
+        paraStart = paraRange.Start
+        listPrefixLen = GetListPrefixLen(para, paraText)
+
+        Err.Clear
+        Application.Run moduleName & "." & procName, doc, paraRange, paraText, paraStart, listPrefixLen, issues
+        If Err.Number <> 0 Then Err.Clear
+NextPara_IP:
+    Next para
+    On Error GoTo 0
+    Set IterateParagraphs = issues
+End Function
+
+' Generic Find loop with stall guard.
+' Returns a Collection of 3-element arrays: Array(startPos, endPos, matchText).
+' Only matches inside the page range are returned.
+Public Function FindAll(doc As Document, ByVal searchText As String, Optional ByVal wholeWord As Boolean = True, Optional ByVal matchCase As Boolean = True, Optional ByVal useWildcards As Boolean = False, Optional searchRange As Range = Nothing) As Collection
+    Dim results As New Collection
+    Dim rng As Range
+    If searchRange Is Nothing Then
+        Set rng = doc.Content.Duplicate
+    Else
+        Set rng = searchRange.Duplicate
+    End If
+
+    With rng.Find
+        .ClearFormatting
+        .Text = searchText
+        .MatchWholeWord = wholeWord
+        .MatchCase = matchCase
+        .MatchWildcards = useWildcards
+        .Wrap = wdFindStop
+        .Forward = True
+    End With
+
+    Dim lastPos As Long
+    lastPos = -1
+    On Error Resume Next
+    Do
+        Err.Clear
+        Dim found As Boolean
+        found = rng.Find.Execute
+        If Err.Number <> 0 Then Err.Clear: Exit Do
+        If Not found Then Exit Do
+        If rng.Start <= lastPos Then Exit Do
+        lastPos = rng.Start
+        If IsInPageRange(rng) Then
+            results.Add Array(rng.Start, rng.End, rng.Text)
+        End If
+        rng.Collapse wdCollapseEnd
+        If Err.Number <> 0 Then Err.Clear: Exit Do
+    Loop
+    On Error GoTo 0
+    Set FindAll = results
+End Function
+
+' Generic footnote iterator.  Calls the named handler via Application.Run
+' with signature: (doc, fn As Footnote, noteText As String, issues As Collection)
+' Handles error recovery and page-range filtering on fn.Reference.
+Public Function ForEachFootnote(doc As Document, ByVal moduleName As String, ByVal procName As String) As Collection
+    Dim issues As New Collection
+    Dim i As Long
+    Dim fn As Footnote
+    Dim noteText As String
+
+    For i = 1 To doc.Footnotes.Count
+        On Error Resume Next
+        Set fn = doc.Footnotes(i)
+        If Err.Number <> 0 Then Err.Clear: On Error GoTo 0: GoTo NextFN_FEF
+        On Error GoTo 0
+
+        On Error Resume Next
+        If Not IsInPageRange(fn.Reference) Then On Error GoTo 0: GoTo NextFN_FEF
+        On Error GoTo 0
+
+        On Error Resume Next
+        noteText = fn.Range.Text
+        If Err.Number <> 0 Then Err.Clear: On Error GoTo 0: GoTo NextFN_FEF
+        On Error GoTo 0
+
+        On Error Resume Next
+        Application.Run moduleName & "." & procName, doc, fn, noteText, issues
+        If Err.Number <> 0 Then Err.Clear
+        On Error GoTo 0
+NextFN_FEF:
+    Next i
+    Set ForEachFootnote = issues
+End Function
+
+' ============================================================
 '  TEXT HELPERS
 ' ============================================================
 

@@ -21,8 +21,10 @@ Attribute VB_Name = "Rules_Spelling"
 '     licensed, licensing = always -s- (verb derivatives)
 '
 ' Dependencies:
-'   - PleadingsEngine.bas (IsInPageRange, IsWhitelistedTerm,
-'                          GetLocationString, GetSpellingMode)
+'   - TextAnchoring.bas (AddIssue, SafeRange, FindAll, IsWhitespaceChar,
+'                        IsInPageRange, IsPastPageFilter, IsWhitelistedTerm,
+'                        GetSpellingMode, GetListPrefixLen,
+'                        PerfTimerStart/End, PerfCount)
 ' ============================================================
 Option Explicit
 
@@ -123,8 +125,6 @@ Private Sub SearchRangeForSpellingIssues(searchRange As Range, _
                                          ByVal direction As String, _
                                          ByRef issues As Collection)
     Dim i As Long
-    Dim finding As Object
-    Dim locStr As String
     Dim issueText As String
     Dim sourceLabel As String
 
@@ -227,9 +227,8 @@ Private Sub SearchRangeForSpellingIssues(searchRange As Range, _
 
                     ' Create a range for the match
                     Dim matchRng As Range
-                    Err.Clear
-                    Set matchRng = doc.Range(spRangeStart, spRangeEnd)
-                    If Err.Number <> 0 Then Err.Clear: GoTo NextSpellToken
+                    Set matchRng = TextAnchoring.SafeRange(doc, spRangeStart, spRangeEnd)
+                    If matchRng Is Nothing Then GoTo NextSpellToken
 
                     ' Verify the document text matches (guard against list prefix offset issues)
                     Dim actualText As String
@@ -240,9 +239,6 @@ Private Sub SearchRangeForSpellingIssues(searchRange As Range, _
                     ' -- Create the finding --
                     Dim foundText As String
                     foundText = actualText
-
-                    locStr = TextAnchoring.GetLocationString(matchRng, doc)
-                    If Err.Number <> 0 Then locStr = "unknown location": Err.Clear
 
                     issueText = sourceLabel & " spelling detected: '" & foundText & "'"
 
@@ -272,10 +268,9 @@ Private Sub SearchRangeForSpellingIssues(searchRange As Range, _
                         spReplacement = suggestion
                     End If
 
-                    Set finding = TextAnchoring.CreateIssueDict(RULE_NAME, locStr, issueText, suggestion, _
+                    TextAnchoring.AddIssue issues, RULE_NAME, doc, matchRng, issueText, suggestion, _
                         spRangeStart, spRangeEnd, severity, spAutoFix, spReplacement, _
-                        foundText, "exact_text", "high")
-                    issues.Add finding
+                        foundText, "exact_text", "high"
                 End If
 NextSpellToken:
             End If
@@ -584,30 +579,36 @@ Private Function IsInsideQuotes(rng As Range, doc As Document) As Boolean
     Dim charBefore As String
     Dim charAfter As String
 
-    On Error Resume Next
-
     ' Get character before range
+    charBefore = ""
     If rng.Start > 0 Then
-        charBefore = doc.Range(rng.Start - 1, rng.Start).Text
-    Else
-        charBefore = ""
-    End If
-    If Err.Number <> 0 Then
-        charBefore = ""
-        Err.Clear
+        Dim rngBefore As Range
+        Set rngBefore = TextAnchoring.SafeRange(doc, rng.Start - 1, rng.Start)
+        If Not rngBefore Is Nothing Then
+            On Error Resume Next
+            charBefore = rngBefore.Text
+            If Err.Number <> 0 Then charBefore = "": Err.Clear
+            On Error GoTo 0
+        End If
     End If
 
     ' Get character after range
-    If rng.End < doc.Content.End Then
-        charAfter = doc.Range(rng.End, rng.End + 1).Text
-    Else
-        charAfter = ""
-    End If
-    If Err.Number <> 0 Then
-        charAfter = ""
-        Err.Clear
-    End If
+    charAfter = ""
+    On Error Resume Next
+    Dim docEnd As Long
+    docEnd = doc.Content.End
+    If Err.Number <> 0 Then docEnd = 0: Err.Clear
     On Error GoTo 0
+    If rng.End < docEnd Then
+        Dim rngAfter As Range
+        Set rngAfter = TextAnchoring.SafeRange(doc, rng.End, rng.End + 1)
+        If Not rngAfter Is Nothing Then
+            On Error Resume Next
+            charAfter = rngAfter.Text
+            If Err.Number <> 0 Then charAfter = "": Err.Clear
+            On Error GoTo 0
+        End If
+    End If
 
     ' Check for opening + closing quotes around the word
     ' This catches "word" and 'word' and similar
@@ -622,9 +623,15 @@ Private Function IsInsideQuotes(rng As Range, doc As Document) As Boolean
     lookbackStart = rng.Start - 200
     If lookbackStart < 0 Then lookbackStart = 0
 
-    On Error Resume Next
+    Dim lookbackRng As Range
+    Set lookbackRng = TextAnchoring.SafeRange(doc, lookbackStart, rng.Start)
+    If lookbackRng Is Nothing Then
+        IsInsideQuotes = False
+        Exit Function
+    End If
     Dim beforeText As String
-    beforeText = doc.Range(lookbackStart, rng.Start).Text
+    On Error Resume Next
+    beforeText = lookbackRng.Text
     If Err.Number <> 0 Then
         Err.Clear
         On Error GoTo 0
@@ -753,16 +760,16 @@ End Sub
 
 ' ============================================================
 '  PRIVATE: Search for a single licence/license term and
-'  analyse context
+'  analyse context.  Uses TextAnchoring.FindAll to replace
+'  the manual Find loop.
 ' ============================================================
 Private Sub SearchSingleLicenceTerm(ByVal term As String, _
                               searchRange As Range, _
                               doc As Document, _
                               ByRef issues As Collection)
-    Dim rng As Range
-    Dim found As Boolean
-    Dim finding As Object
-    Dim locStr As String
+    Dim matches As Collection
+    Set matches = TextAnchoring.FindAll(doc, term, True, False, False, searchRange)
+
     Dim contextBefore As String
     Dim contextAfter As String
     Dim wordBefore As String
@@ -772,76 +779,43 @@ Private Sub SearchSingleLicenceTerm(ByVal term As String, _
     Dim usesS As Boolean
     Dim baseIsNoun As Boolean
     Dim baseIsVerb As Boolean
+    Dim matchArr As Variant
+    Dim startPos As Long, endPos As Long, matchText As String
+    Dim m As Long
 
-    On Error Resume Next
-    Set rng = searchRange.Duplicate
-    If Err.Number <> 0 Then
-        Err.Clear
-        On Error GoTo 0
-        Exit Sub
-    End If
-    On Error GoTo 0
-
-    With rng.Find
-        .ClearFormatting
-        .Text = term
-        .MatchWholeWord = True
-        .MatchCase = False
-        .MatchWildcards = False
-        .Wrap = wdFindStop
-        .Forward = True
-    End With
-
-    Do
-        On Error Resume Next
-        found = rng.Find.Execute
-        If Err.Number <> 0 Then
-            Err.Clear
-            On Error GoTo 0
-            Exit Do
-        End If
-        On Error GoTo 0
-
-        If Not found Then Exit Do
-
-        ' Skip if outside page range
-        If Not TextAnchoring.IsInPageRange(rng) Then
-            GoTo ContinueLicenceSearch
-        End If
+    For m = 1 To matches.Count
+        matchArr = matches(m)
+        startPos = matchArr(0)
+        endPos = matchArr(1)
+        matchText = matchArr(2)
 
         ' Determine if the found word uses -s- or -c-
-        usesS = (InStr(1, LCase(rng.Text), "license") > 0)
+        usesS = (InStr(1, LCase(matchText), "license") > 0)
 
         ' Skip "licensed" and "licensing" -- always correct with -s-
         Dim foundLower As String
-        foundLower = LCase(Trim(rng.Text))
+        foundLower = LCase(Trim(matchText))
         If foundLower = "licensed" Or foundLower = "licensing" Then
             GoTo ContinueLicenceSearch
         End If
 
+        ' Create a range for context and italic/quote checks
+        Dim rng As Range
+        Set rng = TextAnchoring.SafeRange(doc, startPos, endPos)
+        If rng Is Nothing Then GoTo ContinueLicenceSearch
+
         ' -- Downgrade italic / quoted text ------------------
-        Dim licSeverity As String
-        licSeverity = "possible_error"
-
         If IsRangeItalic(rng) Then
-            On Error Resume Next
-            locStr = TextAnchoring.GetLocationString(rng, doc)
-            If Err.Number <> 0 Then locStr = "unknown location": Err.Clear
-            On Error GoTo 0
-
-            Set finding = TextAnchoring.CreateIssueDict(RULE_NAME_LICENCE, locStr, "'" & rng.Text & "' -- in italic text, review manually", "", rng.Start, rng.End, "possible_error")
-            issues.Add finding
+            TextAnchoring.AddIssue issues, RULE_NAME_LICENCE, doc, rng, _
+                "'" & matchText & "' -- in italic text, review manually", "", _
+                startPos, endPos, "possible_error"
             GoTo ContinueLicenceSearch
         End If
 
         If IsInsideQuotes(rng, doc) Then
-            On Error Resume Next
-            locStr = TextAnchoring.GetLocationString(rng, doc)
-            If Err.Number <> 0 Then locStr = "unknown location": Err.Clear
-            On Error GoTo 0
-
-            Set finding = TextAnchoring.CreateIssueDict(RULE_NAME_LICENCE, locStr, "'" & rng.Text & "' -- in quoted text, review manually", "", rng.Start, rng.End, "possible_error")
-            issues.Add finding
+            TextAnchoring.AddIssue issues, RULE_NAME_LICENCE, doc, rng, _
+                "'" & matchText & "' -- in quoted text, review manually", "", _
+                startPos, endPos, "possible_error"
             GoTo ContinueLicenceSearch
         End If
 
@@ -865,56 +839,40 @@ Private Sub SearchSingleLicenceTerm(ByVal term As String, _
 
         If usesS And baseIsNoun And Not baseIsVerb Then
             ' "license" used in noun context -- should be "licence"
-            issueText = "'" & rng.Text & "' appears in a noun context; " & _
+            issueText = "'" & matchText & "' appears in a noun context; " & _
                         "UK convention uses 'licence' for the noun"
-            suggestion = ReplaceSWithC(rng.Text)
+            suggestion = ReplaceSWithC(matchText)
         ElseIf Not usesS And baseIsVerb And Not baseIsNoun Then
             ' "licence" used in verb context -- should be "license"
-            issueText = "'" & rng.Text & "' appears in a verb context; " & _
+            issueText = "'" & matchText & "' appears in a verb context; " & _
                         "UK convention uses 'license' for the verb"
-            suggestion = ReplaceCWithS(rng.Text)
+            suggestion = ReplaceCWithS(matchText)
         ElseIf (usesS And Not baseIsVerb And Not baseIsNoun) Or _
                (Not usesS And Not baseIsVerb And Not baseIsNoun) Then
             ' Context ambiguous
-            issueText = "'" & rng.Text & "' -- unable to determine noun/verb context; " & _
+            issueText = "'" & matchText & "' -- unable to determine noun/verb context; " & _
                         "review context to ensure correct UK spelling"
             suggestion = "Review context: 'licence' = noun, 'license' = verb"
         ElseIf usesS And baseIsVerb And baseIsNoun Then
             ' Both indicators present -- ambiguous
-            issueText = "'" & rng.Text & "' -- conflicting noun/verb indicators; " & _
+            issueText = "'" & matchText & "' -- conflicting noun/verb indicators; " & _
                         "review context"
             suggestion = "Review context: 'licence' = noun, 'license' = verb"
         ElseIf Not usesS And baseIsVerb And baseIsNoun Then
             ' Both indicators present -- ambiguous
-            issueText = "'" & rng.Text & "' -- conflicting noun/verb indicators; " & _
+            issueText = "'" & matchText & "' -- conflicting noun/verb indicators; " & _
                         "review context"
             suggestion = "Review context: 'licence' = noun, 'license' = verb"
         End If
 
         ' Only create finding if we found something to flag
         If Len(issueText) > 0 Then
-            On Error Resume Next
-            locStr = TextAnchoring.GetLocationString(rng, doc)
-            If Err.Number <> 0 Then
-                locStr = "unknown location"
-                Err.Clear
-            End If
-            On Error GoTo 0
-
-            Set finding = TextAnchoring.CreateIssueDict(RULE_NAME_LICENCE, locStr, issueText, suggestion, rng.Start, rng.End, "possible_error")
-            issues.Add finding
+            TextAnchoring.AddIssue issues, RULE_NAME_LICENCE, doc, rng, _
+                issueText, suggestion, startPos, endPos, "possible_error"
         End If
 
 ContinueLicenceSearch:
-        On Error Resume Next
-        rng.Collapse wdCollapseEnd
-        If Err.Number <> 0 Then
-            Err.Clear
-            On Error GoTo 0
-            Exit Do
-        End If
-        On Error GoTo 0
-    Loop
+    Next m
 End Sub
 
 ' ============================================================
@@ -923,22 +881,23 @@ End Sub
 Private Function GetLicenceContextBefore(rng As Range, doc As Document, _
                                    ByVal charCount As Long) As String
     Dim startPos As Long
-    Dim contextRng As Range
-
-    On Error Resume Next
     startPos = rng.Start - charCount
     If startPos < 0 Then startPos = 0
 
-    Set contextRng = doc.Range(startPos, rng.Start)
-    If Err.Number <> 0 Then
-        Err.Clear
-        On Error GoTo 0
+    Dim contextRng As Range
+    Set contextRng = TextAnchoring.SafeRange(doc, startPos, rng.Start)
+    If contextRng Is Nothing Then
         GetLicenceContextBefore = ""
         Exit Function
     End If
-    On Error GoTo 0
 
+    On Error Resume Next
     GetLicenceContextBefore = contextRng.Text
+    If Err.Number <> 0 Then
+        GetLicenceContextBefore = ""
+        Err.Clear
+    End If
+    On Error GoTo 0
 End Function
 
 ' ============================================================
@@ -947,15 +906,10 @@ End Function
 Private Function GetLicenceContextAfter(rng As Range, doc As Document, _
                                   ByVal charCount As Long) As String
     Dim endPos As Long
-    Dim contextRng As Range
     Dim docEnd As Long
 
     On Error Resume Next
     docEnd = doc.Content.End
-    endPos = rng.End + charCount
-    If endPos > docEnd Then endPos = docEnd
-
-    Set contextRng = doc.Range(rng.End, endPos)
     If Err.Number <> 0 Then
         Err.Clear
         On Error GoTo 0
@@ -964,7 +918,23 @@ Private Function GetLicenceContextAfter(rng As Range, doc As Document, _
     End If
     On Error GoTo 0
 
+    endPos = rng.End + charCount
+    If endPos > docEnd Then endPos = docEnd
+
+    Dim contextRng As Range
+    Set contextRng = TextAnchoring.SafeRange(doc, rng.End, endPos)
+    If contextRng Is Nothing Then
+        GetLicenceContextAfter = ""
+        Exit Function
+    End If
+
+    On Error Resume Next
     GetLicenceContextAfter = contextRng.Text
+    If Err.Number <> 0 Then
+        GetLicenceContextAfter = ""
+        Err.Clear
+    End If
+    On Error GoTo 0
 End Function
 
 ' ============================================================
@@ -984,7 +954,7 @@ Private Function GetLastWordFromContext(ByVal text As String) As String
     ' Walk backward from end to find last word boundary
     For i = Len(trimmed) To 1 Step -1
         ch = Mid(trimmed, i, 1)
-        If ch = " " Or ch = vbCr Or ch = vbLf Or ch = vbTab Then
+        If TextAnchoring.IsWhitespaceChar(ch) Then
             GetLastWordFromContext = LCase(Mid(trimmed, i + 1))
             Exit Function
         End If
@@ -1152,82 +1122,45 @@ End Function
 
 Private Sub SearchCheckCheque(searchRange As Range, doc As Document, _
                                ByRef issues As Collection)
-    Dim rng As Range
-    Dim foundText As String
-    Dim finding As Object
-    Dim locStr As String
-
-    ' Search for "check" as whole word
+    ' Search for "check" and "checks" as whole words
     Dim searchTerms As Variant
     searchTerms = Array("check", "checks")
 
     Dim si As Long
     For si = LBound(searchTerms) To UBound(searchTerms)
-        On Error Resume Next
-        Set rng = searchRange.Duplicate
-        If Err.Number <> 0 Then Err.Clear: GoTo NextSearchTerm
-        On Error GoTo 0
+        Dim matches As Collection
+        Set matches = TextAnchoring.FindAll(doc, CStr(searchTerms(si)), True, False, False, searchRange)
 
-        With rng.Find
-            .ClearFormatting
-            .Text = CStr(searchTerms(si))
-            .MatchWholeWord = True
-            .MatchCase = False
-            .MatchWildcards = False
-            .Wrap = wdFindStop
-            .Forward = True
-        End With
+        Dim m As Long
+        For m = 1 To matches.Count
+            Dim matchArr As Variant
+            matchArr = matches(m)
+            Dim startPos As Long, endPos As Long, matchText As String
+            startPos = matchArr(0)
+            endPos = matchArr(1)
+            matchText = matchArr(2)
 
-        Dim lastPos As Long
-        lastPos = -1
-        Do
-            On Error Resume Next
-            Dim foundIt As Boolean
-            foundIt = rng.Find.Execute
-            If Err.Number <> 0 Then Err.Clear: Exit Do
-            On Error GoTo 0
-
-            If Not foundIt Then Exit Do
-            If rng.Start <= lastPos Then Exit Do
-            lastPos = rng.Start
-
-            If Not TextAnchoring.IsInPageRange(rng) Then
-                rng.Collapse wdCollapseEnd
-                GoTo NextCheckMatch
-            End If
-
-            foundText = rng.Text
+            ' Create a range for verb/noun context analysis
+            Dim rng As Range
+            Set rng = TextAnchoring.SafeRange(doc, startPos, endPos)
+            If rng Is Nothing Then GoTo NextCheckMatch
 
             ' Determine if this is a verb usage (skip) or noun (flag)
-            If IsCheckUsedAsVerb(rng, doc) Then
-                rng.Collapse wdCollapseEnd
-                GoTo NextCheckMatch
-            End If
-
-            On Error Resume Next
-            locStr = TextAnchoring.GetLocationString(rng, doc)
-            If Err.Number <> 0 Then locStr = "unknown location": Err.Clear
-            On Error GoTo 0
+            If IsCheckUsedAsVerb(rng, doc) Then GoTo NextCheckMatch
 
             Dim suggestion As String
-            If LCase(foundText) = "checks" Then
+            If LCase(matchText) = "checks" Then
                 suggestion = "cheques"
             Else
                 suggestion = "cheque"
             End If
 
-            Set finding = TextAnchoring.CreateIssueDict(RULE_NAME_CHECK, locStr, _
-                "UK spelling: '" & foundText & "' appears to be a noun (financial instrument). Use '" & suggestion & "' in UK English.", _
-                suggestion, rng.Start, rng.End, "possible_error")
-            issues.Add finding
+            TextAnchoring.AddIssue issues, RULE_NAME_CHECK, doc, rng, _
+                "UK spelling: '" & matchText & "' appears to be a noun (financial instrument). Use '" & suggestion & "' in UK English.", _
+                suggestion, startPos, endPos, "possible_error"
 
 NextCheckMatch:
-            On Error Resume Next
-            rng.Collapse wdCollapseEnd
-            If Err.Number <> 0 Then Err.Clear: Exit Do
-            On Error GoTo 0
-        Loop
-NextSearchTerm:
+        Next m
     Next si
 End Sub
 
@@ -1242,12 +1175,16 @@ Private Function IsCheckUsedAsVerb(rng As Range, doc As Document) As Boolean
     If lookStart < 0 Then lookStart = 0
     Dim beforeText As String
     beforeText = ""
-    On Error Resume Next
     If rng.Start > lookStart Then
-        beforeText = LCase(doc.Range(lookStart, rng.Start).Text)
+        Dim beforeRng As Range
+        Set beforeRng = TextAnchoring.SafeRange(doc, lookStart, rng.Start)
+        If Not beforeRng Is Nothing Then
+            On Error Resume Next
+            beforeText = LCase(beforeRng.Text)
+            If Err.Number <> 0 Then beforeText = "": Err.Clear
+            On Error GoTo 0
+        End If
     End If
-    If Err.Number <> 0 Then beforeText = "": Err.Clear
-    On Error GoTo 0
 
     ' Get up to 20 chars after the word
     Dim afterText As String
@@ -1256,11 +1193,18 @@ Private Function IsCheckUsedAsVerb(rng As Range, doc As Document) As Boolean
     lookEnd = rng.End + 20
     On Error Resume Next
     If lookEnd > doc.Content.End Then lookEnd = doc.Content.End
-    If lookEnd > rng.End Then
-        afterText = LCase(doc.Range(rng.End, lookEnd).Text)
-    End If
-    If Err.Number <> 0 Then afterText = "": Err.Clear
+    If Err.Number <> 0 Then Err.Clear
     On Error GoTo 0
+    If lookEnd > rng.End Then
+        Dim afterRng As Range
+        Set afterRng = TextAnchoring.SafeRange(doc, rng.End, lookEnd)
+        If Not afterRng Is Nothing Then
+            On Error Resume Next
+            afterText = LCase(afterRng.Text)
+            If Err.Number <> 0 Then afterText = "": Err.Clear
+            On Error GoTo 0
+        End If
+    End If
 
     ' Extract last word before "check"
     beforeText = Trim(beforeText)
@@ -1494,63 +1438,32 @@ Private Sub SearchFinancialBatch(searchRange As Range, _
                                   suggestions As Variant, _
                                   wholeWord As Boolean)
     Dim ti As Long
-    Dim rng As Range
-    Dim finding As Object
-    Dim locStr As String
 
     For ti = LBound(terms) To UBound(terms)
-        On Error Resume Next
-        Set rng = searchRange.Duplicate
-        If Err.Number <> 0 Then Err.Clear: GoTo NextFinTerm
-        On Error GoTo 0
+        Dim matches As Collection
+        Set matches = TextAnchoring.FindAll(doc, CStr(terms(ti)), wholeWord, False, False, searchRange)
 
-        With rng.Find
-            .ClearFormatting
-            .Text = CStr(terms(ti))
-            .MatchWholeWord = wholeWord
-            .MatchCase = False
-            .MatchWildcards = False
-            .Wrap = wdFindStop
-            .Forward = True
-        End With
+        Dim m As Long
+        For m = 1 To matches.Count
+            Dim matchArr As Variant
+            matchArr = matches(m)
+            Dim startPos As Long, endPos As Long, matchText As String
+            startPos = matchArr(0)
+            endPos = matchArr(1)
+            matchText = matchArr(2)
 
-        Dim lastPos As Long
-        lastPos = -1
-        Do
-            On Error Resume Next
-            Dim foundIt As Boolean
-            foundIt = rng.Find.Execute
-            If Err.Number <> 0 Then Err.Clear: Exit Do
-            On Error GoTo 0
+            Dim rng As Range
+            Set rng = TextAnchoring.SafeRange(doc, startPos, endPos)
+            If rng Is Nothing Then GoTo NextFinMatch
 
-            If Not foundIt Then Exit Do
-            If rng.Start <= lastPos Then Exit Do
-            lastPos = rng.Start
-
-            If Not TextAnchoring.IsInPageRange(rng) Then
-                rng.Collapse wdCollapseEnd
-                GoTo NextFinMatch
-            End If
-
-            On Error Resume Next
-            locStr = TextAnchoring.GetLocationString(rng, doc)
-            If Err.Number <> 0 Then locStr = "unknown location": Err.Clear
-            On Error GoTo 0
-
-            Set finding = TextAnchoring.CreateIssueDict(RULE_NAME_CHECK, locStr, _
-                "UK spelling: '" & rng.Text & "' should be '" & _
+            TextAnchoring.AddIssue issues, RULE_NAME_CHECK, doc, rng, _
+                "UK spelling: '" & matchText & "' should be '" & _
                 CStr(suggestions(ti)) & "' in UK English.", _
-                "Use '" & CStr(suggestions(ti)) & "'", rng.Start, rng.End, _
-                "possible_error", True, CStr(suggestions(ti)))
-            issues.Add finding
+                "Use '" & CStr(suggestions(ti)) & "'", startPos, endPos, _
+                "possible_error", True, CStr(suggestions(ti))
 
 NextFinMatch:
-            On Error Resume Next
-            rng.Collapse wdCollapseEnd
-            If Err.Number <> 0 Then Err.Clear: Exit Do
-            On Error GoTo 0
-        Loop
-NextFinTerm:
+        Next m
     Next ti
 End Sub
 

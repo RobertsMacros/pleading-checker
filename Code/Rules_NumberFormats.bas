@@ -10,8 +10,8 @@ Attribute VB_Name = "Rules_NumberFormats"
 '   Check_CurrencyNumberFormat  (Rule19)
 '
 ' Dependencies:
-'   - TextAnchoring.bas (IsInPageRange, GetLocationString,
-'     SetPageRange, GetDateFormatPref, CreateIssueDict)
+'   - TextAnchoring.bas (FindAll, AddIssue, SafeRange,
+'     GetDateFormatPref, IsInPageRange)
 ' ============================================================
 Option Explicit
 
@@ -46,36 +46,19 @@ Private Function IsValidMonth(ByVal monthName As String) As Boolean
 End Function
 
 ' -- Helper: search and collect date/time occurrences ----------
-Private Sub FindWithWildcard(doc As Document, ByVal pattern As String, _
-                              results As Collection, ByVal formatType As String)
-    Dim rng As Range
-    Dim info() As Variant
-    Set rng = doc.Content.Duplicate
-
-    With rng.Find
-        .ClearFormatting
-        .Text = pattern
-        .Forward = True
-        .Wrap = wdFindStop
-        .MatchWildcards = True
-        .MatchCase = False
-    End With
-
-    Dim lastPos As Long
-    lastPos = -1
-    Do While rng.Find.Execute
-        If rng.Start <= lastPos Then Exit Do  ' stall guard
-        lastPos = rng.Start
-        If TextAnchoring.IsInPageRange(rng) Then
-            ReDim info(0 To 3)
-            info(0) = formatType
-            info(1) = rng.Text
-            info(2) = rng.Start
-            info(3) = rng.End
-            results.Add info
-        End If
-        rng.Collapse wdCollapseEnd
-    Loop
+Private Sub FindWithWildcard(doc As Document, ByVal pattern As String, results As Collection, ByVal formatType As String)
+    Dim matches As Collection
+    Set matches = TextAnchoring.FindAll(doc, pattern, False, False, True)
+    Dim i As Long
+    For i = 1 To matches.Count
+        Dim m As Variant: m = matches(i)
+        Dim info(0 To 3) As Variant
+        info(0) = formatType
+        info(1) = CStr(m(2))
+        info(2) = CLng(m(0))
+        info(3) = CLng(m(1))
+        results.Add info
+    Next i
 End Sub
 
 ' -- Helper: check if a time match looks like a clause reference,
@@ -194,133 +177,39 @@ Private Sub CheckSymbolConsistency(doc As Document, _
     Set numericRanges = New Collection
 
     ' -- Search for "words" format: symbol + digits + space + word --
-    ' Pattern: e.g. ?[0-9.]@ [a-z]@  (wildcard)
-    Dim rng As Range
-    Dim wordPattern As String
-    wordPattern = sym & "[0-9.]@" & " [a-z]@"
-
-    Set rng = doc.Content.Duplicate
-    With rng.Find
-        .ClearFormatting
-        .Text = wordPattern
-        .MatchWildcards = True
-        .MatchCase = False
-        .MatchWholeWord = False
-        .Wrap = wdFindStop
-        .Forward = True
-    End With
-
-    Dim lastPos As Long
-    lastPos = -1
-    Do
-        On Error Resume Next
-        Dim found As Boolean
-        found = rng.Find.Execute
-        If Err.Number <> 0 Then
-            Err.Clear
-            On Error GoTo 0
-            Exit Do
+    Dim wordMatches As Collection
+    Set wordMatches = TextAnchoring.FindAll(doc, sym & "[0-9.]@" & " [a-z]@", False, False, True)
+    Dim wi As Long
+    For wi = 1 To wordMatches.Count
+        Dim wm As Variant: wm = wordMatches(wi)
+        If IsMagnitudeWord(LCase(CStr(wm(2)))) Then
+            wordsCount = wordsCount + 1
+            wordsRanges.Add TextAnchoring.SafeRange(doc, CLng(wm(0)), CLng(wm(1)))
         End If
-        On Error GoTo 0
-
-        If Not found Then Exit Do
-        If rng.Start <= lastPos Then Exit Do   ' stall guard
-        lastPos = rng.Start
-
-        ' Validate that the trailing word is a magnitude word
-        Dim matchText As String
-        matchText = LCase(rng.Text)
-        If IsMagnitudeWord(matchText) Then
-            If TextAnchoring.IsInPageRange(rng) Then
-                wordsCount = wordsCount + 1
-                wordsRanges.Add doc.Range(rng.Start, rng.End)
-            End If
-        End If
-
-        On Error Resume Next
-        rng.Collapse wdCollapseEnd
-        If Err.Number <> 0 Then Err.Clear: On Error GoTo 0: Exit Do
-        On Error GoTo 0
-    Loop
+    Next wi
 
     ' -- Search for "abbreviated" format: symbol + digits + m/bn/k --
-    Dim abbrPattern As String
-    abbrPattern = sym & "[0-9.]@[mbk]"
-
-    Set rng = doc.Content.Duplicate
-    With rng.Find
-        .ClearFormatting
-        .Text = abbrPattern
-        .MatchWildcards = True
-        .MatchCase = False
-        .MatchWholeWord = False
-        .Wrap = wdFindStop
-        .Forward = True
-    End With
-
-    lastPos = -1
-    Do
-        On Error Resume Next
-        found = rng.Find.Execute
-        If Err.Number <> 0 Then Err.Clear: On Error GoTo 0: Exit Do
-        On Error GoTo 0
-
-        If Not found Then Exit Do
-        If rng.Start <= lastPos Then Exit Do   ' stall guard
-        lastPos = rng.Start
-
-        If TextAnchoring.IsInPageRange(rng) Then
-            abbrCount = abbrCount + 1
-            abbrRanges.Add doc.Range(rng.Start, rng.End)
-        End If
-
-        On Error Resume Next
-        rng.Collapse wdCollapseEnd
-        If Err.Number <> 0 Then Err.Clear: On Error GoTo 0: Exit Do
-        On Error GoTo 0
-    Loop
+    Dim abbrMatches As Collection
+    Set abbrMatches = TextAnchoring.FindAll(doc, sym & "[0-9.]@[mbk]", False, False, True)
+    Dim ai As Long
+    For ai = 1 To abbrMatches.Count
+        Dim am As Variant: am = abbrMatches(ai)
+        abbrCount = abbrCount + 1
+        abbrRanges.Add TextAnchoring.SafeRange(doc, CLng(am(0)), CLng(am(1)))
+    Next ai
 
     ' -- Search for "full_numeric" format: symbol + digits with commas --
-    Dim numPattern As String
-    numPattern = sym & "[0-9,.]@"
-
-    Set rng = doc.Content.Duplicate
-    With rng.Find
-        .ClearFormatting
-        .Text = numPattern
-        .MatchWildcards = True
-        .MatchCase = False
-        .MatchWholeWord = False
-        .Wrap = wdFindStop
-        .Forward = True
-    End With
-
-    lastPos = -1
-    Do
-        On Error Resume Next
-        found = rng.Find.Execute
-        If Err.Number <> 0 Then Err.Clear: On Error GoTo 0: Exit Do
-        On Error GoTo 0
-
-        If Not found Then Exit Do
-        If rng.Start <= lastPos Then Exit Do   ' stall guard
-        lastPos = rng.Start
-
-        ' Only count as full_numeric if it contains a comma and is long enough
-        Dim numText As String
-        numText = rng.Text
+    Dim numMatches As Collection
+    Set numMatches = TextAnchoring.FindAll(doc, sym & "[0-9,.]@", False, False, True)
+    Dim ni As Long
+    For ni = 1 To numMatches.Count
+        Dim nm As Variant: nm = numMatches(ni)
+        Dim numText As String: numText = CStr(nm(2))
         If InStr(numText, ",") > 0 And Len(numText) >= 5 Then
-            If TextAnchoring.IsInPageRange(rng) Then
-                numericCount = numericCount + 1
-                numericRanges.Add doc.Range(rng.Start, rng.End)
-            End If
+            numericCount = numericCount + 1
+            numericRanges.Add TextAnchoring.SafeRange(doc, CLng(nm(0)), CLng(nm(1)))
         End If
-
-        On Error Resume Next
-        rng.Collapse wdCollapseEnd
-        If Err.Number <> 0 Then Err.Clear: On Error GoTo 0: Exit Do
-        On Error GoTo 0
-    Loop
+    Next ni
 
     ' -- Determine dominant format and flag minorities ----------
     Dim totalFormats As Long
@@ -357,87 +246,25 @@ End Sub
 
 ' -- Check ISO code prefixed amounts ---------------------------
 '  Searches for patterns like "GBP 1,500" or "USD 25.00"
-Private Sub CheckISOCodeFormat(doc As Document, _
-                                isoCode As String, _
-                                ByRef issues As Collection)
-    Dim rng As Range
-    Dim isoPattern As String
-    Dim finding As Object
-    Dim locStr As String
-
-    ' Search for ISO code followed by space and number
-    isoPattern = isoCode & " [0-9]@"
-
-    Set rng = doc.Content.Duplicate
-    With rng.Find
-        .ClearFormatting
-        .Text = isoPattern
-        .MatchWildcards = True
-        .MatchCase = True
-        .MatchWholeWord = False
-        .Wrap = wdFindStop
-        .Forward = True
-    End With
-
-    Dim isoCount As Long
-    isoCount = 0
-    Dim isoLastPos As Long
-    isoLastPos = -1
-
-    Do
-        On Error Resume Next
-        Dim isoFound As Boolean
-        isoFound = rng.Find.Execute
-        If Err.Number <> 0 Then Err.Clear: On Error GoTo 0: Exit Do
-        On Error GoTo 0
-
-        If Not isoFound Then Exit Do
-        If rng.Start <= isoLastPos Then Exit Do   ' stall guard
-        isoLastPos = rng.Start
-
-        If TextAnchoring.IsInPageRange(rng) Then
-            isoCount = isoCount + 1
-
-            ' Flag ISO prefix usage as informational (possible_error)
-            ' since mixing ISO codes with symbol notation is inconsistent
-            On Error Resume Next
-            locStr = TextAnchoring.GetLocationString(rng, doc)
-            If Err.Number <> 0 Then locStr = "unknown location": Err.Clear
-            On Error GoTo 0
-
-            Set finding = TextAnchoring.CreateIssueDict(RULE_NAME_CURRENCY, locStr, "ISO code format used: '" & rng.Text & "'", "Consider using symbol notation for consistency", rng.Start, rng.End, "possible_error")
-            issues.Add finding
-        End If
-
-        On Error Resume Next
-        rng.Collapse wdCollapseEnd
-        If Err.Number <> 0 Then Err.Clear: On Error GoTo 0: Exit Do
-        On Error GoTo 0
-    Loop
+Private Sub CheckISOCodeFormat(doc As Document, isoCode As String, ByRef issues As Collection)
+    Dim matches As Collection
+    Set matches = TextAnchoring.FindAll(doc, isoCode & " [0-9]@", False, True, True)
+    Dim i As Long
+    For i = 1 To matches.Count
+        Dim m As Variant: m = matches(i)
+        Dim rng As Range: Set rng = TextAnchoring.SafeRange(doc, CLng(m(0)), CLng(m(1)))
+        TextAnchoring.AddIssue issues, RULE_NAME_CURRENCY, doc, rng, "ISO code format used: '" & CStr(m(2)) & "'", "Consider using symbol notation for consistency", CLng(m(0)), CLng(m(1)), "possible_error"
+    Next i
 End Sub
 
 ' -- Flag all ranges in a minority format collection -----------
-Private Sub FlagMinorityRanges(doc As Document, _
-                                ranges As Collection, _
-                                symLabel As String, _
-                                minorityFmt As String, _
-                                dominantFmt As String, _
-                                ByRef issues As Collection)
+Private Sub FlagMinorityRanges(doc As Document, ranges As Collection, symLabel As String, minorityFmt As String, dominantFmt As String, ByRef issues As Collection)
     Dim i As Long
-    Dim rng As Range
-    Dim finding As Object
-    Dim locStr As String
-
     For i = 1 To ranges.Count
-        Set rng = ranges(i)
-
-        On Error Resume Next
-        locStr = TextAnchoring.GetLocationString(rng, doc)
-        If Err.Number <> 0 Then locStr = "unknown location": Err.Clear
-        On Error GoTo 0
-
-        Set finding = TextAnchoring.CreateIssueDict(RULE_NAME_CURRENCY, locStr, symLabel & " amount uses '" & minorityFmt & "' format: '" & rng.Text & "'", "Use '" & dominantFmt & "' format for consistency (dominant style)", rng.Start, rng.End, "error")
-        issues.Add finding
+        Dim rng As Range: Set rng = ranges(i)
+        If Not rng Is Nothing Then
+            TextAnchoring.AddIssue issues, RULE_NAME_CURRENCY, doc, rng, symLabel & " amount uses '" & minorityFmt & "' format: '" & rng.Text & "'", "Use '" & dominantFmt & "' format for consistency (dominant style)", rng.Start, rng.End, "error"
+        End If
     Next i
 End Sub
 
@@ -575,28 +402,16 @@ Public Function Check_DateTimeFormat(doc As Document) As Collection
                 dType = CStr(dInfo(0))
 
                 If dType <> dominantDate Then
-                    Dim findingD As Object
                     Dim rngD As Range
-                    On Error Resume Next
-                    Set rngD = doc.Range(CLng(dInfo(2)), CLng(dInfo(3)))
-                    If Err.Number <> 0 Then Err.Clear: On Error GoTo 0: GoTo NextDateFind
-                    Dim locD As String
-                    locD = TextAnchoring.GetLocationString(rngD, doc)
-                    If Err.Number <> 0 Then locD = "unknown location": Err.Clear
-                    On Error GoTo 0
-
+                    Set rngD = TextAnchoring.SafeRange(doc, CLng(dInfo(2)), CLng(dInfo(3)))
+                    If rngD Is Nothing Then GoTo NextDateFind
                     Dim suggestion As String
                     Select Case dominantDate
-                        Case "UK"
-                            suggestion = "Reformat to UK style (e.g., '1 January 2024')"
-                        Case "US"
-                            suggestion = "Reformat to US style (e.g., 'January 1, 2024')"
-                        Case "numeric"
-                            suggestion = "Reformat to numeric style (e.g., '01/01/2024')"
+                        Case "UK": suggestion = "Reformat to UK style (e.g., '1 January 2024')"
+                        Case "US": suggestion = "Reformat to US style (e.g., 'January 1, 2024')"
+                        Case "numeric": suggestion = "Reformat to numeric style (e.g., '01/01/2024')"
                     End Select
-
-                    Set findingD = TextAnchoring.CreateIssueDict(RULE_NAME_DATE_TIME, locD, "Inconsistent date format: '" & CStr(dInfo(1)) & "' uses " & dType & " format but dominant is " & dominantDate, suggestion, CLng(dInfo(2)), CLng(dInfo(3)), "error")
-                    issues.Add findingD
+                    TextAnchoring.AddIssue issues, RULE_NAME_DATE_TIME, doc, rngD, "Inconsistent date format: '" & CStr(dInfo(1)) & "' uses " & dType & " format but dominant is " & dominantDate, suggestion, CLng(dInfo(2)), CLng(dInfo(3)), "error"
                 End If
 NextDateFind:
             Next i
@@ -759,25 +574,12 @@ NextDateFind:
                 ' Skip ambiguous times: they don't conflict with anything
                 If tType = "ambiguous" Then GoTo NextTimeFind
                 If tType <> dominantTime Then
-                    Dim findingT As Object
                     Dim rngT As Range
-                    On Error Resume Next
-                    Set rngT = doc.Range(CLng(tInfo(2)), CLng(tInfo(3)))
-                    If Err.Number <> 0 Then Err.Clear: On Error GoTo 0: GoTo NextTimeFind
-                    Dim locT As String
-                    locT = TextAnchoring.GetLocationString(rngT, doc)
-                    If Err.Number <> 0 Then locT = "unknown location": Err.Clear
-                    On Error GoTo 0
-
+                    Set rngT = TextAnchoring.SafeRange(doc, CLng(tInfo(2)), CLng(tInfo(3)))
+                    If rngT Is Nothing Then GoTo NextTimeFind
                     Dim timeSugg As String
-                    If dominantTime = "12hr" Then
-                        timeSugg = "Use 12-hour format (e.g., '2:30 PM') for consistency"
-                    Else
-                        timeSugg = "Use 24-hour format (e.g., '14:30') for consistency"
-                    End If
-
-                    Set findingT = TextAnchoring.CreateIssueDict(RULE_NAME_DATE_TIME, locT, "Inconsistent time format: '" & CStr(tInfo(1)) & "' uses " & tType & " format but dominant is " & dominantTime, timeSugg, CLng(tInfo(2)), CLng(tInfo(3)), "error")
-                    issues.Add findingT
+                    If dominantTime = "12hr" Then timeSugg = "Use 12-hour format (e.g., '2:30 PM') for consistency" Else timeSugg = "Use 24-hour format (e.g., '14:30') for consistency"
+                    TextAnchoring.AddIssue issues, RULE_NAME_DATE_TIME, doc, rngT, "Inconsistent time format: '" & CStr(tInfo(1)) & "' uses " & tType & " format but dominant is " & dominantTime, timeSugg, CLng(tInfo(2)), CLng(tInfo(3)), "error"
                 End If
 NextTimeFind:
             Next i

@@ -8,8 +8,8 @@ Attribute VB_Name = "Rules_Italics"
 '     places or courts that should not be italicised.
 '
 ' Dependencies:
-'   - TextAnchoring.bas (IsInPageRange, GetLocationString,
-'     IsPastPageFilter, CreateIssueDict)
+'   - TextAnchoring.bas (IterateParagraphs, SafeRange, AddIssue,
+'     IsLetterChar, MergeArrays3)
 ' ============================================================
 Option Explicit
 
@@ -120,80 +120,8 @@ End Sub
 '  MAIN ENTRY POINT -- Rule 30
 ' ------------------------------------------------------------
 Public Function Check_AnglicisedTermsNotItalic(doc As Document) As Collection
-    Dim issues As New Collection
-
     InitSeedTerms
-
-    Dim para As Paragraph
-    Dim paraText As String
-    Dim pos As Long
-    Dim termIdx As Long
-    Dim term As String
-    Dim termLen As Long
-    Dim charBefore As String
-    Dim charAfter As String
-    Dim rng As Range
-    Dim locStr As String
-    Dim finding As Object
-
-    For Each para In doc.Paragraphs
-        ' Skip paragraphs outside the configured page range
-        On Error Resume Next
-        Dim inRange As Boolean
-        If TextAnchoring.IsPastPageFilter(para.Range.Start) Then Exit For
-        inRange = TextAnchoring.IsInPageRange(para.Range)
-        If Err.Number <> 0 Then inRange = True: Err.Clear
-        On Error GoTo 0
-        If Not inRange Then GoTo NextParaR30
-
-        On Error Resume Next
-        paraText = para.Range.Text
-        If Err.Number <> 0 Then Err.Clear: On Error GoTo 0: GoTo NextParaR30
-        On Error GoTo 0
-        If Len(paraText) = 0 Then GoTo NextParaR30
-
-        For termIdx = LBound(seedTerms) To UBound(seedTerms)
-            term = CStr(seedTerms(termIdx))
-            termLen = Len(term)
-
-            pos = InStr(1, paraText, term, vbTextCompare)
-            Do While pos > 0
-                If pos > 1 Then
-                    charBefore = Mid$(paraText, pos - 1, 1)
-                    If IsLetter(charBefore) Then GoTo NextMatchR30
-                End If
-
-                If pos + termLen <= Len(paraText) Then
-                    charAfter = Mid$(paraText, pos + termLen, 1)
-                    If IsLetter(charAfter) Then GoTo NextMatchR30
-                End If
-
-                On Error Resume Next
-                Set rng = doc.Range( _
-                    para.Range.Start + pos - 1, _
-                    para.Range.Start + pos - 1 + termLen)
-                If Err.Number <> 0 Then Err.Clear: On Error GoTo 0: GoTo NextMatchR30
-                On Error GoTo 0
-
-                If IsRangeItalic(rng) Then
-                    On Error Resume Next
-                    locStr = TextAnchoring.GetLocationString(rng, doc)
-                    If Err.Number <> 0 Then locStr = "unknown location": Err.Clear
-                    On Error GoTo 0
-
-                    Set finding = TextAnchoring.CreateIssueDict(RULE_NAME_ANGLICISED, locStr, "Anglicised foreign term is italicised.", "Set '" & term & "' in roman, not italics.", rng.Start, rng.End, "warning", False)
-                    issues.Add finding
-                End If
-
-NextMatchR30:
-                pos = InStr(pos + 1, paraText, term, vbTextCompare)
-            Loop
-        Next termIdx
-
-NextParaR30:
-    Next para
-
-    Set Check_AnglicisedTermsNotItalic = issues
+    Set Check_AnglicisedTermsNotItalic = TextAnchoring.IterateParagraphs(doc, "Rules_Italics", "ProcessParagraph_AnglicisedTerms")
 End Function
 
 ' ============================================================
@@ -229,86 +157,11 @@ End Sub
 '  MAIN ENTRY POINT -- Rule 31
 ' ------------------------------------------------------------
 Public Function Check_ForeignNamesNotItalic(doc As Document) As Collection
-    Dim issues As New Collection
-
     ' Initialise defaults if not yet loaded
     If foreignNames Is Nothing Then
         InitSeedNames
     End If
-
-    Dim para As Paragraph
-    Dim paraText As String
-    Dim pos As Long
-    Dim nameKey As Variant
-    Dim term As String
-    Dim termLen As Long
-    Dim charBefore As String
-    Dim charAfter As String
-    Dim rng As Range
-    Dim locStr As String
-    Dim finding As Object
-    Dim keys As Variant
-
-    keys = foreignNames.keys
-
-    For Each para In doc.Paragraphs
-        On Error Resume Next
-        Dim inRange31 As Boolean
-        If TextAnchoring.IsPastPageFilter(para.Range.Start) Then Exit For
-        inRange31 = TextAnchoring.IsInPageRange(para.Range)
-        If Err.Number <> 0 Then inRange31 = True: Err.Clear
-        On Error GoTo 0
-        If Not inRange31 Then GoTo NextParaR31
-
-        On Error Resume Next
-        paraText = para.Range.Text
-        If Err.Number <> 0 Then Err.Clear: On Error GoTo 0: GoTo NextParaR31
-        On Error GoTo 0
-        If Len(paraText) = 0 Then GoTo NextParaR31
-
-        Dim k As Long
-        For k = 0 To foreignNames.Count - 1
-            term = CStr(keys(k))
-            termLen = Len(term)
-
-            pos = InStr(1, paraText, term, vbTextCompare)
-            Do While pos > 0
-                If pos > 1 Then
-                    charBefore = Mid$(paraText, pos - 1, 1)
-                    If IsLetter(charBefore) Then GoTo NextMatchR31
-                End If
-
-                If pos + termLen <= Len(paraText) Then
-                    charAfter = Mid$(paraText, pos + termLen, 1)
-                    If IsLetter(charAfter) Then GoTo NextMatchR31
-                End If
-
-                On Error Resume Next
-                Set rng = doc.Range( _
-                    para.Range.Start + pos - 1, _
-                    para.Range.Start + pos - 1 + termLen)
-                If Err.Number <> 0 Then Err.Clear: On Error GoTo 0: GoTo NextMatchR31
-                On Error GoTo 0
-
-                If IsRangeItalic(rng) Then
-                    On Error Resume Next
-                    locStr = TextAnchoring.GetLocationString(rng, doc)
-                    If Err.Number <> 0 Then locStr = "unknown location": Err.Clear
-                    On Error GoTo 0
-
-                    Set finding = TextAnchoring.CreateIssueDict(RULE_NAME_FOREIGN, locStr, "Foreign name or institution should not be italicised.", "Set '" & term & "' in roman, not italics.", rng.Start, rng.End, "warning", False)
-                    issues.Add finding
-                End If
-
-NextMatchR31:
-                pos = InStr(pos + 1, paraText, term, vbTextCompare)
-            Loop
-        Next k
-
-NextParaR31:
-    Next para
-
-    Set Check_ForeignNamesNotItalic = issues
+    Set Check_ForeignNamesNotItalic = TextAnchoring.IterateParagraphs(doc, "Rules_Italics", "ProcessParagraph_ForeignNames")
 End Function
 
 ' ============================================================
@@ -325,8 +178,6 @@ Public Sub ProcessParagraph_AnglicisedTerms(doc As Document, paraRange As Range,
     Dim charBefore As String
     Dim charAfter As String
     Dim rng As Range
-    Dim locStr As String
-    Dim finding As Object
     Dim adjStart As Long
 
     For termIdx = LBound(seedTerms) To UBound(seedTerms)
@@ -337,29 +188,24 @@ Public Sub ProcessParagraph_AnglicisedTerms(doc As Document, paraRange As Range,
         Do While pos > 0
             If pos > 1 Then
                 charBefore = Mid$(paraText, pos - 1, 1)
-                If IsLetter(charBefore) Then GoTo NextMatchAT
+                If TextAnchoring.IsLetterChar(charBefore) Then GoTo NextMatchAT
             End If
 
             If pos + termLen <= Len(paraText) Then
                 charAfter = Mid$(paraText, pos + termLen, 1)
-                If IsLetter(charAfter) Then GoTo NextMatchAT
+                If TextAnchoring.IsLetterChar(charAfter) Then GoTo NextMatchAT
             End If
 
             adjStart = paraStart + listPrefixLen + pos - 1
 
-            On Error Resume Next
-            Set rng = doc.Range(adjStart, adjStart + termLen)
-            If Err.Number <> 0 Then Err.Clear: On Error GoTo 0: GoTo NextMatchAT
-            On Error GoTo 0
+            Set rng = TextAnchoring.SafeRange(doc, adjStart, adjStart + termLen)
+            If rng Is Nothing Then GoTo NextMatchAT
 
             If IsRangeItalic(rng) Then
-                On Error Resume Next
-                locStr = TextAnchoring.GetLocationString(rng, doc)
-                If Err.Number <> 0 Then locStr = "unknown location": Err.Clear
-                On Error GoTo 0
-
-                Set finding = TextAnchoring.CreateIssueDict(RULE_NAME_ANGLICISED, locStr, "Anglicised foreign term is italicised.", "Set '" & term & "' in roman, not italics.", rng.Start, rng.End, "warning", False)
-                issues.Add finding
+                TextAnchoring.AddIssue issues, RULE_NAME_ANGLICISED, doc, rng, _
+                    "Anglicised foreign term is italicised.", _
+                    "Set '" & term & "' in roman, not italics.", _
+                    rng.Start, rng.End, "warning"
             End If
 
 NextMatchAT:
@@ -385,8 +231,6 @@ Public Sub ProcessParagraph_ForeignNames(doc As Document, paraRange As Range, pa
     Dim charBefore As String
     Dim charAfter As String
     Dim rng As Range
-    Dim locStr As String
-    Dim finding As Object
     Dim adjStart As Long
 
     keys = foreignNames.keys
@@ -399,29 +243,24 @@ Public Sub ProcessParagraph_ForeignNames(doc As Document, paraRange As Range, pa
         Do While pos > 0
             If pos > 1 Then
                 charBefore = Mid$(paraText, pos - 1, 1)
-                If IsLetter(charBefore) Then GoTo NextMatchFN
+                If TextAnchoring.IsLetterChar(charBefore) Then GoTo NextMatchFN
             End If
 
             If pos + termLen <= Len(paraText) Then
                 charAfter = Mid$(paraText, pos + termLen, 1)
-                If IsLetter(charAfter) Then GoTo NextMatchFN
+                If TextAnchoring.IsLetterChar(charAfter) Then GoTo NextMatchFN
             End If
 
             adjStart = paraStart + listPrefixLen + pos - 1
 
-            On Error Resume Next
-            Set rng = doc.Range(adjStart, adjStart + termLen)
-            If Err.Number <> 0 Then Err.Clear: On Error GoTo 0: GoTo NextMatchFN
-            On Error GoTo 0
+            Set rng = TextAnchoring.SafeRange(doc, adjStart, adjStart + termLen)
+            If rng Is Nothing Then GoTo NextMatchFN
 
             If IsRangeItalic(rng) Then
-                On Error Resume Next
-                locStr = TextAnchoring.GetLocationString(rng, doc)
-                If Err.Number <> 0 Then locStr = "unknown location": Err.Clear
-                On Error GoTo 0
-
-                Set finding = TextAnchoring.CreateIssueDict(RULE_NAME_FOREIGN, locStr, "Foreign name or institution should not be italicised.", "Set '" & term & "' in roman, not italics.", rng.Start, rng.End, "warning", False)
-                issues.Add finding
+                TextAnchoring.AddIssue issues, RULE_NAME_FOREIGN, doc, rng, _
+                    "Foreign name or institution should not be italicised.", _
+                    "Set '" & term & "' in roman, not italics.", _
+                    rng.Start, rng.End, "warning"
             End If
 
 NextMatchFN:
