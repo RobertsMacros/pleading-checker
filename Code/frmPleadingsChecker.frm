@@ -50,7 +50,7 @@ Private mHdrVariants As clsHeaderClick
 Private fraRules        As MSForms.Frame
 Private WithEvents txtPageRange As MSForms.TextBox
 Private lstCustomRules  As MSForms.ListBox
-Private txtRuleCorrect  As MSForms.TextBox
+Private WithEvents txtRuleCorrect As MSForms.TextBox
 Private WithEvents txtRuleVariants As MSForms.TextBox
 Private chkAddComments  As MSForms.CheckBox
 Private chkTrackedChanges As MSForms.CheckBox
@@ -73,6 +73,8 @@ Private Const PAGE_RANGE_PLACEHOLDER As String = "e.g. 1,3,5-8,9:30"
 Private mPageRangeShowingPlaceholder As Boolean
 Private Const VARIANTS_PLACEHOLDER As String = "e.g. colour, color, colours"
 Private mVariantsShowingPlaceholder As Boolean
+Private Const CORRECT_PLACEHOLDER As String = "e.g. colour"
+Private mCorrectShowingPlaceholder As Boolean
 
 ' Custom rules data: parallel arrays for the single source of truth
 Private crCorrect()     As String    ' Correct form
@@ -90,6 +92,7 @@ Private crSortOrder()   As Long      ' Indices into cr* arrays for display
 Private Sub UserForm_Initialize()
     editingRuleIndex = -1
     mVariantsShowingPlaceholder = False
+    mCorrectShowingPlaceholder = False
     mPageRangeShowingPlaceholder = False
     crCount = 0
     crSortMode = 0
@@ -337,6 +340,7 @@ Private Sub UserForm_Initialize()
         .Left = colLeft + 42: .Top = yPos: .Width = 90: .Height = TXT_H
         .Font.Size = 7.5
     End With
+    InitCorrectPlaceholder
 
     Set lbl = Me.Controls.Add("Forms.Label.1", "lblIncorrectVars")
     With lbl
@@ -1144,7 +1148,7 @@ End Sub
 Private Sub btnAddRule_Click()
     Dim correctForm As String
     Dim incorrectVars As String
-    correctForm = Trim$(txtRuleCorrect.Text)
+    correctForm = GetCorrectText()
     incorrectVars = GetVariantsText()
 
     If Len(correctForm) = 0 Then
@@ -1181,7 +1185,8 @@ Private Sub btnAddRule_Click()
         AddCustomRule correctForm, incorrectVars
     End If
 
-    txtRuleCorrect.Text = ""
+    ClearCorrect
+    InitCorrectPlaceholder
     ClearVariants
     InitVariantsPlaceholder
     RefreshCustomRulesList
@@ -1206,7 +1211,8 @@ Private Sub btnRemoveRule_Click()
     If editingRuleIndex >= 0 Then
         editingRuleIndex = -1
         btnAddRule.Caption = "Add"
-        txtRuleCorrect.Text = ""
+        ClearCorrect
+        InitCorrectPlaceholder
         ClearVariants
         InitVariantsPlaceholder
     End If
@@ -1228,6 +1234,7 @@ Private Sub btnEditRule_Click()
     If dataIdx < 0 Then Exit Sub
 
     editingRuleIndex = lstCustomRules.ListIndex
+    ClearCorrect
     txtRuleCorrect.Text = crCorrect(dataIdx)
     ClearVariants
     txtRuleVariants.Text = crVariants(dataIdx)
@@ -1425,6 +1432,56 @@ Private Function GetCustomRulesPath() As String
         GetCustomRulesPath = Environ("APPDATA") & sep & "PleadingsChecker" & sep & "custom_rules.txt"
     #End If
 End Function
+
+' ============================================================
+'  CORRECT TEXTBOX PLACEHOLDER HELPERS
+' ============================================================
+Private Sub InitCorrectPlaceholder()
+    If txtRuleCorrect Is Nothing Then Exit Sub
+    With txtRuleCorrect
+        .Text = CORRECT_PLACEHOLDER
+        .ForeColor = RGB(150, 150, 150)
+    End With
+    mCorrectShowingPlaceholder = True
+End Sub
+
+Private Function GetCorrectText() As String
+    If mCorrectShowingPlaceholder Then
+        GetCorrectText = vbNullString
+        Exit Function
+    End If
+    Dim raw As String
+    raw = Trim$(txtRuleCorrect.Text)
+    ' Safety net: treat placeholder text as empty even if flag desynced
+    If raw = CORRECT_PLACEHOLDER Then
+        GetCorrectText = vbNullString
+    Else
+        GetCorrectText = raw
+    End If
+End Function
+
+Private Sub ClearCorrect()
+    txtRuleCorrect.Text = ""
+    txtRuleCorrect.ForeColor = RGB(0, 0, 0)
+    mCorrectShowingPlaceholder = False
+End Sub
+
+Private Sub txtRuleCorrect_Enter()
+    If mCorrectShowingPlaceholder Then
+        txtRuleCorrect.Text = ""
+        txtRuleCorrect.ForeColor = RGB(0, 0, 0)
+        mCorrectShowingPlaceholder = False
+    End If
+End Sub
+
+Private Sub txtRuleCorrect_Exit(ByVal Cancel As MSForms.ReturnBoolean)
+    If Len(Trim$(txtRuleCorrect.Text)) = 0 Then
+        InitCorrectPlaceholder
+    Else
+        txtRuleCorrect.ForeColor = RGB(0, 0, 0)
+        mCorrectShowingPlaceholder = False
+    End If
+End Sub
 
 ' ============================================================
 '  VARIANTS TEXTBOX PLACEHOLDER HELPERS
