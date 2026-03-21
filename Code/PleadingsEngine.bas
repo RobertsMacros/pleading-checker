@@ -1165,27 +1165,27 @@ Private Function FindParagraphIndex(ByVal pos As Long) As Long
     End If
 
     ' Binary search for paragraph containing this position
-    Dim lo As Long, hi As Long, mid As Long
+    Dim lo As Long, hi As Long, pivot As Long
     lo = 0
     hi = paraStartCount - 1
 
     Do While lo <= hi
-        mid = (lo + hi) \ 2
-        If mid < paraStartCount - 1 Then
-            If paraStartPos(mid) <= pos And paraStartPos(mid + 1) > pos Then
-                FindParagraphIndex = mid + 1  ' 1-based
+        pivot = (lo + hi) \ 2
+        If pivot < paraStartCount - 1 Then
+            If paraStartPos(pivot) <= pos And paraStartPos(pivot + 1) > pos Then
+                FindParagraphIndex = pivot + 1  ' 1-based
                 Exit Function
-            ElseIf paraStartPos(mid) > pos Then
-                hi = mid - 1
+            ElseIf paraStartPos(pivot) > pos Then
+                hi = pivot - 1
             Else
-                lo = mid + 1
+                lo = pivot + 1
             End If
         Else
             ' Last paragraph
-            If paraStartPos(mid) <= pos Then
-                FindParagraphIndex = mid + 1
+            If paraStartPos(pivot) <= pos Then
+                FindParagraphIndex = pivot + 1
             Else
-                FindParagraphIndex = mid
+                FindParagraphIndex = pivot
             End If
             Exit Function
         End If

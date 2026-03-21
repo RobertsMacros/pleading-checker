@@ -297,10 +297,10 @@ Public Function FindAll(doc As Document, ByVal searchText As String, Optional By
     On Error Resume Next
     Do
         Err.Clear
-        Dim found As Boolean
-        found = rng.Find.Execute
+        Dim didFind As Boolean
+        didFind = rng.Find.Execute
         If Err.Number <> 0 Then Err.Clear: Exit Do
-        If Not found Then Exit Do
+        If Not didFind Then Exit Do
         If rng.Start <= lastPos Then Exit Do
         lastPos = rng.Start
         If IsInPageRange(rng) Then

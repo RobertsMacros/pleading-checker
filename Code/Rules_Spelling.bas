@@ -940,12 +940,12 @@ End Function
 ' ============================================================
 '  PRIVATE: Extract the last word from a context string
 ' ============================================================
-Private Function GetLastWordFromContext(ByVal text As String) As String
+Private Function GetLastWordFromContext(ByVal contextStr As String) As String
     Dim trimmed As String
     Dim i As Long
     Dim ch As String
 
-    trimmed = Trim(text)
+    trimmed = Trim(contextStr)
     If Len(trimmed) = 0 Then
         GetLastWordFromContext = ""
         Exit Function
@@ -966,11 +966,11 @@ End Function
 ' ============================================================
 '  PRIVATE: Extract the first word from a context string
 ' ============================================================
-Private Function GetFirstWordFromContext(ByVal text As String) As String
+Private Function GetFirstWordFromContext(ByVal contextStr As String) As String
     Dim trimmed As String
     Dim spacePos As Long
 
-    trimmed = Trim(text)
+    trimmed = Trim(contextStr)
     If Len(trimmed) = 0 Then
         GetFirstWordFromContext = ""
         Exit Function

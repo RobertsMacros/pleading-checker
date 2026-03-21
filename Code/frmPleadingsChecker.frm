@@ -1483,11 +1483,11 @@ Private Function NormaliseVariants(ByVal raw As String) As String
     Dim result As String
     Dim p As Long
     For p = LBound(parts) To UBound(parts)
-        Dim item As String
-        item = Trim$(parts(p))
-        If Len(item) > 0 Then
+        Dim partStr As String
+        partStr = Trim$(parts(p))
+        If Len(partStr) > 0 Then
             If Len(result) > 0 Then result = result & ", "
-            result = result & item
+            result = result & partStr
         End If
     Next p
     NormaliseVariants = result

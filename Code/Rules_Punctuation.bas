@@ -71,10 +71,10 @@ Private Function CountTightSlashes(doc As Document) As Long
     Dim cnt As Long
     cnt = 0
 
-    Dim item As Variant
-    For Each item In results
+    Dim findResult As Variant
+    For Each findResult In results
         Dim rng As Range
-        Set rng = TextAnchoring.SafeRange(doc, item(0), item(1))
+        Set rng = TextAnchoring.SafeRange(doc, findResult(0), findResult(1))
         If Not rng Is Nothing Then
             ' Skip URLs and dates
             If Not IsURLContext(rng, doc) And Not IsDateSlash(rng) Then
@@ -84,7 +84,7 @@ Private Function CountTightSlashes(doc As Document) As Long
                 End If
             End If
         End If
-    Next item
+    Next findResult
 
     CountTightSlashes = cnt
 End Function
@@ -99,17 +99,17 @@ Private Function CountSpacedSlashes(doc As Document) As Long
     Dim cnt As Long
     cnt = 0
 
-    Dim item As Variant
-    For Each item In results
+    Dim findResult As Variant
+    For Each findResult In results
         Dim rng As Range
-        Set rng = TextAnchoring.SafeRange(doc, item(0), item(1))
+        Set rng = TextAnchoring.SafeRange(doc, findResult(0), findResult(1))
         If Not rng Is Nothing Then
             ' Skip URLs
             If Not IsURLContext(rng, doc) Then
                 cnt = cnt + 1
             End If
         End If
-    Next item
+    Next findResult
 
     CountSpacedSlashes = cnt
 End Function
@@ -121,12 +121,12 @@ Private Sub FlagSpacedSlashes(doc As Document, ByRef issues As Collection)
     Dim results As Collection
     Set results = TextAnchoring.FindAll(doc, " / ", False, False, False)
 
-    Dim item As Variant
+    Dim findResult As Variant
     Dim sPos As Long, ePos As Long, mText As String
-    For Each item In results
-        sPos = item(0)
-        ePos = item(1)
-        mText = item(2)
+    For Each findResult In results
+        sPos = findResult(0)
+        ePos = findResult(1)
+        mText = findResult(2)
 
         Dim rng As Range
         Set rng = TextAnchoring.SafeRange(doc, sPos, ePos)
@@ -138,7 +138,7 @@ Private Sub FlagSpacedSlashes(doc As Document, ByRef issues As Collection)
             "Remove spaces around slash for consistency", sPos, ePos, "possible_error"
 
 ContinueSpaced:
-    Next item
+    Next findResult
 End Sub
 
 ' ============================================================
@@ -148,12 +148,12 @@ Private Sub FlagTightSlashes(doc As Document, ByRef issues As Collection)
     Dim results As Collection
     Set results = TextAnchoring.FindAll(doc, "[! ]/[! ]", False, False, True)
 
-    Dim item As Variant
+    Dim findResult As Variant
     Dim sPos As Long, ePos As Long, mText As String
-    For Each item In results
-        sPos = item(0)
-        ePos = item(1)
-        mText = item(2)
+    For Each findResult In results
+        sPos = findResult(0)
+        ePos = findResult(1)
+        mText = findResult(2)
 
         Dim rng As Range
         Set rng = TextAnchoring.SafeRange(doc, sPos, ePos)
@@ -167,7 +167,7 @@ Private Sub FlagTightSlashes(doc As Document, ByRef issues As Collection)
             "Add spaces around slash for consistency", sPos, ePos, "possible_error"
 
 ContinueTight:
-    Next item
+    Next findResult
 End Sub
 
 ' ============================================================
@@ -177,15 +177,15 @@ Private Sub FlagBackslashes(doc As Document, ByRef issues As Collection)
     Dim results As Collection
     Set results = TextAnchoring.FindAll(doc, "\", False, False, False)
 
-    Dim item As Variant
+    Dim findResult As Variant
     Dim sPos As Long, ePos As Long
     Dim context As String
     Dim fontName As String
 
     On Error Resume Next
-    For Each item In results
-        sPos = item(0)
-        ePos = item(1)
+    For Each findResult In results
+        sPos = findResult(0)
+        ePos = findResult(1)
 
         Dim rng As Range
         Set rng = TextAnchoring.SafeRange(doc, sPos, ePos)
@@ -226,7 +226,7 @@ Private Sub FlagBackslashes(doc As Document, ByRef issues As Collection)
             "Replace '\' with '/'", sPos, ePos, "possible_error"
 
 ContinueBackslash:
-    Next item
+    Next findResult
     On Error GoTo 0
 End Sub
 
