@@ -19,6 +19,8 @@ Private Const RULE_NAME_BRACKET As String = "bracket_integrity"
 Private Const RULE_NAME_DASH As String = "hyphens"
 Private Const RULE_NAME_TRIPLICATE As String = "triplicate_punctuation"
 
+' (Bracket pre-check flag is now in Prechecks.bas module)
+
 ' ?==============================================================?
 ' ?  SLASH STYLE (Rule14)                                       ?
 ' ?==============================================================?
@@ -734,16 +736,19 @@ End Sub
 
 ' ============================================================
 '  ProcessParagraph_BracketIntegrity
-'  Per-paragraph handler extracted from Check_BracketIntegrity.
-'  Performs byte-array bracket counting and stack-based nesting
-'  check for a single paragraph.  The global pre-check (counting
-'  all brackets in doc.Content.Text) is NOT done here -- it
-'  belongs in the Check_BracketIntegrity function.
+'  Per-paragraph handler.  Performs byte-array bracket counting
+'  and stack-based nesting check for a single paragraph.
+'  Respects the module-level mSkipBracketCheck flag set by
+'  InitBracketPreCheck -- when brackets balance globally the
+'  per-paragraph scan is skipped.
 ' ============================================================
 Public Sub ProcessParagraph_BracketIntegrity(doc As Document, paraRange As Range, _
         paraText As String, paraStart As Long, listPrefixLen As Long, _
         ByRef issues As Collection)
     If LenB(paraText) = 0 Then Exit Sub
+
+    ' If global pre-check found all brackets balanced, skip scan
+    If Prechecks.SkipBracketIntegrity Then Exit Sub
 
     ' Counters per bracket type
     Dim parenOpen As Long, parenClose As Long

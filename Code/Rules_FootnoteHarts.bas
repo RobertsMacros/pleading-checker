@@ -20,6 +20,54 @@ Private Const RULE25_NAME As String = "footnote_terminal_full_stop"
 Private Const RULE26_NAME As String = "footnote_initial_capital"
 Private Const RULE27_NAME As String = "footnote_abbreviation_dictionary"
 
+' Module-level cached dictionaries for Rule 26 and Rule 27.
+' Built once by InitFootnoteCaches before the consolidated
+' footnote loop, cleared by ClearFootnoteCaches afterwards.
+Private mAllowedLC As Object      ' Rule 26 allowed lower-case starts
+Private mApproved As Object       ' Rule 27 approved (case-sensitive)
+Private mApprovedLC As Object     ' Rule 27 approved (case-insensitive)
+Private mUnapproved As Object     ' Rule 27 unapproved variants
+
+' ============================================================
+'  Cache management -- called by RunFootnoteRules
+' ============================================================
+
+Public Sub InitFootnoteCaches()
+    ' Rule 26: allowed lower-case starts
+    Set mAllowedLC = CreateObject("Scripting.Dictionary")
+    mAllowedLC.CompareMode = vbTextCompare
+    mAllowedLC.Add "c", True
+    mAllowedLC.Add "cf", True
+    mAllowedLC.Add "cp", True
+    mAllowedLC.Add "eg", True
+    mAllowedLC.Add "ie", True
+    mAllowedLC.Add "p", True
+    mAllowedLC.Add "pp", True
+    mAllowedLC.Add "ibid", True
+
+    ' Rule 27: approved (case-sensitive)
+    Set mApproved = CreateObject("Scripting.Dictionary")
+    mApproved.CompareMode = vbBinaryCompare
+    BuildApprovedDict mApproved
+
+    ' Rule 27: approved (case-insensitive, for dotted-form check)
+    Set mApprovedLC = CreateObject("Scripting.Dictionary")
+    mApprovedLC.CompareMode = vbTextCompare
+    BuildApprovedLCDict mApprovedLC
+
+    ' Rule 27: unapproved variant mapping
+    Set mUnapproved = CreateObject("Scripting.Dictionary")
+    mUnapproved.CompareMode = vbTextCompare
+    BuildUnapprovedDict mUnapproved
+End Sub
+
+Public Sub ClearFootnoteCaches()
+    Set mAllowedLC = Nothing
+    Set mApproved = Nothing
+    Set mApprovedLC = Nothing
+    Set mUnapproved = Nothing
+End Sub
+
 ' ============================================================
 '  RULE 24 -- FOOTNOTES NOT ENDNOTES
 ' ============================================================
@@ -95,9 +143,9 @@ Public Sub ProcessFootnote_TerminalFullStop(doc As Document, fn As Footnote, not
 
     ' -- Flag missing full stop ---------------------------
     TextAnchoring.AddIssue issues, RULE25_NAME, doc, fn.Reference, _
-        "Footnote does not end with a full stop.", _
+        "Footnote " & fn.Index & ": does not end with a full stop.", _
         "Add a full stop at the end of the footnote.", _
-        fn.Range.Start, fn.Range.End, "warning", False
+        fn.Reference.Start, fn.Reference.End, "warning", False
 End Sub
 
 ' ============================================================
@@ -109,24 +157,15 @@ Public Function Check_FootnoteInitialCapital(doc As Document) As Collection
 End Function
 
 Public Sub ProcessFootnote_InitialCapital(doc As Document, fn As Footnote, noteText As String, ByRef issues As Collection)
-    Dim allowed As Object
     Dim trimmed As String
     Dim token As String
     Dim firstCharCode As Long
     Dim j As Long
     Dim ch As String
 
-    ' -- Build allowed lower-case starts dictionary -----------
-    Set allowed = CreateObject("Scripting.Dictionary")
-    allowed.CompareMode = vbTextCompare
-    allowed.Add "c", True
-    allowed.Add "cf", True
-    allowed.Add "cp", True
-    allowed.Add "eg", True
-    allowed.Add "ie", True
-    allowed.Add "p", True
-    allowed.Add "pp", True
-    allowed.Add "ibid", True
+    ' Use module-level cache (built by InitFootnoteCaches).
+    ' Fall back to lazy init for standalone Check_ entry point.
+    If mAllowedLC Is Nothing Then InitFootnoteCaches
 
     ' -- Trim leading whitespace --------------------------
     trimmed = LTrim(noteText)
@@ -152,16 +191,16 @@ Public Sub ProcessFootnote_InitialCapital(doc As Document, fn As Footnote, noteT
     If Len(token) = 0 Then Exit Sub
 
     ' -- Check if token is in allowed list ----------------
-    If allowed.Exists(LCase(token)) Then Exit Sub
+    If mAllowedLC.Exists(LCase(token)) Then Exit Sub
 
     ' -- Check if first character is lower-case -----------
     firstCharCode = AscW(Mid(token, 1, 1))
     If firstCharCode >= 97 And firstCharCode <= 122 Then
         ' Lower-case and not in allowed list: flag
         TextAnchoring.AddIssue issues, RULE26_NAME, doc, fn.Reference, _
-            "Footnote begins with lower-case text outside the approved exceptions.", _
+            "Footnote " & fn.Index & ": begins with lower-case text outside the approved exceptions.", _
             "Begin the footnote with a capital letter, unless it starts with an approved lower-case abbreviation.", _
-            fn.Range.Start, fn.Range.End, "warning", False
+            fn.Reference.Start, fn.Reference.End, "warning", False
     End If
 End Sub
 
@@ -174,24 +213,9 @@ Public Function Check_FootnoteAbbreviationDictionary(doc As Document) As Collect
 End Function
 
 Public Sub ProcessFootnote_AbbreviationDictionary(doc As Document, fn As Footnote, noteText As String, ByRef issues As Collection)
-    Dim approved As Object
-    Dim approvedLC As Object
-    Dim unapproved As Object
-
-    ' -- Build approved abbreviations set (case-sensitive) ----
-    Set approved = CreateObject("Scripting.Dictionary")
-    approved.CompareMode = vbBinaryCompare
-    BuildApprovedDict approved
-
-    ' -- Build approved lower-case set for dotted-form check --
-    Set approvedLC = CreateObject("Scripting.Dictionary")
-    approvedLC.CompareMode = vbTextCompare
-    BuildApprovedLCDict approvedLC
-
-    ' -- Build unapproved variant mapping (LCase key) --------
-    Set unapproved = CreateObject("Scripting.Dictionary")
-    unapproved.CompareMode = vbTextCompare
-    BuildUnapprovedDict unapproved
+    ' Use module-level caches (built by InitFootnoteCaches).
+    ' Fall back to lazy init for standalone Check_ entry point.
+    If mApproved Is Nothing Then InitFootnoteCaches
 
     ' -- Tokenize on spaces -----------------------------------
     Dim tokens() As String
@@ -218,14 +242,14 @@ Public Sub ProcessFootnote_AbbreviationDictionary(doc As Document, fn As Footnot
         stripped = StripTrailingDot(token)
         lcToken = LCase(stripped)
 
-        If unapproved.Exists(lcToken) Then
-            preferred = unapproved(lcToken)
+        If mUnapproved.Exists(lcToken) Then
+            preferred = mUnapproved(lcToken)
 
-            issueText = "Unapproved footnote abbreviation."
+            issueText = "Footnote " & fn.Index & ": unapproved abbreviation."
             suggText = "Use '" & preferred & "' instead of '" & stripped & "'."
 
             TextAnchoring.AddIssue issues, RULE27_NAME, doc, fn.Reference, _
-                issueText, suggText, fn.Range.Start, fn.Range.End, "warning", False
+                issueText, suggText, fn.Reference.Start, fn.Reference.End, "warning", False
             GoTo NextToken
         End If
 
@@ -240,13 +264,13 @@ Public Sub ProcessFootnote_AbbreviationDictionary(doc As Document, fn As Footnot
 
             If Len(noDots) > 0 Then
                 ' Check if the undotted form is an approved abbreviation
-                If approvedLC.Exists(noDots) Then
+                If mApprovedLC.Exists(noDots) Then
                     ' This is a dotted form of an approved abbrev -- flag it
-                    issueText = "Unapproved footnote abbreviation."
+                    issueText = "Footnote " & fn.Index & ": unapproved abbreviation."
                     suggText = "Use '" & noDots & "' instead of '" & token & "'."
 
                     TextAnchoring.AddIssue issues, RULE27_NAME, doc, fn.Reference, _
-                        issueText, suggText, fn.Range.Start, fn.Range.End, "warning", False
+                        issueText, suggText, fn.Reference.Start, fn.Reference.End, "warning", False
                     GoTo NextToken
                 End If
             End If

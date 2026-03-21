@@ -9,7 +9,7 @@ Attribute VB_Name = "Rules_Spacing"
 '   - Check_MissingSpaceAfterDot : Flag ".X" (missing space)
 '
 ' Dependencies:
-'   - TextAnchoring.bas (IterateParagraphs, FindAll, AddIssue,
+'   - TextAnchoring.bas (IterateParagraphs, AddIssue,
 '                        SafeRange, CreateRegex, GetSpaceStylePref)
 ' ============================================================
 Option Explicit
@@ -50,26 +50,12 @@ End Function
 ' ============================================================
 '  PUBLIC: Check_SpaceBeforePunct
 '  Flags "word ," / "word ;" / "word :" etc. patterns.
+'  Standalone entry point -- delegates to IterateParagraphs.
+'  (In the engine, ProcessParagraph_SpaceBeforePunct is called
+'  directly from RunParagraphRules for single-pass efficiency.)
 ' ============================================================
 Public Function Check_SpaceBeforePunct(doc As Document) As Collection
-    Dim issues As New Collection
-    Dim results As Collection
-    Set results = TextAnchoring.FindAll(doc, " [,;:!?]", False, True, True)
-
-    Dim i As Long
-    For i = 1 To results.Count
-        Dim item As Variant
-        item = results(i)
-        Dim startPos As Long: startPos = CLng(item(0))
-        Dim endPos As Long: endPos = CLng(item(1))
-        Dim matchText As String: matchText = CStr(item(2))
-        Dim punctChar As String: punctChar = Mid(matchText, 2, 1)
-        Dim rng As Range
-        Set rng = TextAnchoring.SafeRange(doc, startPos, endPos)
-        TextAnchoring.AddIssue issues, RULE_SPACE_BEFORE_PUNCT, doc, rng, "Unexpected space before '" & punctChar & "'", "Remove the space before punctuation", startPos, startPos + 1, "error", True, "", " ", "exact_text", "high"
-    Next i
-
-    Set Check_SpaceBeforePunct = issues
+    Set Check_SpaceBeforePunct = TextAnchoring.IterateParagraphs(doc, "Rules_Spacing", "ProcessParagraph_SpaceBeforePunct")
 End Function
 
 ' ============================================================
@@ -250,6 +236,24 @@ Public Sub ProcessParagraph_MissingSpaceAfterDot(doc As Document, paraRange As R
             Dim rng As Range: Set rng = TextAnchoring.SafeRange(doc, msdStart, msdEnd)
             TextAnchoring.AddIssue issues, RULE_MISSING_SPACE_DOT, doc, rng, "Missing space after full stop before '" & Mid(paraText, dotIdx + 2, 1) & "'.", "Insert a space after the full stop.", msdStart, msdEnd, "error", False
         End If
+    Next m
+End Sub
+
+' ============================================================
+'  PUBLIC: ProcessParagraph_SpaceBeforePunct
+'  Per-paragraph handler for space-before-punctuation detection.
+'  Scans paraText with regex for " [,;:!?]" patterns.
+' ============================================================
+Public Sub ProcessParagraph_SpaceBeforePunct(doc As Document, paraRange As Range, paraText As String, paraStart As Long, listPrefixLen As Long, ByRef issues As Collection)
+    Dim re As Object: Set re = TextAnchoring.CreateRegex(" [,;:!?]")
+    Dim m As Object
+    For Each m In re.Execute(paraText)
+        Dim mIdx As Long: mIdx = m.FirstIndex
+        Dim spStart As Long: spStart = paraStart + mIdx - listPrefixLen
+        Dim spEnd As Long: spEnd = spStart + 2
+        Dim punctChar As String: punctChar = Mid(paraText, mIdx + 2, 1)
+        Dim rng As Range: Set rng = TextAnchoring.SafeRange(doc, spStart, spEnd)
+        TextAnchoring.AddIssue issues, RULE_SPACE_BEFORE_PUNCT, doc, rng, "Unexpected space before '" & punctChar & "'", "Remove the space before punctuation", spStart, spStart + 1, "error", True, "", " ", "exact_text", "high"
     Next m
 End Sub
 

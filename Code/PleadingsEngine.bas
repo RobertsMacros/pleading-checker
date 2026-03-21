@@ -1241,6 +1241,8 @@ Public Sub RunParagraphRules(doc As Document, config As Object, _
         hCount = hCount + 1
         handlers(hCount) = "Rules_Spacing.ProcessParagraph_MissingSpaceAfterDot"
         hCount = hCount + 1
+        handlers(hCount) = "Rules_Spacing.ProcessParagraph_SpaceBeforePunct"
+        hCount = hCount + 1
     End If
     ' Always capitalise terms
     If IsRuleEnabled(config, "always_capitalise_terms") Then
@@ -1345,6 +1347,284 @@ NextParaRP:
 End Sub
 
 ' ============================================================
+'  CONSOLIDATED FOOTNOTE/ENDNOTE RULE RUNNER
+'  Iterates doc.Footnotes exactly once and doc.Endnotes once,
+'  running all enabled footnote/endnote checks per note.
+'  Replaces 6 separate loops with 2.
+' ============================================================
+Public Sub RunFootnoteRules(doc As Document, config As Object, _
+                             ByRef allIssues As Collection)
+    PerfTimerStart "footnote_rules_combined"
+    TraceStep "RunFootnoteRules", "starting consolidated footnote pass"
+
+    Dim fnIssues As New Collection
+    Dim fnEnabled As Boolean: fnEnabled = IsRuleEnabled(config, "footnote_rules")
+    Dim dupEnabled As Boolean: dupEnabled = IsRuleEnabled(config, "duplicate_footnotes")
+
+    ' -- FootnotesNotEndnotes (no-loop check) ----------------------
+    If fnEnabled Then
+        AddIssuesToCollection fnIssues, _
+            TryRunRule("Rules_FootnoteHarts.Check_FootnotesNotEndnotes", doc)
+    End If
+
+    ' -- Build Harts handler list ----------------------------------
+    Dim hartsHandlers() As String
+    Dim hartsCount As Long
+    hartsCount = 0
+    ReDim hartsHandlers(0 To 3)
+
+    If fnEnabled Then
+        hartsHandlers(hartsCount) = "Rules_FootnoteHarts.ProcessFootnote_TerminalFullStop"
+        hartsCount = hartsCount + 1
+        hartsHandlers(hartsCount) = "Rules_FootnoteHarts.ProcessFootnote_InitialCapital"
+        hartsCount = hartsCount + 1
+        hartsHandlers(hartsCount) = "Rules_FootnoteHarts.ProcessFootnote_AbbreviationDictionary"
+        hartsCount = hartsCount + 1
+    End If
+
+    ' -- Initialise Harts module-level caches ----------------------
+    If hartsCount > 0 Then
+        On Error Resume Next
+        Application.Run "Rules_FootnoteHarts.InitFootnoteCaches"
+        If Err.Number <> 0 Then Err.Clear
+        On Error GoTo 0
+    End If
+
+    ' -- Single pass through footnotes -----------------------------
+    If doc.Footnotes.Count > 0 Then
+        Dim fnExpectedIdx As Long: fnExpectedIdx = 1
+        Dim fnDupDict As Object
+        If dupEnabled Then
+            Set fnDupDict = CreateObject("Scripting.Dictionary")
+        End If
+
+        Dim fi As Long
+        Dim fn As Footnote
+        Dim fnNoteText As String
+        Dim fnRefStart As Long
+        Dim fnCharBefore As String
+        Dim fnRngBefore As Range
+        Dim fnCleanText As String
+
+        For fi = 1 To doc.Footnotes.Count
+            On Error Resume Next
+            Set fn = doc.Footnotes(fi)
+            If Err.Number <> 0 Then Err.Clear: On Error GoTo 0: GoTo NextFnCombined
+            On Error GoTo 0
+
+            On Error Resume Next
+            If Not TextAnchoring.IsInPageRange(fn.Reference) Then
+                fnExpectedIdx = fnExpectedIdx + 1
+                On Error GoTo 0
+                GoTo NextFnCombined
+            End If
+            On Error GoTo 0
+
+            ' -- Integrity: sequence ---------------------------------
+            If fnEnabled Then
+                If fn.Index <> fnExpectedIdx Then
+                    TextAnchoring.AddIssue fnIssues, "footnote_integrity", doc, fn.Reference, _
+                        "Footnote numbering gap: expected " & fnExpectedIdx & ", found " & fn.Index, _
+                        "Renumber footnotes sequentially", _
+                        fn.Reference.Start, fn.Reference.End
+                End If
+            End If
+            fnExpectedIdx = fnExpectedIdx + 1
+
+            ' -- Integrity: placement --------------------------------
+            If fnEnabled Then
+                fnRefStart = fn.Reference.Start
+                If fnRefStart > 0 Then
+                    Set fnRngBefore = TextAnchoring.SafeRange(doc, fnRefStart - 1, fnRefStart)
+                    If Not fnRngBefore Is Nothing Then
+                        fnCharBefore = fnRngBefore.Text
+                        If Not TextAnchoring.IsPunctuation(fnCharBefore) Then
+                            TextAnchoring.AddIssue fnIssues, "footnote_integrity", doc, fn.Reference, _
+                                "Footnote " & fn.Index & " reference not placed after punctuation", _
+                                "Place footnote reference after punctuation mark", _
+                                fn.Reference.Start, fn.Reference.End
+                        End If
+                    End If
+                End If
+            End If
+
+            ' -- Read note text (shared by empty, duplicate, Harts) --
+            On Error Resume Next
+            fnNoteText = fn.Range.Text
+            If Err.Number <> 0 Then Err.Clear: On Error GoTo 0: GoTo NextFnCombined
+            On Error GoTo 0
+
+            ' -- Integrity: empty ------------------------------------
+            If fnEnabled Then
+                fnCleanText = Trim(Replace(Replace(fnNoteText, vbCr, ""), vbLf, ""))
+                If Len(fnCleanText) = 0 Then
+                    TextAnchoring.AddIssue fnIssues, "footnote_integrity", doc, fn.Reference, _
+                        "Footnote " & fn.Index & " has empty content", _
+                        "Add content or remove the empty footnote", _
+                        fn.Reference.Start, fn.Reference.End
+                End If
+            End If
+
+            ' -- Duplicate: build dict / flag duplicates -------------
+            If dupEnabled Then
+                fnCleanText = Trim(Replace(Replace(fnNoteText, vbCr, ""), vbLf, ""))
+                If Len(fnCleanText) > 0 Then
+                    If fnDupDict.Exists(fnCleanText) Then
+                        Dim fnFirstIdx As Long
+                        fnFirstIdx = CLng(fnDupDict(fnCleanText))
+                        TextAnchoring.AddIssue fnIssues, "footnote_integrity", doc, fn.Reference, _
+                            "Footnote " & fn.Index & " has identical content to footnote " & fnFirstIdx, _
+                            "Remove duplicate or differentiate content", _
+                            fn.Reference.Start, fn.Reference.End, "possible_error"
+                    Else
+                        fnDupDict.Add fnCleanText, fn.Index
+                    End If
+                End If
+            End If
+
+            ' -- Harts handlers (terminal stop, initial capital, abbreviation dict) --
+            Dim fh As Long
+            For fh = 0 To hartsCount - 1
+                On Error Resume Next
+                Application.Run hartsHandlers(fh), doc, fn, fnNoteText, fnIssues
+                If Err.Number <> 0 Then
+                    If Err.Number = ERR_RUN_CANCELLED Then
+                        On Error GoTo 0
+                        Err.Raise ERR_RUN_CANCELLED, "RunFootnoteRules", "Run cancelled"
+                    End If
+                    DebugLogError "RunFootnoteRules", hartsHandlers(fh), Err.Number, Err.Description
+                    Err.Clear
+                End If
+                On Error GoTo 0
+            Next fh
+
+            ' -- Cancellation check every 50 notes -------------------
+            If fi Mod 50 = 0 Then
+                DoEvents
+                If gCancelRun Then
+                    Err.Raise ERR_RUN_CANCELLED, "RunFootnoteRules", "Run cancelled"
+                End If
+            End If
+
+NextFnCombined:
+        Next fi
+    End If
+
+    ' -- Single pass through endnotes (integrity only) -------------
+    If doc.Endnotes.Count > 0 And (fnEnabled Or dupEnabled) Then
+        Dim enExpectedIdx As Long: enExpectedIdx = 1
+        Dim enDupDict As Object
+        If dupEnabled Then
+            Set enDupDict = CreateObject("Scripting.Dictionary")
+        End If
+
+        Dim ei As Long
+        Dim en As Endnote
+        Dim enNoteText As String
+        Dim enRefStart As Long
+        Dim enCharBefore As String
+        Dim enRngBefore As Range
+        Dim enCleanText As String
+
+        For ei = 1 To doc.Endnotes.Count
+            On Error Resume Next
+            Set en = doc.Endnotes(ei)
+            If Err.Number <> 0 Then Err.Clear: On Error GoTo 0: GoTo NextEnCombined
+            On Error GoTo 0
+
+            On Error Resume Next
+            If Not TextAnchoring.IsInPageRange(en.Reference) Then
+                enExpectedIdx = enExpectedIdx + 1
+                On Error GoTo 0
+                GoTo NextEnCombined
+            End If
+            On Error GoTo 0
+
+            ' -- Integrity: sequence ---------------------------------
+            If fnEnabled Then
+                If en.Index <> enExpectedIdx Then
+                    TextAnchoring.AddIssue fnIssues, "footnote_integrity", doc, en.Reference, _
+                        "Endnote numbering gap: expected " & enExpectedIdx & ", found " & en.Index, _
+                        "Renumber endnotes sequentially", _
+                        en.Reference.Start, en.Reference.End
+                End If
+            End If
+            enExpectedIdx = enExpectedIdx + 1
+
+            ' -- Integrity: placement --------------------------------
+            If fnEnabled Then
+                enRefStart = en.Reference.Start
+                If enRefStart > 0 Then
+                    Set enRngBefore = TextAnchoring.SafeRange(doc, enRefStart - 1, enRefStart)
+                    If Not enRngBefore Is Nothing Then
+                        enCharBefore = enRngBefore.Text
+                        If Not TextAnchoring.IsPunctuation(enCharBefore) Then
+                            TextAnchoring.AddIssue fnIssues, "footnote_integrity", doc, en.Reference, _
+                                "Endnote " & en.Index & " reference not placed after punctuation", _
+                                "Place endnote reference after punctuation mark", _
+                                en.Reference.Start, en.Reference.End
+                        End If
+                    End If
+                End If
+            End If
+
+            ' -- Read note text (shared by empty + duplicate) --------
+            On Error Resume Next
+            enNoteText = en.Range.Text
+            If Err.Number <> 0 Then Err.Clear: On Error GoTo 0: GoTo NextEnCombined
+            On Error GoTo 0
+
+            ' -- Integrity: empty ------------------------------------
+            If fnEnabled Then
+                enCleanText = Trim(Replace(Replace(enNoteText, vbCr, ""), vbLf, ""))
+                If Len(enCleanText) = 0 Then
+                    TextAnchoring.AddIssue fnIssues, "footnote_integrity", doc, en.Reference, _
+                        "Endnote " & en.Index & " has empty content", _
+                        "Add content or remove the empty endnote", _
+                        en.Reference.Start, en.Reference.End
+                End If
+            End If
+
+            ' -- Duplicate: build dict / flag duplicates -------------
+            If dupEnabled Then
+                enCleanText = Trim(Replace(Replace(enNoteText, vbCr, ""), vbLf, ""))
+                If Len(enCleanText) > 0 Then
+                    If enDupDict.Exists(enCleanText) Then
+                        Dim enFirstIdx As Long
+                        enFirstIdx = CLng(enDupDict(enCleanText))
+                        TextAnchoring.AddIssue fnIssues, "footnote_integrity", doc, en.Reference, _
+                            "Endnote " & en.Index & " has identical content to endnote " & enFirstIdx, _
+                            "Remove duplicate or differentiate content", _
+                            en.Reference.Start, en.Reference.End, "possible_error"
+                    Else
+                        enDupDict.Add enCleanText, en.Index
+                    End If
+                End If
+            End If
+
+NextEnCombined:
+        Next ei
+    End If
+
+    ' -- Cleanup Harts module-level caches -------------------------
+    If hartsCount > 0 Then
+        On Error Resume Next
+        Application.Run "Rules_FootnoteHarts.ClearFootnoteCaches"
+        If Err.Number <> 0 Then Err.Clear
+        On Error GoTo 0
+    End If
+
+    ' -- Merge into master collection ------------------------------
+    Dim fni As Long
+    For fni = 1 To fnIssues.Count
+        allIssues.Add fnIssues(fni)
+    Next fni
+
+    PerfTimerEnd "footnote_rules_combined"
+    TraceStep "RunFootnoteRules", "completed: " & fnIssues.Count & " issues"
+End Sub
+
+' ============================================================
 '  APPLICATION.RUN DISPATCHER
 '  Calls a public function by string name. Returns a
 '  Collection of issue dictionary, or an empty Collection if
@@ -1411,6 +1691,9 @@ Public Function RunAllPleadingsRules(doc As Document, _
     ' -- Precompute page-range character boundaries (one-time, cheap thereafter) --
     InitPageFilter doc
 
+    ' -- Run fast prechecks (bracket balance, spelling presence, etc.) --
+    Prechecks.RunPrechecks doc, config
+
     ' -- Whitelist rule first (populates whitelistDict) --
     If IsRuleEnabled(config, "custom_term_whitelist") Then
         PerfTimerStart "custom_term_whitelist"
@@ -1421,7 +1704,7 @@ Public Function RunAllPleadingsRules(doc As Document, _
     CheckCancellation
 
     ' -- Spellchecker (spelling + licence/license + check/cheque) --
-    If IsRuleEnabled(config, "spellchecker") Then
+    If IsRuleEnabled(config, "spellchecker") And Not Prechecks.SkipSpelling Then
         PerfTimerStart "spellchecker"
         AddIssuesToCollection allIssues, _
             TryRunRule("Rules_Spelling.Check_Spelling", doc)
@@ -1462,35 +1745,18 @@ Public Function RunAllPleadingsRules(doc As Document, _
         PerfTimerStart "punctuation_find"
         AddIssuesToCollection allIssues, _
             TryRunRule("Rules_Punctuation.Check_SlashStyle", doc)
-        AddIssuesToCollection allIssues, _
-            TryRunRule("Rules_Spacing.Check_SpaceBeforePunct", doc)
         PerfTimerEnd "punctuation_find"
     End If
 
     CheckCancellation
-    ' -- Footnote rules (combined: integrity, not-endnotes, Hart's rules) --
-    If IsRuleEnabled(config, "footnote_rules") Then
-        PerfTimerStart "footnote_rules"
-        AddIssuesToCollection allIssues, _
-            TryRunRule("Rules_FootnoteIntegrity.Check_FootnoteIntegrity", doc)
-        AddIssuesToCollection allIssues, _
-            TryRunRule("Rules_FootnoteHarts.Check_FootnotesNotEndnotes", doc)
-        AddIssuesToCollection allIssues, _
-            TryRunRule("Rules_FootnoteHarts.Check_FootnoteTerminalFullStop", doc)
-        AddIssuesToCollection allIssues, _
-            TryRunRule("Rules_FootnoteHarts.Check_FootnoteInitialCapital", doc)
-        AddIssuesToCollection allIssues, _
-            TryRunRule("Rules_FootnoteHarts.Check_FootnoteAbbreviationDictionary", doc)
-        PerfTimerEnd "footnote_rules"
-    End If
-
-    CheckCancellation
-    ' -- Duplicate footnotes (separate toggle, final-pass check) --
-    If IsRuleEnabled(config, "duplicate_footnotes") Then
-        PerfTimerStart "duplicate_footnotes"
-        AddIssuesToCollection allIssues, _
-            TryRunRule("Rules_FootnoteIntegrity.Check_DuplicateFootnotes", doc)
-        PerfTimerEnd "duplicate_footnotes"
+    ' -- Footnote rules (consolidated single pass) -----------------
+    ' Handles: footnote integrity (sequence, placement, empty),
+    '          footnotes-not-endnotes, Hart's rules (terminal stop,
+    '          initial capital, abbreviation dictionary), and
+    '          duplicate footnote detection.
+    If IsRuleEnabled(config, "footnote_rules") Or _
+       IsRuleEnabled(config, "duplicate_footnotes") Then
+        RunFootnoteRules doc, config, allIssues
     End If
 
     CheckCancellation
@@ -1516,6 +1782,9 @@ RunnerCleanup:
     Dim wasCancelled As Boolean
     wasCancelled = (Err.Number = ERR_RUN_CANCELLED)
     If wasCancelled Then Err.Clear
+
+    ' -- Free prechecks cached data --------------------------------
+    Prechecks.ClearPrechecks
 
     ' -- Restore application state (always runs) ----------------
     On Error Resume Next
@@ -2847,8 +3116,8 @@ End Function
 ' ============================================================
 '  PRIVATE HELPERS
 ' ============================================================
-Private Function IsRuleEnabled(config As Object, _
-                                ruleName As String) As Boolean
+Public Function IsRuleEnabled(config As Object, _
+                               ruleName As String) As Boolean
     If config.Exists(ruleName) Then
         IsRuleEnabled = CBool(config(ruleName))
     Else
