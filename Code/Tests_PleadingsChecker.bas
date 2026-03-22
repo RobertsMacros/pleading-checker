@@ -108,6 +108,8 @@ Public Sub RunAllTests()
     Test_AutoFixSafe_SpaceBeforePunct
     Test_EnsureParentDir_WhitelistPath
     Test_FootnoteUILabels
+    Test_DoubleSpacePayloadConsistency
+    Test_BracketIntegrityCreatesComments
 
     ' -- Print summary --
     Debug.Print ""
@@ -886,4 +888,64 @@ Private Sub Test_FootnoteUILabels()
         AssertEqual PleadingsEngine.GetUILabel(CStr(fnRules(i))), "Footnote Rules", _
             "FootnoteUILabel: " & CStr(fnRules(i)) & " -> Footnote Rules"
     Next i
+End Sub
+
+Private Sub Test_DoubleSpacePayloadConsistency()
+    ' Regression: double-space findings must have internally consistent
+    ' RangeStart/RangeEnd/MatchedText/ReplacementText payloads.
+    ' The finding should describe the exact matched run of spaces and
+    ' the replacement should be a single space (the normalised form).
+    On Error GoTo TestDSPFail
+    Dim doc As Document
+    Set doc = Documents.Add
+
+    doc.Content.Text = "Hello  world." & vbCr
+
+    Dim issues As Collection
+    Set issues = Application.Run("Rules_Spacing.Check_DoubleSpaces", doc)
+
+    AssertTrue issues.Count >= 1, "DSPayload: found >= 1 issue (got " & issues.Count & ")"
+
+    If issues.Count >= 1 Then
+        Dim d As Object: Set d = issues(1)
+        Dim rs As Long: rs = CLng(d("RangeStart"))
+        Dim re As Long: re = CLng(d("RangeEnd"))
+
+        ' RangeEnd - RangeStart must equal the matched run length
+        Dim spanLen As Long: spanLen = re - rs
+        AssertTrue spanLen >= 2, "DSPayload: span covers >= 2 chars (got " & spanLen & ")"
+
+        ' MatchedText must be the full run of spaces
+        Dim mt As String: mt = CStr(d("MatchedText"))
+        AssertEqual Len(mt), spanLen, "DSPayload: MatchedText length equals span"
+        AssertEqual mt, String(spanLen, " "), "DSPayload: MatchedText is all spaces"
+
+        ' ReplacementText must be a single space (normalised form)
+        Dim rt As String: rt = CStr(d("ReplacementText"))
+        AssertEqual rt, " ", "DSPayload: ReplacementText is single space"
+
+        ' AutoFixSafe must be True for double-space findings
+        AssertTrue CBool(d("AutoFixSafe")), "DSPayload: AutoFixSafe is True"
+
+        ' Verify anchor text in the document
+        Dim anchorRng As Range
+        Set anchorRng = doc.Range(rs, re)
+        AssertEqual anchorRng.Text, mt, "DSPayload: document text matches MatchedText"
+    End If
+
+    doc.Close wdDoNotSaveChanges
+    Exit Sub
+
+TestDSPFail:
+    testsFailed = testsFailed + 1
+    testLog = testLog & "  FAIL: Test_DoubleSpacePayloadConsistency (Err " & Err.Number & ": " & Err.Description & ")" & vbCrLf
+    On Error Resume Next
+    doc.Close wdDoNotSaveChanges
+    On Error GoTo 0
+End Sub
+
+Private Sub Test_BracketIntegrityCreatesComments()
+    ' Bracket integrity findings should create comments (comment-safe).
+    AssertTrue PleadingsEngine.ShouldCreateCommentForRule("bracket_integrity"), _
+        "BracketIntegrity: ShouldCreateCommentForRule returns True"
 End Sub

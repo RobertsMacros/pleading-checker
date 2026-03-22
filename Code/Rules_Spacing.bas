@@ -181,7 +181,7 @@ Public Sub ProcessParagraph_DoubleSpaces(doc As Document, paraRange As Range, pa
         Dim dsMsg As String
         If md.Length = 2 Then dsMsg = "Double space found." Else dsMsg = md.Length & " consecutive spaces found."
         Dim dsRng As Range: Set dsRng = TextAnchoring.SafeRange(doc, dsStart, dsEnd)
-        TextAnchoring.AddIssue issues, RULE_DOUBLE_SPACES, doc, dsRng, dsMsg, "Remove extra space(s)", dsStart + 1, dsEnd, "error", True, "", String(md.Length - 1, " "), "exact_text", "high"
+        TextAnchoring.AddIssue issues, RULE_DOUBLE_SPACES, doc, dsRng, dsMsg, "Remove extra space(s)", dsStart, dsEnd, "error", True, " ", String(md.Length, " "), "exact_text", "high"
 NextDoubleMatchPP:
     Next md
 

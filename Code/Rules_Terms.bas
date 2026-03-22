@@ -193,12 +193,22 @@ Private Sub EnsureParentDir(ByVal filePath As String)
     parts = Split(parentDir, sep)
     Dim built As String
     built = parts(0) ' drive letter or first segment
+    ' Mac absolute paths start with "/" so parts(0) is empty;
+    ' prepend the separator so MkDir sees "/Users/..." not "Users/...".
+    If Len(built) = 0 Then built = sep
     Dim i As Long
     For i = 1 To UBound(parts)
-        built = built & sep & parts(i)
+        ' Skip empty segments (e.g. double separators)
+        If Len(parts(i)) = 0 Then GoTo NextSegment
+        If built = sep Then
+            built = sep & parts(i)
+        Else
+            built = built & sep & parts(i)
+        End If
         If Dir(built, vbDirectory) = "" Then
             MkDir built
         End If
+NextSegment:
     Next i
     Err.Clear
     On Error GoTo 0

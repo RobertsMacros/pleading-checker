@@ -113,7 +113,28 @@ Private Sub InitSeedTerms()
         "terra nullius", "ultra vires", "vice versa", _
         "vis-a-vis", "viz")
     seedTerms = TextAnchoring.MergeArrays3(batch1, batch2, batch3)
+    ' Sort longest-first so that "ex post facto" is matched before
+    ' "ex post", preventing shorter terms from shadowing longer ones.
+    SortLongestFirst seedTerms
     seedInitialised = True
+End Sub
+
+' ------------------------------------------------------------
+'  Sort a Variant array of strings in descending order of length
+'  (simple bubble sort -- only runs once at init time)
+' ------------------------------------------------------------
+Private Sub SortLongestFirst(ByRef arr As Variant)
+    Dim i As Long, j As Long
+    Dim tmp As String
+    For i = LBound(arr) To UBound(arr) - 1
+        For j = i + 1 To UBound(arr)
+            If Len(CStr(arr(j))) > Len(CStr(arr(i))) Then
+                tmp = arr(i)
+                arr(i) = arr(j)
+                arr(j) = tmp
+            End If
+        Next j
+    Next i
 End Sub
 
 ' ------------------------------------------------------------

@@ -10,8 +10,14 @@ Attribute VB_Name = "Rules_NumberFormats"
 '   Check_CurrencyNumberFormat  (Rule19)
 '
 ' Dependencies:
-'   - TextAnchoring.bas (FindAll, AddIssue, SafeRange,
-'     GetDateFormatPref, IsInPageRange)
+'   - TextAnchoring.bas (AddIssue, SafeRange, FindAll,
+'     GetDateFormatPref, IsInPageRange, IsPastPageFilter,
+'     CreateRegex)
+'
+' NOTE: Date/time detection uses VBScript.RegExp over paragraph
+' text (not Word Find wildcards) for reliable pattern matching.
+' Currency detection still uses Word Find wildcards with valid
+' syntax (the @ quantifier, which Word supports).
 ' ============================================================
 Option Explicit
 
@@ -45,20 +51,66 @@ Private Function IsValidMonth(ByVal monthName As String) As Boolean
     IsValidMonth = False
 End Function
 
-' -- Helper: search and collect date/time occurrences ----------
-Private Sub FindWithWildcard(doc As Document, ByVal pattern As String, results As Collection, ByVal formatType As String)
-    Dim matches As Collection
-    Set matches = TextAnchoring.FindAll(doc, pattern, False, False, True)
-    Dim i As Long
-    For i = 1 To matches.Count
-        Dim m As Variant: m = matches(i)
-        Dim info(0 To 3) As Variant
-        info(0) = formatType
-        info(1) = CStr(m(2))
-        info(2) = CLng(m(0))
-        info(3) = CLng(m(1))
-        results.Add info
-    Next i
+' -- Helper: scan a paragraph with a regex and collect matches --
+' Each match is added to results as an Array(formatType, matchText,
+' docStart, docEnd).  paraStart and listPrefixLen are used to map
+' regex positions back to document positions.
+Private Sub RegexScanParagraph(ByVal re As Object, _
+                                ByVal paraText As String, _
+                                ByVal paraStart As Long, _
+                                ByVal listPrefixLen As Long, _
+                                ByRef results As Collection, _
+                                ByVal formatType As String)
+    Dim mc As Object
+    Set mc = re.Execute(paraText)
+    Dim m As Object
+    For Each m In mc
+        ' Map regex 0-based offset to document position
+        Dim docStart As Long
+        docStart = paraStart + m.FirstIndex - listPrefixLen
+        Dim docEnd As Long
+        docEnd = docStart + m.Length
+        If docStart >= 0 Then
+            Dim info(0 To 3) As Variant
+            info(0) = formatType
+            info(1) = m.Value
+            info(2) = docStart
+            info(3) = docEnd
+            results.Add info
+        End If
+    Next m
+End Sub
+
+' -- Helper: iterate paragraphs and run a regex, collecting results --
+' Respects page-range filtering.
+Private Sub FindWithRegex(doc As Document, _
+                           ByVal re As Object, _
+                           ByRef results As Collection, _
+                           ByVal formatType As String)
+    Dim para As Paragraph
+    On Error Resume Next
+    For Each para In doc.Paragraphs
+        Err.Clear
+        Dim paraRange As Range
+        Set paraRange = para.Range
+        If Err.Number <> 0 Then Err.Clear: GoTo NextParaFWR
+        If TextAnchoring.IsPastPageFilter(paraRange.Start) Then Exit For
+        If Not TextAnchoring.IsInPageRange(paraRange) Then GoTo NextParaFWR
+
+        Dim paraText As String
+        paraText = paraRange.Text
+        If Err.Number <> 0 Then Err.Clear: GoTo NextParaFWR
+        If Len(paraText) < 3 Then GoTo NextParaFWR
+
+        Dim paraStart As Long
+        paraStart = paraRange.Start
+        Dim listPrefixLen As Long
+        listPrefixLen = TextAnchoring.GetListPrefixLen(para, paraText)
+
+        RegexScanParagraph re, paraText, paraStart, listPrefixLen, results, formatType
+NextParaFWR:
+    Next para
+    On Error GoTo 0
 End Sub
 
 ' -- Helper: check if a time match looks like a clause reference,
@@ -163,6 +215,8 @@ End Function
 ' -- Check format consistency for a single symbol --------------
 '  Searches for words, abbreviated, and full_numeric formats,
 '  determines the dominant format, and flags minorities.
+'  NOTE: Currency detection still uses Word Find wildcards with
+'  valid syntax (@ = one or more of preceding character class).
 Private Sub CheckSymbolConsistency(doc As Document, _
                                     sym As String, _
                                     symLabel As String, _
@@ -293,11 +347,36 @@ End Function
 '  determines the dominant style, and flags deviations.
 '  Also checks for mixed 12-hour / 24-hour time formats.
 '
+'  Uses VBScript.RegExp over paragraph text (not Word Find
+'  wildcards) to avoid invalid {1,2} / {2,} quantifier issues.
+'
 '  24-hour detection recognises 00:00 through 23:59 with
 '  context filtering to exclude clause references and ratios.
 ' ================================================================
 Public Function Check_DateTimeFormat(doc As Document) As Collection
     Dim issues As New Collection
+
+    ' ==========================================================
+    '  Build regex objects (once per run)
+    ' ==========================================================
+    ' UK date: "1 January 2024" or "12 March 2025"
+    Dim reUK As Object
+    Set reUK = TextAnchoring.CreateRegex("\b(\d{1,2}) ([A-Z][a-z]{2,}) (\d{4})\b")
+    ' US date: "January 1, 2024" or "March 12, 2025"
+    Dim reUS As Object
+    Set reUS = TextAnchoring.CreateRegex("\b([A-Z][a-z]{2,}) (\d{1,2}), (\d{4})\b")
+    ' Numeric date: "01/02/2024" or "1/2/24"
+    Dim reNum As Object
+    Set reNum = TextAnchoring.CreateRegex("\b(\d{1,2})/(\d{1,2})/(\d{2,4})\b")
+    ' 12-hour time: "2:30 PM", "11:00 am" (colon separator)
+    Dim re12Colon As Object
+    Set re12Colon = TextAnchoring.CreateRegex("\b(\d{1,2}):(\d{2})\s*([AaPp][Mm])\b")
+    ' 12-hour time: "2.30 pm" (dot separator)
+    Dim re12Dot As Object
+    Set re12Dot = TextAnchoring.CreateRegex("\b(\d{1,2})\.(\d{2})\s*([AaPp][Mm])\b")
+    ' 24-hour time: "09:30", "23:15" (exactly 2 digits each side)
+    Dim re24 As Object
+    Set re24 = TextAnchoring.CreateRegex("\b(\d{2}):(\d{2})\b")
 
     ' ==========================================================
     '  PASS 1: Find all date occurrences
@@ -309,21 +388,16 @@ Public Function Check_DateTimeFormat(doc As Document) As Collection
     dateCounts.Add "US", 0
     dateCounts.Add "numeric", 0
 
-    ' -- UK format: "1 January 2024" or "12 March 2025" ------
-    ' VBA wildcard: one or two digits, space, word, space, four digits
+    ' -- UK dates --
     Dim ukResults As New Collection
-    FindWithWildcard doc, "[0-9]{1,2} [A-Z][a-z]{2,} [0-9]{4}", ukResults, "UK"
-
-    ' Validate UK results (check month name)
-    Dim ukItem As Variant
+    FindWithRegex doc, reUK, ukResults, "UK"
     Dim i As Long
     For i = 1 To ukResults.Count
         Dim ukInfo As Variant
         ukInfo = ukResults(i)
         Dim ukText As String
         ukText = CStr(ukInfo(1))
-
-        ' Extract month name (between first and last space)
+        ' Validate: middle token must be a real month name
         Dim parts() As String
         parts = Split(ukText, " ")
         If UBound(parts) >= 2 Then
@@ -334,16 +408,14 @@ Public Function Check_DateTimeFormat(doc As Document) As Collection
         End If
     Next i
 
-    ' -- US format: "January 1, 2024" or "March 12, 2025" ----
+    ' -- US dates --
     Dim usResults As New Collection
-    FindWithWildcard doc, "[A-Z][a-z]{2,} [0-9]{1,2}, [0-9]{4}", usResults, "US"
-
+    FindWithRegex doc, reUS, usResults, "US"
     For i = 1 To usResults.Count
         Dim usInfo As Variant
         usInfo = usResults(i)
         Dim usText As String
         usText = CStr(usInfo(1))
-
         parts = Split(usText, " ")
         If UBound(parts) >= 0 Then
             If IsValidMonth(parts(0)) Then
@@ -353,10 +425,9 @@ Public Function Check_DateTimeFormat(doc As Document) As Collection
         End If
     Next i
 
-    ' -- Numeric format: "01/02/2024" or "1/2/24" -------------
+    ' -- Numeric dates --
     Dim numResults As New Collection
-    FindWithWildcard doc, "[0-9]{1,2}/[0-9]{1,2}/[0-9]{2,4}", numResults, "numeric"
-
+    FindWithRegex doc, reNum, numResults, "numeric"
     For i = 1 To numResults.Count
         dateFinds.Add numResults(i)
         dateCounts("numeric") = dateCounts("numeric") + 1
@@ -433,37 +504,50 @@ NextDateFind:
     timeCounts.Add "12hr", 0
     timeCounts.Add "24hr", 0
 
-    ' -- 12-hour format: "2:30 PM", "11:00 am" ----------------
-    Dim time12Results As New Collection
-    FindWithWildcard doc, "[0-9]{1,2}:[0-9]{2} [AaPp][Mm]", time12Results, "12hr"
+    ' Use a dictionary to track seen ranges and avoid duplicates
+    Dim seenTimeRanges As Object
+    Set seenTimeRanges = CreateObject("Scripting.Dictionary")
 
-    For i = 1 To time12Results.Count
-        timeFinds.Add time12Results(i)
-        timeCounts("12hr") = timeCounts("12hr") + 1
+    ' -- 12-hour format: colon separator (e.g. "2:30 PM") ------
+    Dim time12ColonResults As New Collection
+    FindWithRegex doc, re12Colon, time12ColonResults, "12hr"
+    For i = 1 To time12ColonResults.Count
+        Dim t12ci As Variant: t12ci = time12ColonResults(i)
+        Dim t12cKey As String: t12cKey = CLng(t12ci(2)) & ":" & CLng(t12ci(3))
+        If Not seenTimeRanges.Exists(t12cKey) Then
+            seenTimeRanges.Add t12cKey, True
+            timeFinds.Add t12ci
+            timeCounts("12hr") = timeCounts("12hr") + 1
+        End If
     Next i
 
-    ' Also catch dot-separated 12hr times: "2.30 pm"
+    ' -- 12-hour format: dot separator (e.g. "2.30 pm") ---------
     Dim time12DotResults As New Collection
-    FindWithWildcard doc, "[0-9]{1,2}.[0-9]{2} [AaPp][Mm]", time12DotResults, "12hr"
-
+    FindWithRegex doc, re12Dot, time12DotResults, "12hr"
     For i = 1 To time12DotResults.Count
-        timeFinds.Add time12DotResults(i)
-        timeCounts("12hr") = timeCounts("12hr") + 1
+        Dim t12di As Variant: t12di = time12DotResults(i)
+        Dim t12dKey As String: t12dKey = CLng(t12di(2)) & ":" & CLng(t12di(3))
+        If Not seenTimeRanges.Exists(t12dKey) Then
+            seenTimeRanges.Add t12dKey, True
+            timeFinds.Add t12di
+            timeCounts("12hr") = timeCounts("12hr") + 1
+        End If
     Next i
 
     ' -- 24-hour format: HH:MM (00:00 through 23:59) ----------
-    '  Search for two-digit colon two-digit patterns.
-    '  Filter: must be valid 00-23 hour and 00-59 minute.
-    '  Exclude matches followed by AM/PM (those are 12-hour).
-    '  Exclude matches in non-time context (clause refs, ratios).
     Dim time24Results As New Collection
-    FindWithWildcard doc, "[0-9]{2}:[0-9]{2}", time24Results, "24hr"
+    FindWithRegex doc, re24, time24Results, "24hr"
 
     For i = 1 To time24Results.Count
         Dim t24Info As Variant
         t24Info = time24Results(i)
         Dim t24Text As String
         t24Text = CStr(t24Info(1))
+
+        ' Skip if we already saw this range as a 12-hour match
+        Dim t24Key As String
+        t24Key = CLng(t24Info(2)) & ":" & CLng(t24Info(3))
+        If seenTimeRanges.Exists(t24Key) Then GoTo NextTime24
 
         ' Parse hour and minute
         Dim colonPos As Long
@@ -526,6 +610,7 @@ NextDateFind:
                 ' drive the dominant-style count (but are still collected
                 ' so they can be flagged if a clear dominant emerges).
                 If is24hrTime Then
+                    seenTimeRanges.Add t24Key, True
                     If hourVal >= 13 Or hourVal = 0 Then
                         ' Definite 24-hour: counts toward dominance
                         timeFinds.Add t24Info
@@ -545,6 +630,7 @@ NextDateFind:
                 End If
             End If
         End If
+NextTime24:
     Next i
 
     ' -- Determine dominant time format and flag deviations ----
