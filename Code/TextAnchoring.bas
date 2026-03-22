@@ -67,6 +67,24 @@ End Function
 
 ' ============================================================
 '  ISSUE-DICT FACTORY  (single canonical implementation)
+'
+'  Required fields (always present in the returned dictionary):
+'    RuleName        - String : rule identifier (e.g. "Spacing")
+'    Location        - String : human-readable location text
+'    Issue           - String : description of the problem found
+'    Suggestion      - String : recommended fix
+'    RangeStart      - Long   : character start position in document
+'    RangeEnd        - Long   : character end position in document
+'    Severity        - String : "error" | "warning" | "info"
+'    AutoFixSafe     - Boolean: True if auto-fix can be applied safely
+'    ReplacementText - String : replacement text (empty string when
+'                               AutoFixSafe is False)
+'    MatchedText     - String : the original text that was matched
+'    AnchorKind      - String : anchoring strategy ("exact_text", etc.)
+'    ConfidenceLabel - String : confidence level ("high","medium","low")
+'
+'  Optional fields (may be omitted or defaulted):
+'    SourceParagraphIndex - Long : paragraph index (default 0)
 ' ============================================================
 Public Function CreateIssueDict(ByVal ruleName_ As String, _
                                 ByVal location_ As String, _
@@ -91,12 +109,84 @@ Public Function CreateIssueDict(ByVal ruleName_ As String, _
     d("RangeEnd") = rangeEnd_
     d("Severity") = severity_
     d("AutoFixSafe") = autoFixSafe_
-    If autoFixSafe_ Then d("ReplacementText") = replacementText_
+    If autoFixSafe_ Then
+        d("ReplacementText") = replacementText_
+    Else
+        d("ReplacementText") = ""
+    End If
     d("MatchedText") = matchedText_
     d("AnchorKind") = anchorKind_
     d("ConfidenceLabel") = confidenceLabel_
     d("SourceParagraphIndex") = sourceParagraphIndex_
     Set CreateIssueDict = d
+End Function
+
+' ============================================================
+'  FINDING COMPLETENESS VALIDATOR
+'  Checks that a finding dictionary has all required fields.
+'  Returns True if valid, False if missing required fields.
+'
+'  Required fields:
+'    RuleName, Location, Issue, Suggestion, RangeStart, RangeEnd,
+'    Severity, AutoFixSafe, MatchedText, AnchorKind, ConfidenceLabel,
+'    ReplacementText
+'
+'  Optional fields:
+'    SourceParagraphIndex (default 0)
+' ============================================================
+Public Function ValidateFindingCompleteness(ByVal finding As Object) As Boolean
+    ValidateFindingCompleteness = False
+    If finding Is Nothing Then Exit Function
+    On Error Resume Next
+    If TypeName(finding) <> "Dictionary" Then
+        On Error GoTo 0
+        Exit Function
+    End If
+    ' Check all required keys exist
+    Dim requiredKeys As Variant
+    requiredKeys = Array("RuleName", "Location", "Issue", "Suggestion", _
+                         "RangeStart", "RangeEnd", "Severity", "AutoFixSafe", _
+                         "MatchedText", "AnchorKind", "ConfidenceLabel", _
+                         "ReplacementText")
+    Dim k As Variant
+    For Each k In requiredKeys
+        If Not finding.Exists(CStr(k)) Then
+            Debug.Print "ValidateFinding: missing key '" & CStr(k) & "'"
+            On Error GoTo 0
+            Exit Function
+        End If
+    Next k
+    On Error GoTo 0
+    ValidateFindingCompleteness = True
+End Function
+
+' ============================================================
+'  SAFE ISSUE PROPERTY GETTER
+'  Avoids repetitive late-bound key lookups with error handling.
+'  Returns the value for the given key, or the default if not found.
+' ============================================================
+Public Function GetIssuePropSafe(ByVal finding As Object, _
+                                  ByVal propName As String, _
+                                  Optional ByVal defaultVal As Variant = "") As Variant
+    On Error Resume Next
+    If finding Is Nothing Then
+        GetIssuePropSafe = defaultVal
+        Exit Function
+    End If
+    If TypeName(finding) = "Dictionary" Then
+        If finding.Exists(propName) Then
+            GetIssuePropSafe = finding(propName)
+        Else
+            GetIssuePropSafe = defaultVal
+        End If
+    Else
+        GetIssuePropSafe = CallByName(finding, propName, VbGet)
+        If Err.Number <> 0 Then
+            GetIssuePropSafe = defaultVal
+            Err.Clear
+        End If
+    End If
+    On Error GoTo 0
 End Function
 
 ' ============================================================

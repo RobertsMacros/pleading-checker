@@ -853,13 +853,12 @@ Private Sub RefreshCustomRulesList()
 End Sub
 
 ' ============================================================
-'  RUN BUTTON
+'  GATHER FORM CONFIG (Section G)
+'  Collects all UI state into a single dictionary for the engine.
 ' ============================================================
-Private Sub btnRun_Click()
-    Set targetDoc = PleadingsEngine.GetTargetDocument()
-    If targetDoc Is Nothing Then
-        Exit Sub
-    End If
+Private Function GatherFormConfig() As Object
+    Dim cfg As Object
+    Set cfg = CreateObject("Scripting.Dictionary")
 
     ' Sync rule config from dynamic checkboxes
     Dim i As Long
@@ -870,44 +869,47 @@ Private Sub btnRun_Click()
             ruleConfig(rName) = CBool(ruleCheckboxes(i).Value)
         End If
     Next i
+    Set cfg("ruleConfig") = ruleConfig
 
-    ' Sync custom rules to engine
-    SyncCustomRulesToEngine
+    ' Page range (ignore placeholder text)
+    cfg("pageRange") = GetPageRangeInput()
 
-    ' Set page range from flexible input (ignore placeholder text)
-    PleadingsEngine.SetPageRangeFromString GetPageRangeInput()
-
-    ' Set mode toggles from dropdowns
+    ' Spelling mode
     If cboSpelling.ListIndex = 1 Then
-        PleadingsEngine.SetSpellingMode "US"
+        cfg("spellingMode") = "US"
     Else
-        PleadingsEngine.SetSpellingMode "UK"
+        cfg("spellingMode") = "UK"
     End If
 
+    ' Quote nesting
     If cboQuoteNesting.ListIndex = 1 Then
-        PleadingsEngine.SetQuoteNesting "DOUBLE"
+        cfg("quoteNesting") = "DOUBLE"
     Else
-        PleadingsEngine.SetQuoteNesting "SINGLE"
+        cfg("quoteNesting") = "SINGLE"
     End If
 
+    ' Smart quotes
     If cboSmartQuotes.ListIndex = 1 Then
-        PleadingsEngine.SetSmartQuotePref "STRAIGHT"
+        cfg("smartQuotePref") = "STRAIGHT"
     Else
-        PleadingsEngine.SetSmartQuotePref "SMART"
+        cfg("smartQuotePref") = "SMART"
     End If
 
+    ' Date format
     If cboDateFormat.ListIndex = 1 Then
-        PleadingsEngine.SetDateFormatPref "US"
+        cfg("dateFormatPref") = "US"
     Else
-        PleadingsEngine.SetDateFormatPref "UK"
+        cfg("dateFormatPref") = "UK"
     End If
 
+    ' Non-English terms
     If cboNonEngTerms.ListIndex = 1 Then
-        PleadingsEngine.SetNonEngTermPref "REGULAR"
+        cfg("nonEngTermPref") = "REGULAR"
     Else
-        PleadingsEngine.SetNonEngTermPref "ITALICS"
+        cfg("nonEngTermPref") = "ITALICS"
     End If
 
+    ' Term format
     Dim termFmt As String
     Select Case cboTermFormat.ListIndex
         Case 0: termFmt = "BOLD"
@@ -915,21 +917,40 @@ Private Sub btnRun_Click()
         Case 2: termFmt = "ITALIC"
         Case Else: termFmt = "NONE"
     End Select
-    PleadingsEngine.SetTermFormatPref termFmt
+    cfg("termFormatPref") = termFmt
 
-    Dim termQt As String
+    ' Term quotes
     If cboTermQuotes.ListIndex = 0 Then
-        termQt = "SINGLE"
+        cfg("termQuotePref") = "SINGLE"
     Else
-        termQt = "DOUBLE"
+        cfg("termQuotePref") = "DOUBLE"
     End If
-    PleadingsEngine.SetTermQuotePref termQt
 
+    ' Space style
     If cboSpaceStyle.ListIndex = 1 Then
-        PleadingsEngine.SetSpaceStylePref "TWO"
+        cfg("spaceStylePref") = "TWO"
     Else
-        PleadingsEngine.SetSpaceStylePref "ONE"
+        cfg("spaceStylePref") = "ONE"
     End If
+
+    Set GatherFormConfig = cfg
+End Function
+
+' ============================================================
+'  RUN BUTTON
+' ============================================================
+Private Sub btnRun_Click()
+    Set targetDoc = PleadingsEngine.GetTargetDocument()
+    If targetDoc Is Nothing Then
+        Exit Sub
+    End If
+
+    ' Sync custom rules to engine
+    SyncCustomRulesToEngine
+
+    ' Gather all UI state into a single config object
+    Dim formCfg As Object
+    Set formCfg = GatherFormConfig()
 
     ' Reset cancel flag and bind Escape key to cancel
     PleadingsEngine.ResetCancelRun
@@ -942,7 +963,7 @@ Private Sub btnRun_Click()
 
     On Error GoTo RunCancelled
 
-    Set lastResults = PleadingsEngine.RunAllPleadingsRules(targetDoc, ruleConfig)
+    Set lastResults = PleadingsEngine.RunCheckerFromFormConfig(targetDoc, formCfg)
 
     ' Show performance summary in Immediate window
     Dim slowestRules As String

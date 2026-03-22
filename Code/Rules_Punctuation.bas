@@ -645,7 +645,7 @@ Public Sub ProcessParagraph_DashUsage(doc As Document, paraRange As Range, _
         Set hrRng = TextAnchoring.SafeRange(doc, hyphenPos, hrEnd)
         TextAnchoring.AddIssue issues, RULE_NAME_DASH, doc, hrRng, _
             "Hyphen used in number range. Use an en-dash (" & enDash & ") for ranges.", _
-            "Replace hyphen with en-dash", hyphenPos, hrEnd, "error", True, enDash
+            "Replace hyphen with en-dash", hyphenPos, hrEnd, "error", False
     Next hm
 
     ' --- Check 2: Double-hyphen "--" should be em-dash ---
@@ -662,7 +662,7 @@ Public Sub ProcessParagraph_DashUsage(doc As Document, paraRange As Range, _
         Set dhRng = TextAnchoring.SafeRange(doc, dhStart, dhEnd)
         TextAnchoring.AddIssue issues, RULE_NAME_DASH, doc, dhRng, _
             "Double-hyphen found. Use an em-dash (" & emDash & ") instead.", _
-            "Replace with em-dash", dhStart, dhEnd, "error", True, emDash
+            "Replace with em-dash", dhStart, dhEnd, "error", False
     Next dhm
 
     ' --- Check 3: En-dash between letters (compound word) ---
@@ -691,7 +691,7 @@ Public Sub ProcessParagraph_DashUsage(doc As Document, paraRange As Range, _
                 Set enRng = TextAnchoring.SafeRange(doc, enStart, enEnd)
                 TextAnchoring.AddIssue issues, RULE_NAME_DASH, doc, enRng, _
                     "En-dash (" & enDash & ") used between words. Use a hyphen (-) for compound words.", _
-                    "Replace en-dash with hyphen", enStart, enEnd, "error", True, "-"
+                    "Replace en-dash with hyphen", enStart, enEnd, "error", False
             End If
 
             ' Check 4: Spaced en-dash (" - ") -> should be em-dash (" -- ")

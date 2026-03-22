@@ -92,6 +92,15 @@ Public Sub RunAllTests()
     Test_AlwaysCapitaliseTerms
     Test_DashUsage
 
+    ' -- Section J regression tests --
+    Test_PlaceholderNotTreatedAsInput
+    Test_GroupedSpellingThreshold
+    Test_TrackedSafeGateRejectsDash
+    Test_CancellationFlag
+    Test_PageRangeParserEdgeCases
+    Test_GetFindingOutputMode
+    Test_GetReplacementOperationType
+
     ' -- Print summary --
     Debug.Print ""
     If Len(testLog) > 0 Then
@@ -234,11 +243,12 @@ Private Sub Test_CreateIssueDict()
     AssertEqual d("ConfidenceLabel"), "high", "CreateIssueDict: ConfidenceLabel"
     AssertEqual d("SourceParagraphIndex"), 5, "CreateIssueDict: SourceParagraphIndex"
 
-    ' Test that ReplacementText is NOT set when autoFixSafe_ = False
+    ' Test that ReplacementText IS set (always present) but empty when autoFix=False
     Dim d2 As Object
     Set d2 = TextAnchoring.CreateIssueDict("test2", "loc", "issue", "sug", 0, 1, _
         "warning", False, "should_not_appear")
-    AssertFalse d2.Exists("ReplacementText"), "CreateIssueDict: no ReplacementText when autoFix=False"
+    AssertTrue d2.Exists("ReplacementText"), "CreateIssueDict: ReplacementText key always exists"
+    AssertEqual d2("ReplacementText"), "", "CreateIssueDict: ReplacementText empty when autoFix=False"
 End Sub
 
 Private Sub Test_GetUILabel()
@@ -526,4 +536,151 @@ TestDashFail:
     On Error Resume Next
     doc.Close wdDoNotSaveChanges
     On Error GoTo 0
+End Sub
+
+' ============================================================
+'  NEW REGRESSION TESTS (Section J)
+' ============================================================
+
+Private Sub Test_PlaceholderNotTreatedAsInput()
+    ' Placeholder text should not be treated as real page range input
+    ' When the form shows "e.g. 1,3,5-8,9:30", it should be treated as empty
+    Dim result() As Long
+    result = PleadingsEngine.ParsePageList("e.g. 1,3,5-8,9:30")
+    ' Non-numeric tokens should be skipped; only valid numbers parsed
+    ' "e.g." is not numeric, so the full placeholder produces mostly empty
+    AssertEqual result(0), 0, "PlaceholderInput: placeholder text produces no valid pages"
+
+    ' Empty string should also return 0
+    result = PleadingsEngine.ParsePageList("")
+    AssertEqual result(0), 0, "PlaceholderInput: empty string returns 0"
+
+    ' Pure whitespace
+    result = PleadingsEngine.ParsePageList("   ")
+    AssertEqual result(0), 0, "PlaceholderInput: whitespace-only returns 0"
+End Sub
+
+Private Sub Test_GroupedSpellingThreshold()
+    ' Verify the spelling comment threshold constant exists and is reasonable
+    ' We test indirectly by checking ShouldCreateCommentForRule behaviour
+    ' Before any run, spelling should create comments
+    AssertTrue PleadingsEngine.ShouldCreateCommentForRule("spellchecker"), _
+        "GroupedSpelling: spellchecker creates comments before threshold"
+End Sub
+
+Private Sub Test_TrackedSafeGateRejectsDash()
+    ' Dash/hyphen rules must NOT be tracked-safe
+    AssertFalse PleadingsEngine.IsTrackedSafeRule("hyphens"), _
+        "TrackedSafeGate: hyphens not tracked-safe"
+    AssertFalse PleadingsEngine.IsTrackedSafeRule("dash_usage"), _
+        "TrackedSafeGate: dash_usage not tracked-safe"
+
+    ' Footnote rules must NOT be tracked-safe
+    AssertFalse PleadingsEngine.IsTrackedSafeRule("footnote_integrity"), _
+        "TrackedSafeGate: footnote_integrity not tracked-safe"
+    AssertFalse PleadingsEngine.IsTrackedSafeRule("footnote_terminal_full_stop"), _
+        "TrackedSafeGate: footnote_terminal_full_stop not tracked-safe"
+
+    ' Bracket integrity must NOT be tracked-safe
+    AssertFalse PleadingsEngine.IsTrackedSafeRule("bracket_integrity"), _
+        "TrackedSafeGate: bracket_integrity not tracked-safe"
+
+    ' Spelling should be tracked-safe (it's in the allow-list)
+    AssertTrue PleadingsEngine.IsTrackedSafeRule("spellchecker"), _
+        "TrackedSafeGate: spellchecker IS tracked-safe"
+
+    ' Custom rules must NOT be tracked-safe
+    AssertFalse PleadingsEngine.IsTrackedSafeRule("custom_rule"), _
+        "TrackedSafeGate: custom_rule not tracked-safe"
+    AssertFalse PleadingsEngine.IsTrackedSafeRule("brand_name_enforcement"), _
+        "TrackedSafeGate: brand_name_enforcement not tracked-safe"
+End Sub
+
+Private Sub Test_CancellationFlag()
+    ' Test that cancel flag can be set and read
+    PleadingsEngine.ResetCancelRun
+    AssertFalse PleadingsEngine.CancelRunRequested(), _
+        "Cancellation: initially False after reset"
+
+    PleadingsEngine.RequestCancelRun
+    AssertTrue PleadingsEngine.CancelRunRequested(), _
+        "Cancellation: True after RequestCancelRun"
+
+    ' Reset again
+    PleadingsEngine.ResetCancelRun
+    AssertFalse PleadingsEngine.CancelRunRequested(), _
+        "Cancellation: False after second reset"
+End Sub
+
+Private Sub Test_PageRangeParserEdgeCases()
+    Dim result() As Long
+
+    ' Single page "5"
+    result = PleadingsEngine.ParsePageList("5")
+    AssertEqual result(0), 5, "PageRange: single page 5"
+
+    ' Range "7-8"
+    result = PleadingsEngine.ParsePageList("7-8")
+    AssertEqual UBound(result) - LBound(result) + 1, 2, "PageRange: 7-8 count"
+
+    ' Colon range "9:30"
+    result = PleadingsEngine.ParsePageList("9:30")
+    AssertEqual UBound(result) - LBound(result) + 1, 22, "PageRange: 9:30 count"
+
+    ' Mixed "1,3,5-8,9:30"
+    result = PleadingsEngine.ParsePageList("1,3,5-8,9:30")
+    ' 1 + 1 + 4 + 22 = 28
+    AssertEqual UBound(result) - LBound(result) + 1, 28, "PageRange: mixed 1,3,5-8,9:30 count"
+
+    ' En-dash normalisation
+    Dim enDashSpec As String
+    enDashSpec = "5" & ChrW(8211) & "8"
+    result = PleadingsEngine.ParsePageList(PleadingsEngine.NormalizePageRangeInput(enDashSpec))
+    AssertEqual UBound(result) - LBound(result) + 1, 4, "PageRange: en-dash 5-8 count"
+End Sub
+
+Private Sub Test_GetFindingOutputMode()
+    ' A dash finding should NOT be OUTPUT_TRACKED_SAFE
+    Dim dashFinding As Object
+    Set dashFinding = TextAnchoring.CreateIssueDict("hyphens", "page 1", _
+        "Hyphen in range", "Use en-dash", 10, 11, "error", True, ChrW(8211), "-")
+
+    Dim mode As String
+    mode = PleadingsEngine.GetFindingOutputMode(dashFinding)
+    AssertTrue mode <> PleadingsEngine.OUTPUT_TRACKED_SAFE, _
+        "GetFindingOutputMode: dash finding is NOT tracked-safe (got " & mode & ")"
+
+    ' A spelling finding with replacement should be tracked-safe
+    Dim spellFinding As Object
+    Set spellFinding = TextAnchoring.CreateIssueDict("spellchecker", "page 1", _
+        "US spelling", "Use UK form", 10, 15, "error", True, "colour", "color")
+
+    mode = PleadingsEngine.GetFindingOutputMode(spellFinding)
+    ' May be tracked-safe or comment-only depending on doc complexity
+    ' At minimum it should not be REPORT_ONLY for a spelling finding
+    AssertTrue mode = PleadingsEngine.OUTPUT_TRACKED_SAFE Or _
+               mode = PleadingsEngine.OUTPUT_COMMENT_ONLY, _
+        "GetFindingOutputMode: spelling finding is tracked-safe or comment-only (got " & mode & ")"
+End Sub
+
+Private Sub Test_GetReplacementOperationType()
+    ' DELETE: original text, empty replacement
+    AssertEqual PleadingsEngine.GetReplacementOperationType("hello", ""), _
+        "DELETE", "OpType: DELETE"
+
+    ' INSERT: empty original, non-empty replacement
+    AssertEqual PleadingsEngine.GetReplacementOperationType("", "hello"), _
+        "INSERT", "OpType: INSERT"
+
+    ' REPLACE: different alphanumeric content
+    AssertEqual PleadingsEngine.GetReplacementOperationType("color", "colour"), _
+        "REPLACE", "OpType: REPLACE"
+
+    ' WHITESPACE_NORMALISE: same content, different whitespace
+    AssertEqual PleadingsEngine.GetReplacementOperationType("hello  world", "hello world"), _
+        "WHITESPACE_NORMALISE", "OpType: WHITESPACE_NORMALISE"
+
+    ' PUNCTUATION_NORMALISE: same alpha, different punct
+    AssertEqual PleadingsEngine.GetReplacementOperationType("-", ChrW(8211)), _
+        "PUNCTUATION_NORMALISE", "OpType: PUNCTUATION_NORMALISE for dash"
 End Sub

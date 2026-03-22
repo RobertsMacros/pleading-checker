@@ -42,9 +42,19 @@ Private ruleConfig      As Object
 Public gCancelRun       As Boolean
 Private Const ERR_RUN_CANCELLED As Long = vbObjectError + 513
 
-' -- Grouped report / comment suppression infrastructure --
+' -- Finding output mode constants --
+Public Const OUTPUT_TRACKED_SAFE As String = "TRACKED_SAFE"
+Public Const OUTPUT_COMMENT_ONLY As String = "COMMENT_ONLY"
+Public Const OUTPUT_REPORT_ONLY As String = "REPORT_ONLY"
+Public Const OUTPUT_GROUPED_REPORT As String = "GROUPED_REPORT"
+
+' -- Comment spam / grouped report thresholds --
 Private Const SPELLING_COMMENT_THRESHOLD As Long = 25
 Private Const FOOTNOTE_COMMENT_THRESHOLD As Long = 15
+Private Const MAX_INLINE_SPELLING_COMMENTS As Long = 20
+Private Const MAX_INLINE_FOOTNOTE_COMMENTS As Long = 10
+Private Const MAX_INLINE_TOTAL_COMMENTS As Long = 80
+Private Const MAX_DUPLICATE_COMMENT_TEXT_PER_RUN As Long = 3
 Private gSpellingGroups     As Object   ' Dictionary: "wrong|right" -> count
 Private gSpellingExamples   As Object   ' Dictionary: "wrong|right" -> first 3 locations
 Private gFootnoteGroups     As Object   ' Dictionary: "issueKey" -> Dictionary with Count, NoteNumbers, IssueText
@@ -56,6 +66,18 @@ Private gEditsSkippedUnsafe As Long
 
 ' -- Unsafe autofix category set (report-only, no tracked edits) --
 Private gUnsafeAutofixRules As Object   ' Dictionary of rule names -> True
+
+' -- Tracked-safe allow-list (narrow: only rules proven safe for auto-fix) --
+Private gTrackedSafeRules As Object     ' Dictionary of rule names -> True
+
+' -- Comment-safe allow-list (rules that may create inline comments) --
+Private gCommentSafeRules As Object     ' Dictionary of rule names -> True
+
+' -- Document complexity state (computed once per run) --
+Private gDocIsComplex As Boolean
+
+' -- Duplicate comment text tracking (suppress repeated identical comments) --
+Private gCommentTextCounts As Object    ' Dictionary: comment_text -> count
 
 Private pageRangeSet    As Object   ' Dictionary of page numbers (Long -> True)
 Private whitelistDict   As Object
@@ -129,8 +151,12 @@ Private Sub InitGroupedReportState()
     gCommentsCreated = 0
     gTrackedEditsApplied = 0
     gEditsSkippedUnsafe = 0
+    gDocIsComplex = False
 
-    ' Populate unsafe autofix rules (report-only categories)
+    ' Duplicate comment text tracking
+    Set gCommentTextCounts = CreateObject("Scripting.Dictionary")
+
+    ' -- Unsafe autofix rules (report-only, never tracked-edit) --
     Set gUnsafeAutofixRules = CreateObject("Scripting.Dictionary")
     gUnsafeAutofixRules("double_spaces") = True
     gUnsafeAutofixRules("missing_space_after_dot") = True
@@ -143,7 +169,47 @@ Private Sub InitGroupedReportState()
     gUnsafeAutofixRules("footnote_terminal_full_stop") = True
     gUnsafeAutofixRules("footnote_initial_capital") = True
     gUnsafeAutofixRules("footnote_abbreviation") = True
+    gUnsafeAutofixRules("footnote_abbreviation_dictionary") = True
     gUnsafeAutofixRules("footnotes_not_endnotes") = True
+    gUnsafeAutofixRules("bracket_integrity") = True
+    gUnsafeAutofixRules("triplicate_punctuation") = True
+    gUnsafeAutofixRules("slash_style") = True
+    gUnsafeAutofixRules("custom_rule") = True
+    gUnsafeAutofixRules("brand_name_enforcement") = True
+
+    ' -- Tracked-safe allow-list (very narrow, conservative) --
+    ' Only whitespace/punctuation-only fixes where range exactly matches
+    ' and the rule is known safe. Hyphen, dash, footnote, spelling,
+    ' bracket, and custom rules are explicitly EXCLUDED.
+    Set gTrackedSafeRules = CreateObject("Scripting.Dictionary")
+    gTrackedSafeRules("spellchecker") = True
+    gTrackedSafeRules("licence_license") = True
+    gTrackedSafeRules("check_cheque") = True
+    gTrackedSafeRules("always_capitalise_terms") = True
+    gTrackedSafeRules("mandated_legal_term_forms") = True
+    gTrackedSafeRules("repeated_words") = True
+
+    ' -- Comment-safe allow-list (rules that may create inline comments) --
+    Set gCommentSafeRules = CreateObject("Scripting.Dictionary")
+    gCommentSafeRules("spellchecker") = True
+    gCommentSafeRules("licence_license") = True
+    gCommentSafeRules("check_cheque") = True
+    gCommentSafeRules("repeated_words") = True
+    gCommentSafeRules("always_capitalise_terms") = True
+    gCommentSafeRules("mandated_legal_term_forms") = True
+    gCommentSafeRules("brand_name_enforcement") = True
+    gCommentSafeRules("custom_rule") = True
+    gCommentSafeRules("bracket_integrity") = True
+    gCommentSafeRules("footnote_integrity") = True
+    gCommentSafeRules("footnotes_not_endnotes") = True
+    gCommentSafeRules("footnote_terminal_full_stop") = True
+    gCommentSafeRules("footnote_initial_capital") = True
+    gCommentSafeRules("footnote_abbreviation_dictionary") = True
+    gCommentSafeRules("known_anglicised_terms_not_italic") = True
+    gCommentSafeRules("foreign_names_not_italic") = True
+    gCommentSafeRules("date_time_format") = True
+    gCommentSafeRules("currency_number_format") = True
+    gCommentSafeRules("spell_out_under_ten") = True
 End Sub
 
 ' Returns the bucket name for a given rule (for threshold grouping)
@@ -284,6 +350,257 @@ Public Function IsStrongTrackedAnchor(ByVal matchedText As String) As Boolean
             Exit Function
         End If
     Next i
+End Function
+
+' ============================================================
+'  SECTION A: CENTRALISED FINDING OUTPUT MODE CLASSIFICATION
+'  Decides how a finding should be output based on rule name,
+'  bucket, document complexity, thresholds, and allow-lists.
+' ============================================================
+
+' Returns the output mode for a finding.
+' Possible return values: OUTPUT_TRACKED_SAFE, OUTPUT_COMMENT_ONLY,
+'   OUTPUT_REPORT_ONLY, OUTPUT_GROUPED_REPORT
+Public Function GetFindingOutputMode(ByVal finding As Object, _
+                                      Optional doc As Document = Nothing) As String
+    Dim rn As String
+    rn = LCase$(CStr(GetIssueProp(finding, "RuleName")))
+    Dim bucket As String
+    bucket = GetRuleBucket(rn)
+    Dim autoFix As Boolean
+    On Error Resume Next
+    autoFix = CBool(GetIssueProp(finding, "AutoFixSafe"))
+    If Err.Number <> 0 Then autoFix = False: Err.Clear
+    On Error GoTo 0
+
+    ' Step 1: Check if this should be grouped report
+    If ShouldForceGroupedReport(bucket, GetBucketCount(bucket), doc) Then
+        GetFindingOutputMode = OUTPUT_GROUPED_REPORT
+        Exit Function
+    End If
+
+    ' Step 2: Check if rule is explicitly tracked-safe AND has replacement
+    If autoFix And IsTrackedSafeRule(rn) And HasReplacementText(finding) Then
+        ' Additional gate: document must not be complex for inline markup
+        If Not DocumentLooksComplexForInlineMarkup(doc) Then
+            ' Check operation type is allowed
+            Dim origText As String, repText As String
+            origText = CStr(GetIssueProp(finding, "MatchedText"))
+            repText = CStr(GetIssueProp(finding, "ReplacementText"))
+            Dim opType As String
+            opType = GetReplacementOperationType(origText, repText)
+            If IsOperationTypeAllowed(rn, opType) Then
+                GetFindingOutputMode = OUTPUT_TRACKED_SAFE
+                Exit Function
+            End If
+        End If
+    End If
+
+    ' Step 3: Check if rule is comment-safe
+    If IsCommentSafeRule(rn) Then
+        GetFindingOutputMode = OUTPUT_COMMENT_ONLY
+        Exit Function
+    End If
+
+    ' Default: report-only
+    GetFindingOutputMode = OUTPUT_REPORT_ONLY
+End Function
+
+' Is this rule explicitly in the tracked-safe allow-list?
+Public Function IsTrackedSafeRule(ByVal ruleName As String) As Boolean
+    If gTrackedSafeRules Is Nothing Then
+        IsTrackedSafeRule = False
+        Exit Function
+    End If
+    IsTrackedSafeRule = gTrackedSafeRules.Exists(LCase$(ruleName))
+End Function
+
+' Is this rule allowed to create inline comments?
+Public Function IsCommentSafeRule(ByVal ruleName As String) As Boolean
+    If gCommentSafeRules Is Nothing Then
+        ' Before initialisation, allow all comments
+        IsCommentSafeRule = True
+        Exit Function
+    End If
+    IsCommentSafeRule = gCommentSafeRules.Exists(LCase$(ruleName))
+End Function
+
+' Should findings in this bucket be forced to grouped report mode?
+Public Function ShouldForceGroupedReport(ByVal bucket As String, _
+                                          ByVal totalCount As Long, _
+                                          Optional doc As Document = Nothing) As Boolean
+    ShouldForceGroupedReport = False
+    Select Case bucket
+        Case "spelling"
+            If totalCount > SPELLING_COMMENT_THRESHOLD Then
+                ShouldForceGroupedReport = True
+            End If
+        Case "footnote"
+            If totalCount > FOOTNOTE_COMMENT_THRESHOLD Then
+                ShouldForceGroupedReport = True
+            End If
+        Case "spacing"
+            ' Spacing findings are always report-only (no inline comments)
+            ShouldForceGroupedReport = True
+        Case "dash"
+            ' Dash findings are always report-only
+            ShouldForceGroupedReport = True
+    End Select
+    ' Complex documents bias towards grouped report
+    If Not ShouldForceGroupedReport And gDocIsComplex Then
+        If totalCount > 10 Then ShouldForceGroupedReport = True
+    End If
+End Function
+
+' Assess whether the document is complex enough that inline markup is risky.
+' Factors: existing tracked changes, many comments, Simple Markup view,
+' footnote count, revision count.
+Public Function DocumentLooksComplexForInlineMarkup( _
+        Optional doc As Document = Nothing) As Boolean
+    ' Use cached result if already computed
+    DocumentLooksComplexForInlineMarkup = gDocIsComplex
+End Function
+
+' Compute document complexity (called once per run after doc is available)
+Private Sub ComputeDocumentComplexity(doc As Document)
+    gDocIsComplex = False
+    If doc Is Nothing Then Exit Sub
+    On Error Resume Next
+    ' Check revision count
+    Dim revCount As Long
+    revCount = doc.Revisions.Count
+    If Err.Number <> 0 Then revCount = 0: Err.Clear
+    If revCount > 20 Then gDocIsComplex = True
+    ' Check comment count
+    Dim cmtCount As Long
+    cmtCount = doc.Comments.Count
+    If Err.Number <> 0 Then cmtCount = 0: Err.Clear
+    If cmtCount > 30 Then gDocIsComplex = True
+    ' Check footnote count
+    Dim fnCount As Long
+    fnCount = doc.Footnotes.Count
+    If Err.Number <> 0 Then fnCount = 0: Err.Clear
+    If fnCount > 100 Then gDocIsComplex = True
+    ' Check document length (very long = complex)
+    Dim docLen As Long
+    docLen = doc.Content.End
+    If Err.Number <> 0 Then docLen = 0: Err.Clear
+    If docLen > 200000 Then gDocIsComplex = True
+    On Error GoTo 0
+    If gDocIsComplex Then
+        DebugLog "DocumentComplexity: COMPLEX (revisions=" & revCount & _
+                 " comments=" & cmtCount & " footnotes=" & fnCount & _
+                 " length=" & docLen & ")"
+    End If
+End Sub
+
+' Get count of findings in a bucket from current grouped state
+Private Function GetBucketCount(ByVal bucket As String) As Long
+    Select Case bucket
+        Case "spelling": GetBucketCount = gGroupedSpellingCount
+        Case "footnote": GetBucketCount = gGroupedFootnoteCount
+        Case Else: GetBucketCount = 0
+    End Select
+End Function
+
+' ============================================================
+'  SECTION B: REPLACEMENT OPERATION TYPE CLASSIFICATION
+' ============================================================
+
+' Classify what kind of text operation a replacement represents.
+Public Function GetReplacementOperationType(ByVal origText As String, _
+                                             ByVal newText As String) As String
+    If Len(origText) = 0 And Len(newText) > 0 Then
+        GetReplacementOperationType = "INSERT"
+        Exit Function
+    End If
+    If Len(newText) = 0 And Len(origText) > 0 Then
+        GetReplacementOperationType = "DELETE"
+        Exit Function
+    End If
+    If Len(origText) = 0 And Len(newText) = 0 Then
+        GetReplacementOperationType = "UNKNOWN"
+        Exit Function
+    End If
+    ' Check if only whitespace changed
+    Dim origStripped As String, newStripped As String
+    origStripped = StripAllWhitespace(origText)
+    newStripped = StripAllWhitespace(newText)
+    If origStripped = newStripped Then
+        GetReplacementOperationType = "WHITESPACE_NORMALISE"
+        Exit Function
+    End If
+    ' Check if only punctuation changed (e.g. dash replacement)
+    If IsPunctuationOnlyChange(origText, newText) Then
+        GetReplacementOperationType = "PUNCTUATION_NORMALISE"
+        Exit Function
+    End If
+    ' General replacement
+    GetReplacementOperationType = "REPLACE"
+End Function
+
+' Is this operation type allowed for this rule?
+Private Function IsOperationTypeAllowed(ByVal ruleName As String, _
+                                         ByVal opType As String) As Boolean
+    ' Only allow REPLACE for tracked-safe rules (the normal case: word swap)
+    ' WHITESPACE_NORMALISE is safe.  PUNCTUATION_NORMALISE is safe for
+    ' some rules but NOT for dash/hyphen rules.
+    Select Case opType
+        Case "REPLACE", "WHITESPACE_NORMALISE"
+            IsOperationTypeAllowed = True
+        Case "PUNCTUATION_NORMALISE"
+            ' Only allow for non-dash rules
+            Dim rn As String
+            rn = LCase$(ruleName)
+            If rn = "hyphens" Or rn = "dash_usage" Then
+                IsOperationTypeAllowed = False
+            Else
+                IsOperationTypeAllowed = True
+            End If
+        Case "DELETE"
+            ' Never allow auto-delete via tracked changes
+            IsOperationTypeAllowed = False
+        Case "INSERT"
+            IsOperationTypeAllowed = False
+        Case Else
+            IsOperationTypeAllowed = False
+    End Select
+End Function
+
+' Strip all whitespace from a string (for comparison)
+Private Function StripAllWhitespace(ByVal s As String) As String
+    Dim result As String
+    Dim i As Long
+    Dim ch As String
+    For i = 1 To Len(s)
+        ch = Mid$(s, i, 1)
+        If ch <> " " And ch <> vbTab And ch <> ChrW(160) And _
+           ch <> vbCr And ch <> vbLf And ch <> Chr(11) Then
+            result = result & ch
+        End If
+    Next i
+    StripAllWhitespace = result
+End Function
+
+' Check if the change is punctuation-only (no alphanumeric chars changed)
+Private Function IsPunctuationOnlyChange(ByVal orig As String, _
+                                          ByVal repl As String) As Boolean
+    ' Extract only alphanumeric chars from both; if equal, it's punct-only
+    Dim origAlpha As String, replAlpha As String
+    Dim i As Long, ch As String, c As Long
+    For i = 1 To Len(orig)
+        c = AscW(Mid$(orig, i, 1))
+        If (c >= 65 And c <= 90) Or (c >= 97 And c <= 122) Or (c >= 48 And c <= 57) Then
+            origAlpha = origAlpha & Mid$(orig, i, 1)
+        End If
+    Next i
+    For i = 1 To Len(repl)
+        c = AscW(Mid$(repl, i, 1))
+        If (c >= 65 And c <= 90) Or (c >= 97 And c <= 122) Or (c >= 48 And c <= 57) Then
+            replAlpha = replAlpha & Mid$(repl, i, 1)
+        End If
+    Next i
+    IsPunctuationOnlyChange = (origAlpha = replAlpha And Len(origAlpha) > 0)
 End Function
 
 ' Public accessors for grouped report data
@@ -571,17 +888,24 @@ Public Function GetTargetDocument() As Document
         Exit Function
     End If
 
-    ' Multiple candidates: show picker
+    ' Multiple candidates: show picker with browse option
     Dim prompt As String
     prompt = "Select the document to check:" & vbCrLf & vbCrLf
     Dim idx As Long
     For idx = 1 To candidates.Count
         prompt = prompt & idx & ". " & candidates(idx).Name & vbCrLf
     Next idx
+    prompt = prompt & vbCrLf & "Or type B to browse for a file."
 
     Dim selectionText As String
     selectionText = InputBox(prompt, "Pleadings Checker - Select Document", "1")
     If Len(Trim(selectionText)) = 0 Then Exit Function  ' cancelled
+
+    ' Browse option
+    If UCase$(Trim$(selectionText)) = "B" Then
+        Set GetTargetDocument = BrowseForTargetDocument()
+        Exit Function
+    End If
 
     Dim chosen As Long
     If IsNumeric(selectionText) Then
@@ -593,6 +917,64 @@ Public Function GetTargetDocument() As Document
         End If
     Else
         MsgBox "Invalid selection.", vbExclamation, "Pleadings Checker"
+    End If
+End Function
+
+' ============================================================
+'  BROWSE FOR TARGET DOCUMENT (Section H)
+'  Opens a file dialog to select and open a Word document.
+'  Falls back to InputBox path entry on Mac or if FileDialog
+'  is not available.
+' ============================================================
+Private Function BrowseForTargetDocument() As Document
+    Set BrowseForTargetDocument = Nothing
+    Dim filePath As String
+    filePath = ""
+
+    ' Try FileDialog first (Windows)
+    On Error Resume Next
+    Dim fd As Object
+    Set fd = Application.FileDialog(1)  ' msoFileDialogOpen
+    If Err.Number <> 0 Then
+        Err.Clear
+        On Error GoTo 0
+        ' Fallback: InputBox for path
+        filePath = InputBox("Enter the full path to the document:", _
+                            "Pleadings Checker - Open Document", "")
+        If Len(Trim$(filePath)) = 0 Then Exit Function
+    Else
+        On Error GoTo 0
+        With fd
+            .Title = "Select Document to Check"
+            .AllowMultiSelect = False
+            On Error Resume Next
+            .Filters.Clear
+            .Filters.Add "Word Documents", "*.docx;*.doc;*.docm"
+            .Filters.Add "All Files", "*.*"
+            If Err.Number <> 0 Then Err.Clear
+            On Error GoTo 0
+            If .Show = -1 Then
+                filePath = CStr(.SelectedItems(1))
+            Else
+                Exit Function  ' cancelled
+            End If
+        End With
+    End If
+
+    ' Open the selected file
+    If Len(filePath) > 0 Then
+        On Error Resume Next
+        Dim openDoc As Document
+        Set openDoc = Documents.Open(filePath)
+        If Err.Number <> 0 Then
+            MsgBox "Could not open:" & vbCrLf & filePath & vbCrLf & _
+                   "Error: " & Err.Description, vbExclamation, "Pleadings Checker"
+            Err.Clear
+            On Error GoTo 0
+            Exit Function
+        End If
+        On Error GoTo 0
+        Set BrowseForTargetDocument = openDoc
     End If
 End Function
 
@@ -638,6 +1020,56 @@ Public Sub RunQuick()
     End If
     TraceExit "RunQuick", issues.Count & " issues"
 End Sub
+
+' ============================================================
+'  RunCheckerFromFormConfig (Section G)
+'  Single entry point for the form to run all checks.
+'  Accepts a config dictionary with all UI state pre-gathered
+'  so the form does not need to call individual Set* methods.
+'
+'  Config keys (all optional, with defaults):
+'    "ruleConfig"      -> Dictionary of rule_name -> Boolean
+'    "pageRange"       -> String (page range spec)
+'    "spellingMode"    -> "UK" or "US"
+'    "quoteNesting"    -> "SINGLE" or "DOUBLE"
+'    "smartQuotePref"  -> "SMART" or "STRAIGHT"
+'    "dateFormatPref"  -> "UK" or "US"
+'    "termFormatPref"  -> "BOLD" / "BOLDITALIC" / "ITALIC" / "NONE"
+'    "termQuotePref"   -> "SINGLE" or "DOUBLE"
+'    "spaceStylePref"  -> "ONE" or "TWO"
+'    "nonEngTermPref"  -> "ITALICS" or "REGULAR"
+' ============================================================
+Public Function RunCheckerFromFormConfig(doc As Document, _
+                                          formConfig As Object) As Collection
+    TraceEnter "RunCheckerFromFormConfig"
+
+    ' Apply all preferences from the config dictionary
+    If formConfig.Exists("pageRange") Then
+        SetPageRangeFromString CStr(formConfig("pageRange"))
+    Else
+        SetPageRangeFromString ""
+    End If
+    If formConfig.Exists("spellingMode") Then SetSpellingMode CStr(formConfig("spellingMode"))
+    If formConfig.Exists("quoteNesting") Then SetQuoteNesting CStr(formConfig("quoteNesting"))
+    If formConfig.Exists("smartQuotePref") Then SetSmartQuotePref CStr(formConfig("smartQuotePref"))
+    If formConfig.Exists("dateFormatPref") Then SetDateFormatPref CStr(formConfig("dateFormatPref"))
+    If formConfig.Exists("termFormatPref") Then SetTermFormatPref CStr(formConfig("termFormatPref"))
+    If formConfig.Exists("termQuotePref") Then SetTermQuotePref CStr(formConfig("termQuotePref"))
+    If formConfig.Exists("spaceStylePref") Then SetSpaceStylePref CStr(formConfig("spaceStylePref"))
+    If formConfig.Exists("nonEngTermPref") Then SetNonEngTermPref CStr(formConfig("nonEngTermPref"))
+
+    ' Get rule config
+    Dim cfg As Object
+    If formConfig.Exists("ruleConfig") Then
+        Set cfg = formConfig("ruleConfig")
+    Else
+        Set cfg = InitRuleConfig()
+    End If
+
+    ' Run all rules
+    Set RunCheckerFromFormConfig = RunAllPleadingsRules(doc, cfg)
+    TraceExit "RunCheckerFromFormConfig"
+End Function
 
 ' ============================================================
 '  SPELLING MODE (UK / US toggle)
@@ -1688,6 +2120,9 @@ Public Function RunAllPleadingsRules(doc As Document, _
     ' -- Build paragraph position cache (one scan, enables O(log N) lookups) --
     BuildParagraphCache doc
 
+    ' -- Assess document complexity (once per run) --
+    ComputeDocumentComplexity doc
+
     ' -- Precompute page-range character boundaries (one-time, cheap thereafter) --
     InitPageFilter doc
 
@@ -1790,6 +2225,7 @@ RunnerCleanup:
     On Error Resume Next
     Application.ScreenUpdating = wasScreenUpdating
     Application.StatusBar = False   ' restore default status bar
+    Application.OnKey "{ESC}"       ' always restore Escape key
     On Error GoTo 0
 
     ' -- Re-raise cancellation so caller can handle it --
@@ -1976,6 +2412,7 @@ HighlightCleanup:
     On Error Resume Next
     Application.ScreenUpdating = wasScreenUpdating
     Application.StatusBar = False
+    Application.OnKey "{ESC}"  ' always restore Escape key
     On Error GoTo 0
     TraceExit "ApplyHighlights"
     If hlCancelled Then Err.Raise ERR_RUN_CANCELLED, "PleadingsEngine", "Run cancelled"
@@ -2070,8 +2507,25 @@ Public Sub ApplySuggestionsAsTrackedChanges(doc As Document, _
                     origStart = rng.Start
                     origLen = rng.End - rng.Start
 
-                    ' --- UNSAFE AUTOFIX CATEGORY GATE ---
-                    ' Rules in the unsafe category are report-only; never tracked-edit
+                    ' --- FINDING OUTPUT MODE GATE (Section A) ---
+                    ' Only OUTPUT_TRACKED_SAFE findings proceed to tracked edit
+                    Dim outputMode As String
+                    outputMode = GetFindingOutputMode(finding, doc)
+                    If outputMode <> OUTPUT_TRACKED_SAFE Then
+                        cntSkippedUnsafe = cntSkippedUnsafe + 1
+                        gEditsSkippedUnsafe = gEditsSkippedUnsafe + 1
+                        TraceStep "ApplyTrackedChanges", "SKIPPED output_mode=" & outputMode & _
+                                  " i=" & i & " rule=" & thisRuleName
+                        If addComments And outputMode = OUTPUT_COMMENT_ONLY And _
+                           ShouldCreateCommentForRule(thisRuleName, finding) Then
+                            TryAddComment doc, rng, BuildCommentText(finding), cmtRef, _
+                                "ApplyTrackedChanges", "mode-downgrade-comment i=" & i
+                            gCommentsCreated = gCommentsCreated + 1
+                        End If
+                        GoTo NextApplyIssue
+                    End If
+
+                    ' --- UNSAFE AUTOFIX CATEGORY GATE (legacy, kept as belt-and-braces) ---
                     If IsUnsafeAutofixRule(thisRuleName) Then
                         cntSkippedUnsafe = cntSkippedUnsafe + 1
                         gEditsSkippedUnsafe = gEditsSkippedUnsafe + 1
@@ -2246,6 +2700,7 @@ TrackedCleanup:
     doc.TrackRevisions = wasTrackingChanges
     Application.ScreenUpdating = wasScreenUpdating
     Application.StatusBar = False
+    Application.OnKey "{ESC}"  ' always restore Escape key
     On Error GoTo 0
     TraceStep "ApplyTrackedChanges", "SUMMARY: applied=" & cntApplied & _
               " comment_only=" & cntCommentOnly & " skipped_anchor=" & cntSkippedAnchor & _
@@ -2644,11 +3099,12 @@ End Function
 
 ' ============================================================
 '  COMMENT SUPPRESSION: returns True if a comment bubble should
-'  be created for this rule.  Returns False for:
-'  - all spacing rules (always suppressed)
-'  - all dash/hyphen rules (always suppressed)
-'  - spelling when total spelling count > threshold (grouped report mode)
-'  - footnote rules when total footnote count > threshold (grouped report mode)
+'  be created for this rule. Much stricter than before:
+'  - Spacing and dash rules: always suppressed
+'  - Spelling/footnote: suppressed above threshold
+'  - Duplicate comment text: suppressed above per-text limit
+'  - Total comment cap: suppressed when exceeded
+'  - Complex documents: bias further towards report-only
 ' ============================================================
 Public Function ShouldCreateCommentForRule(ByVal ruleName As String, _
                                            Optional ByVal finding As Object = Nothing) As Boolean
@@ -2657,41 +3113,47 @@ Public Function ShouldCreateCommentForRule(ByVal ruleName As String, _
     Dim bucket As String
     bucket = GetRuleBucket(rn)
 
-    ' Spacing rules: always suppress comments
+    ' Gate 1: Spacing rules -- never create comments
     If bucket = "spacing" Then
         ShouldCreateCommentForRule = False
         Exit Function
     End If
 
-    ' Dash/hyphen rules: always suppress comments
+    ' Gate 2: Dash/hyphen rules -- never create comments
     If bucket = "dash" Then
         ShouldCreateCommentForRule = False
         Exit Function
     End If
 
-    ' Trailing spaces: always suppress
+    ' Gate 3: Trailing spaces -- never
     If rn = "trailing_spaces" Or rn = "trailing_space" Then
         ShouldCreateCommentForRule = False
         Exit Function
     End If
 
-    ' Spelling: suppress if over threshold
+    ' Gate 4: Total comment cap exceeded
+    If gCommentsCreated >= MAX_INLINE_TOTAL_COMMENTS Then
+        ShouldCreateCommentForRule = False
+        Exit Function
+    End If
+
+    ' Gate 5: Spelling -- per-bucket threshold
     If bucket = "spelling" Then
-        If gGroupedSpellingCount > SPELLING_COMMENT_THRESHOLD Then
+        If gGroupedSpellingCount > MAX_INLINE_SPELLING_COMMENTS Then
             ShouldCreateCommentForRule = False
             Exit Function
         End If
     End If
 
-    ' Footnotes: suppress if over threshold
+    ' Gate 6: Footnotes -- per-bucket threshold
     If bucket = "footnote" Then
-        If gGroupedFootnoteCount > FOOTNOTE_COMMENT_THRESHOLD Then
+        If gGroupedFootnoteCount > MAX_INLINE_FOOTNOTE_COMMENTS Then
             ShouldCreateCommentForRule = False
             Exit Function
         End If
     End If
 
-    ' Check issue text for spacing sub-types emitted under other rule names
+    ' Gate 7: Check issue text for spacing sub-types emitted under other rule names
     If Not finding Is Nothing Then
         On Error Resume Next
         Dim issText As String
@@ -2702,6 +3164,32 @@ Public Function ShouldCreateCommentForRule(ByVal ruleName As String, _
         On Error GoTo 0
         If InStr(issText, "missing second space") > 0 Or _
            InStr(issText, "double space") > 0 Then
+            ShouldCreateCommentForRule = False
+            Exit Function
+        End If
+
+        ' Gate 8: Duplicate comment text suppression
+        If Len(issText) > 0 And Not gCommentTextCounts Is Nothing Then
+            Dim textKey As String
+            textKey = Left$(issText, 120)
+            If gCommentTextCounts.Exists(textKey) Then
+                Dim dupCount As Long
+                dupCount = CLng(gCommentTextCounts(textKey))
+                If dupCount >= MAX_DUPLICATE_COMMENT_TEXT_PER_RUN Then
+                    ShouldCreateCommentForRule = False
+                    Exit Function
+                End If
+                gCommentTextCounts(textKey) = dupCount + 1
+            Else
+                gCommentTextCounts(textKey) = 1
+            End If
+        End If
+    End If
+
+    ' Gate 9: Complex document bias -- suppress less-important rule comments
+    If gDocIsComplex Then
+        ' In complex docs, only allow comments from high-value rules
+        If Not IsCommentSafeRule(rn) Then
             ShouldCreateCommentForRule = False
             Exit Function
         End If
