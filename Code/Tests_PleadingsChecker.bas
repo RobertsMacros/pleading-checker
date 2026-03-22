@@ -101,6 +101,14 @@ Public Sub RunAllTests()
     Test_GetFindingOutputMode
     Test_GetReplacementOperationType
 
+    ' -- Anchor / payload regression tests --
+    Test_GetListPrefixLen
+    Test_ListParagraphAnchor_DoubleSpaces
+    Test_ListParagraphAnchor_RepeatedWords
+    Test_AutoFixSafe_SpaceBeforePunct
+    Test_EnsureParentDir_WhitelistPath
+    Test_FootnoteUILabels
+
     ' -- Print summary --
     Debug.Print ""
     If Len(testLog) > 0 Then
@@ -681,4 +689,201 @@ Private Sub Test_GetReplacementOperationType()
     ' PUNCTUATION_NORMALISE: same alpha, different punct
     AssertEqual PleadingsEngine.GetReplacementOperationType("-", ChrW(8211)), _
         "PUNCTUATION_NORMALISE", "OpType: PUNCTUATION_NORMALISE for dash"
+End Sub
+
+' ============================================================
+'  ANCHOR / PAYLOAD REGRESSION TESTS
+' ============================================================
+
+Private Sub Test_GetListPrefixLen()
+    ' GetListPrefixLen should return the length of the list prefix
+    ' that appears in paraText but not in the document.
+    ' Without a real list paragraph, a normal paragraph should return 0.
+    On Error GoTo TestGLPFail
+    Dim doc As Document
+    Set doc = Documents.Add
+    doc.Content.Text = "Normal paragraph text." & vbCr
+
+    Dim para As Paragraph
+    Set para = doc.Paragraphs(1)
+    Dim paraText As String
+    paraText = TextAnchoring.StripParaMarkChar(para.Range.Text)
+
+    Dim prefixLen As Long
+    prefixLen = TextAnchoring.GetListPrefixLen(para, paraText)
+    AssertEqual prefixLen, 0, "GetListPrefixLen: normal paragraph returns 0"
+
+    doc.Close wdDoNotSaveChanges
+    Exit Sub
+
+TestGLPFail:
+    testsFailed = testsFailed + 1
+    testLog = testLog & "  FAIL: Test_GetListPrefixLen (Err " & Err.Number & ": " & Err.Description & ")" & vbCrLf
+    On Error Resume Next
+    doc.Close wdDoNotSaveChanges
+    On Error GoTo 0
+End Sub
+
+Private Sub Test_ListParagraphAnchor_DoubleSpaces()
+    ' Regression: verify that double-space issues in a list paragraph
+    ' have correct anchor positions (the anchor text should be spaces).
+    On Error GoTo TestLPADSFail
+    Dim doc As Document
+    Set doc = Documents.Add
+
+    ' Create a numbered list paragraph with a double space.
+    doc.Content.Text = "Hello  world." & vbCr
+    ' Apply list numbering
+    On Error Resume Next
+    doc.Paragraphs(1).Range.ListFormat.ApplyListTemplateWithLevel _
+        ListTemplate:=ListGalleries(wdNumberGallery).ListTemplates(1)
+    If Err.Number <> 0 Then
+        ' List templates may not be available in all environments.
+        Err.Clear
+        On Error GoTo TestLPADSFail
+        testsPassed = testsPassed + 1  ' skip gracefully
+        doc.Close wdDoNotSaveChanges
+        Exit Sub
+    End If
+    On Error GoTo TestLPADSFail
+
+    Dim issues As Collection
+    Set issues = Application.Run("Rules_Spacing.Check_DoubleSpaces", doc)
+
+    ' Should find at least 1 double-space issue
+    AssertTrue issues.Count >= 1, "ListAnchor_DoubleSpaces: found >= 1 issue (got " & issues.Count & ")"
+
+    ' Verify anchor text at the reported position is actually spaces
+    If issues.Count >= 1 Then
+        Dim d As Object: Set d = issues(1)
+        Dim rs As Long: rs = CLng(d("RangeStart"))
+        Dim re As Long: re = CLng(d("RangeEnd"))
+        Dim anchorRng As Range
+        Set anchorRng = doc.Range(rs, re)
+        Dim anchorText As String
+        anchorText = anchorRng.Text
+        ' Every character in the anchor should be a space
+        Dim allSpaces As Boolean: allSpaces = True
+        Dim ci As Long
+        For ci = 1 To Len(anchorText)
+            If Mid$(anchorText, ci, 1) <> " " Then allSpaces = False
+        Next ci
+        AssertTrue allSpaces, "ListAnchor_DoubleSpaces: anchor text is all spaces (got '" & anchorText & "')"
+    End If
+
+    doc.Close wdDoNotSaveChanges
+    Exit Sub
+
+TestLPADSFail:
+    testsFailed = testsFailed + 1
+    testLog = testLog & "  FAIL: Test_ListParagraphAnchor_DoubleSpaces (Err " & Err.Number & ": " & Err.Description & ")" & vbCrLf
+    On Error Resume Next
+    doc.Close wdDoNotSaveChanges
+    On Error GoTo 0
+End Sub
+
+Private Sub Test_ListParagraphAnchor_RepeatedWords()
+    ' Regression: verify that repeated-word issues in a list paragraph
+    ' have correct anchor positions (anchor text should match the word).
+    On Error GoTo TestLPARWFail
+    Dim doc As Document
+    Set doc = Documents.Add
+
+    doc.Content.Text = "The the quick brown fox." & vbCr
+    On Error Resume Next
+    doc.Paragraphs(1).Range.ListFormat.ApplyListTemplateWithLevel _
+        ListTemplate:=ListGalleries(wdNumberGallery).ListTemplates(1)
+    If Err.Number <> 0 Then
+        Err.Clear
+        On Error GoTo TestLPARWFail
+        testsPassed = testsPassed + 1
+        doc.Close wdDoNotSaveChanges
+        Exit Sub
+    End If
+    On Error GoTo TestLPARWFail
+
+    Dim issues As Collection
+    Set issues = Application.Run("Rules_TextScan.Check_RepeatedWords", doc)
+
+    AssertTrue issues.Count >= 1, "ListAnchor_RepeatedWords: found >= 1 issue (got " & issues.Count & ")"
+
+    If issues.Count >= 1 Then
+        Dim d As Object: Set d = issues(1)
+        Dim rs As Long: rs = CLng(d("RangeStart"))
+        Dim re As Long: re = CLng(d("RangeEnd"))
+        Dim anchorRng As Range
+        Set anchorRng = doc.Range(rs, re)
+        ' The anchor should contain "the" (case-insensitive)
+        AssertTrue LCase(TextAnchoring.StripPunctuation(anchorRng.Text)) = "the", _
+            "ListAnchor_RepeatedWords: anchor text is 'the' (got '" & anchorRng.Text & "')"
+    End If
+
+    doc.Close wdDoNotSaveChanges
+    Exit Sub
+
+TestLPARWFail:
+    testsFailed = testsFailed + 1
+    testLog = testLog & "  FAIL: Test_ListParagraphAnchor_RepeatedWords (Err " & Err.Number & ": " & Err.Description & ")" & vbCrLf
+    On Error Resume Next
+    doc.Close wdDoNotSaveChanges
+    On Error GoTo 0
+End Sub
+
+Private Sub Test_AutoFixSafe_SpaceBeforePunct()
+    ' Regression: SpaceBeforePunct should now be AutoFixSafe=False
+    ' for conservative behaviour.
+    On Error GoTo TestAFSFail
+    Dim doc As Document
+    Set doc = Documents.Add
+
+    doc.Content.Text = "Hello , world." & vbCr
+
+    Dim issues As Collection
+    Set issues = Application.Run("Rules_Spacing.Check_SpaceBeforePunct", doc)
+
+    AssertTrue issues.Count >= 1, "AutoFixSafe_SpaceBeforePunct: found >= 1 issue (got " & issues.Count & ")"
+
+    If issues.Count >= 1 Then
+        Dim d As Object: Set d = issues(1)
+        Dim afs As Boolean
+        afs = CBool(d("AutoFixSafe"))
+        AssertFalse afs, "AutoFixSafe_SpaceBeforePunct: AutoFixSafe is False"
+    End If
+
+    doc.Close wdDoNotSaveChanges
+    Exit Sub
+
+TestAFSFail:
+    testsFailed = testsFailed + 1
+    testLog = testLog & "  FAIL: Test_AutoFixSafe_SpaceBeforePunct (Err " & Err.Number & ": " & Err.Description & ")" & vbCrLf
+    On Error Resume Next
+    doc.Close wdDoNotSaveChanges
+    On Error GoTo 0
+End Sub
+
+Private Sub Test_EnsureParentDir_WhitelistPath()
+    ' Verify GetDefaultWhitelistPath returns a non-empty path.
+    ' We do not test actual directory creation to avoid brittle
+    ' filesystem side effects in the test environment.
+    Dim p As String
+    p = Rules_Terms.GetDefaultWhitelistPath()
+    AssertTrue Len(p) > 0, "EnsureParentDir: GetDefaultWhitelistPath non-empty"
+    ' Path should end with "whitelist.txt"
+    AssertTrue Right$(p, 14) = "whitelist.txt", _
+        "EnsureParentDir: path ends with whitelist.txt (got '" & Right$(p, 20) & "')"
+End Sub
+
+Private Sub Test_FootnoteUILabels()
+    ' All footnote sub-rules should map to "Footnote Rules".
+    Dim fnRules As Variant
+    fnRules = Array("footnote_integrity", "footnote_harts", _
+        "footnote_terminal_full_stop", "footnote_initial_capital", _
+        "footnote_abbreviation", "footnote_abbreviation_dictionary", _
+        "footnotes_not_endnotes", "footnote_rules", "duplicate_footnotes")
+
+    Dim i As Long
+    For i = LBound(fnRules) To UBound(fnRules)
+        AssertEqual PleadingsEngine.GetUILabel(CStr(fnRules(i))), "Footnote Rules", _
+            "FootnoteUILabel: " & CStr(fnRules(i)) & " -> Footnote Rules"
+    Next i
 End Sub

@@ -253,7 +253,9 @@ Public Sub ProcessParagraph_SpaceBeforePunct(doc As Document, paraRange As Range
         Dim spEnd As Long: spEnd = spStart + 2
         Dim punctChar As String: punctChar = Mid(paraText, mIdx + 2, 1)
         Dim rng As Range: Set rng = TextAnchoring.SafeRange(doc, spStart, spEnd)
-        TextAnchoring.AddIssue issues, RULE_SPACE_BEFORE_PUNCT, doc, rng, "Unexpected space before '" & punctChar & "'", "Remove the space before punctuation", spStart, spStart + 1, "error", True, "", " ", "exact_text", "high"
+        ' Conservative: AutoFixSafe=False because false positives near
+        ' URLs, code snippets, or stylistic spacing make deletion risky.
+        TextAnchoring.AddIssue issues, RULE_SPACE_BEFORE_PUNCT, doc, rng, "Unexpected space before '" & punctChar & "'", "Remove the space before punctuation", spStart, spStart + 1, "error", False, "", " ", "exact_text", "high"
     Next m
 End Sub
 

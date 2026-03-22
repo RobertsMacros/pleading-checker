@@ -328,6 +328,10 @@ End Sub
 ' via Application.Run with the standard signature:
 '   (doc, paraRange, paraText, paraStart, listPrefixLen, issues)
 ' Returns the populated issues collection.
+'
+' IMPORTANT: paraText includes the list-numbering prefix.  paraStart
+' is the document position of the first real character.  See
+' GetListPrefixLen for the full anchor-model contract.
 Public Function IterateParagraphs(doc As Document, ByVal moduleName As String, ByVal procName As String) As Collection
     Dim issues As New Collection
     Dim para As Paragraph
@@ -549,6 +553,24 @@ End Function
 
 ' Calculate the length of auto-generated list numbering text
 ' that appears in Range.Text but doesn't map to document positions.
+'
+' CONTRACT:
+'   paraText  = StripParaMarkChar(para.Range.Text).  This string
+'               includes the list numbering prefix (e.g. "1." or "a)")
+'               that Word injects into Range.Text but which has NO
+'               corresponding character positions in the document.
+'   paraStart = para.Range.Start.  This is the document position of
+'               the first REAL character (after the phantom prefix).
+'
+'   Rule modules must convert a 1-based position P in paraText to a
+'   document position using:
+'       docPos = paraStart + (P - 1) - listPrefixLen
+'   For 0-based regex FirstIndex:
+'       docPos = paraStart + firstIndex - listPrefixLen
+'
+'   listPrefixLen is the number of leading characters in paraText
+'   that are phantom list-numbering text.  Subtracting it compensates
+'   for the fact that paraStart already points past them.
 Public Function GetListPrefixLen(para As Paragraph, ByVal paraText As String) As Long
     GetListPrefixLen = 0
     On Error Resume Next

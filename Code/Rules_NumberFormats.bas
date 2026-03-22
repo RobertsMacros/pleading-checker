@@ -64,6 +64,8 @@ End Sub
 ' -- Helper: check if a time match looks like a clause reference,
 '  ratio, date component, or other non-time pattern.
 '  Examines characters before and after the HH:MM match.
+'  NOTE: creates Range objects for single characters, but this runs
+'  only on the small set of time-pattern matches, not per-paragraph.
 ' ----------------------------------------------------------------
 Private Function LooksLikeNonTimeContext(doc As Document, _
         ByVal matchStart As Long, ByVal matchEnd As Long) As Boolean

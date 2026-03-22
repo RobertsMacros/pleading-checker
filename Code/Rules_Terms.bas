@@ -102,6 +102,9 @@ Public Function SaveWhitelistTerms(ByVal filePath As String) As Boolean
     SaveWhitelistTerms = False
     EnsureUserWhitelist
 
+    ' Ensure the parent directory exists before writing.
+    EnsureParentDir filePath
+
     On Error GoTo SaveFail
     Dim fNum As Long
     fNum = FreeFile
@@ -167,6 +170,38 @@ Private Sub EnsureUserWhitelist()
     If userWhitelist Is Nothing Then
         Set userWhitelist = CreateObject("Scripting.Dictionary")
     End If
+End Sub
+
+' Ensure the parent directory of a file path exists.
+' Works for both Windows (backslash) and Mac (forward slash) paths.
+' Uses MkDir iteratively for each missing ancestor.  No external
+' dependencies (FileSystemObject, shell, etc.).
+Private Sub EnsureParentDir(ByVal filePath As String)
+    On Error Resume Next
+    Dim sep As String
+    sep = Application.PathSeparator
+    ' Extract parent directory
+    Dim lastSep As Long
+    lastSep = InStrRev(filePath, sep)
+    If lastSep <= 0 Then Exit Sub
+    Dim parentDir As String
+    parentDir = Left$(filePath, lastSep - 1)
+    ' If directory already exists, nothing to do.
+    If Dir(parentDir, vbDirectory) <> "" Then Exit Sub
+    ' Walk the path from root and create each missing segment.
+    Dim parts() As String
+    parts = Split(parentDir, sep)
+    Dim built As String
+    built = parts(0) ' drive letter or first segment
+    Dim i As Long
+    For i = 1 To UBound(parts)
+        built = built & sep & parts(i)
+        If Dir(built, vbDirectory) = "" Then
+            MkDir built
+        End If
+    Next i
+    Err.Clear
+    On Error GoTo 0
 End Sub
 
 

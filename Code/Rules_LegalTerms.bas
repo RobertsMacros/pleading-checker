@@ -28,6 +28,11 @@ Option Explicit
 Private Const RULE28_NAME As String = "mandated_legal_term_forms"
 Private Const RULE29_NAME As String = "always_capitalise_terms"
 
+' -- Module-level cached term list for Rule29 ----------------
+' Built once, reused across all paragraphs.
+Private r29Terms As Variant
+Private r29Initialised As Boolean
+
 ' -- Module-level dictionary for Rule28 ----------------------
 ' Key = LCase(correct form), Value = correct form (String)
 Private mandatedTerms As Object
@@ -150,7 +155,8 @@ Private Sub CheckTermInParagraph(doc As Document, _
                                   paraText As String, _
                                   paraStart As Long, _
                                   paraRng As Range, _
-                                  ByRef issues As Collection)
+                                  ByRef issues As Collection, _
+                                  Optional ByVal listPrefixLen As Long = 0)
     Dim termLen As Long
     Dim pos As Long
     Dim actualText As String
@@ -189,7 +195,9 @@ Private Sub CheckTermInParagraph(doc As Document, _
         If IsInsideQuote(paraText, pos) Then GoTo NextMatch
 
         ' -- Calculate range positions ----------------------
-        matchStart = paraStart + pos - 1
+        ' Anchor model: paraText includes the list prefix, so we
+        ' subtract listPrefixLen to map back to document positions.
+        matchStart = paraStart + (pos - 1) - listPrefixLen
         matchEnd = matchStart + termLen
 
         Dim rng As Range
@@ -351,16 +359,19 @@ End Function
 '  Extracts per-paragraph logic from Check_AlwaysCapitaliseTerms.
 ' ============================================================
 Public Sub ProcessParagraph_AlwaysCapitalise(doc As Document, paraRange As Range, paraText As String, paraStart As Long, listPrefixLen As Long, ByRef issues As Collection)
-    Dim terms As Variant
-    Dim batch1 As Variant, batch2 As Variant
-    batch1 = Array("Act", "Bill", "Attorney-General", "Cabinet", "Commonwealth", "Constitution", "Crown", _
-        "Executive Council", "Governor", "Governor-General", "Her Majesty", "the Queen")
-    batch2 = Array("his Honour", "her Honour", "their Honours", "Law Lords", "their Lordships", _
-        "Lords Justices", "Member States", "Parliament", "Labour Party", "Prime Minister", "Vice-Chancellor")
-    terms = TextAnchoring.MergeArrays2(batch1, batch2)
+    ' Build the term list once at module scope and reuse it.
+    If Not r29Initialised Then
+        Dim batch1 As Variant, batch2 As Variant
+        batch1 = Array("Act", "Bill", "Attorney-General", "Cabinet", "Commonwealth", "Constitution", "Crown", _
+            "Executive Council", "Governor", "Governor-General", "Her Majesty", "the Queen")
+        batch2 = Array("his Honour", "her Honour", "their Honours", "Law Lords", "their Lordships", _
+            "Lords Justices", "Member States", "Parliament", "Labour Party", "Prime Minister", "Vice-Chancellor")
+        r29Terms = TextAnchoring.MergeArrays2(batch1, batch2)
+        r29Initialised = True
+    End If
 
     Dim t As Long
-    For t = LBound(terms) To UBound(terms)
-        CheckTermInParagraph doc, CStr(terms(t)), paraText, paraStart, paraRange, issues
+    For t = LBound(r29Terms) To UBound(r29Terms)
+        CheckTermInParagraph doc, CStr(r29Terms(t)), paraText, paraStart, paraRange, issues, listPrefixLen
     Next t
 End Sub

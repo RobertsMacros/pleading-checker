@@ -196,7 +196,10 @@ Public Sub ProcessParagraph_AnglicisedTerms(doc As Document, paraRange As Range,
                 If TextAnchoring.IsLetterChar(charAfter) Then GoTo NextMatchAT
             End If
 
-            adjStart = paraStart + listPrefixLen + pos - 1
+            ' Anchor model: paraText includes the list prefix, so we
+            ' subtract listPrefixLen to map back to document positions.
+            ' Formula: docPos = paraStart + (pos - 1) - listPrefixLen
+            adjStart = paraStart + (pos - 1) - listPrefixLen
 
             Set rng = TextAnchoring.SafeRange(doc, adjStart, adjStart + termLen)
             If rng Is Nothing Then GoTo NextMatchAT
@@ -251,7 +254,9 @@ Public Sub ProcessParagraph_ForeignNames(doc As Document, paraRange As Range, pa
                 If TextAnchoring.IsLetterChar(charAfter) Then GoTo NextMatchFN
             End If
 
-            adjStart = paraStart + listPrefixLen + pos - 1
+            ' Anchor model: paraText includes the list prefix, so we
+            ' subtract listPrefixLen to map back to document positions.
+            adjStart = paraStart + (pos - 1) - listPrefixLen
 
             Set rng = TextAnchoring.SafeRange(doc, adjStart, adjStart + termLen)
             If rng Is Nothing Then GoTo NextMatchFN
