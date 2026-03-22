@@ -87,6 +87,102 @@ Private crSortAscending As Boolean   ' True=ascending, False=descending
 Private crSortOrder()   As Long      ' Indices into cr* arrays for display
 
 ' ============================================================
+'  CONTROL-CREATION HELPERS
+'  Reduce duplication in UserForm_Initialize.
+' ============================================================
+Private Function AddLabel(parent As Object, ByVal ctlName As String, _
+                          ByVal cap As String, ByVal l As Single, _
+                          ByVal t As Single, ByVal w As Single, _
+                          ByVal h As Single, _
+                          Optional ByVal fontSize As Single = 7.5, _
+                          Optional ByVal isBold As Boolean = False) As MSForms.Label
+    Set AddLabel = parent.Controls.Add("Forms.Label.1", ctlName)
+    With AddLabel
+        .Caption = cap
+        .Left = l: .Top = t: .Width = w: .Height = h
+        .Font.Size = fontSize
+        .Font.Bold = isBold
+    End With
+End Function
+
+Private Function AddButton(parent As Object, ByVal ctlName As String, _
+                           ByVal cap As String, ByVal l As Single, _
+                           ByVal t As Single, ByVal w As Single, _
+                           ByVal h As Single, _
+                           Optional ByVal fontSize As Single = 7.5, _
+                           Optional ByVal isBold As Boolean = False) As MSForms.CommandButton
+    Set AddButton = parent.Controls.Add("Forms.CommandButton.1", ctlName)
+    With AddButton
+        .Caption = cap
+        .Left = l: .Top = t: .Width = w: .Height = h
+        .Font.Size = fontSize
+        .Font.Bold = isBold
+    End With
+End Function
+
+Private Function AddTextBox(parent As Object, ByVal ctlName As String, _
+                            ByVal l As Single, ByVal t As Single, _
+                            ByVal w As Single, ByVal h As Single, _
+                            Optional ByVal fontSize As Single = 7.5) As MSForms.TextBox
+    Set AddTextBox = parent.Controls.Add("Forms.TextBox.1", ctlName)
+    With AddTextBox
+        .Left = l: .Top = t: .Width = w: .Height = h
+        .Font.Size = fontSize
+        .Text = ""
+    End With
+End Function
+
+Private Function AddCombo(parent As Object, ByVal ctlName As String, _
+                          ByVal l As Single, ByVal t As Single, _
+                          ByVal w As Single, ByVal h As Single, _
+                          Optional ByVal fontSize As Single = 7.5) As MSForms.ComboBox
+    Set AddCombo = parent.Controls.Add("Forms.ComboBox.1", ctlName)
+    With AddCombo
+        .Left = l: .Top = t: .Width = w: .Height = h
+        .Style = fmStyleDropDownList
+        .Font.Size = fontSize
+    End With
+End Function
+
+Private Function AddCheckBox(parent As Object, ByVal ctlName As String, _
+                             ByVal cap As String, ByVal l As Single, _
+                             ByVal t As Single, ByVal w As Single, _
+                             ByVal h As Single, _
+                             Optional ByVal fontSize As Single = 7.5, _
+                             Optional ByVal startVal As Boolean = True) As MSForms.CheckBox
+    Set AddCheckBox = parent.Controls.Add("Forms.CheckBox.1", ctlName)
+    With AddCheckBox
+        .Caption = cap
+        .Left = l: .Top = t: .Width = w: .Height = h
+        .Value = startVal
+        .Font.Size = fontSize
+    End With
+End Function
+
+' Helper: create a "Label + ComboBox" option row and return the combo.
+' Advances yPos by rowHeight + gap.
+Private Function AddOptionRow(ByVal labelText As String, _
+                              ByVal ctlName As String, _
+                              ByRef yPos As Single, _
+                              ByVal colRight As Single, _
+                              ByVal lblOptW As Single, _
+                              ByVal cboW As Single, _
+                              ByVal rowH As Single, _
+                              ByVal lblH As Single, _
+                              ByVal gap As Single, _
+                              items As Variant, _
+                              Optional ByVal defaultIdx As Long = 0) As MSForms.ComboBox
+    AddLabel Me, "lbl" & ctlName, labelText, colRight, yPos + 2, lblOptW, lblH
+    Set AddOptionRow = AddCombo(Me, ctlName, colRight + lblOptW + 2, yPos, cboW, rowH)
+    Dim v As Variant
+    For Each v In items
+        AddOptionRow.AddItem CStr(v)
+    Next v
+    AddOptionRow.ListIndex = defaultIdx
+    yPos = yPos + rowH + gap
+End Function
+
+' ============================================================
 '  FORM INITIALISATION -- creates all controls at runtime
 ' ============================================================
 Private Sub UserForm_Initialize()
@@ -98,7 +194,6 @@ Private Sub UserForm_Initialize()
     crSortMode = 0
     crSortAscending = True
 
-    Dim lbl As MSForms.Label
     Dim yPos As Single
 
     ' -- Overall form padding ----------------------------------
@@ -131,26 +226,9 @@ Private Sub UserForm_Initialize()
     ' ==========================================================
     '  ROW 1: Rules header + Select All / Deselect All inline
     ' ==========================================================
-    Set lbl = Me.Controls.Add("Forms.Label.1", "lblRulesHeader")
-    With lbl
-        .Caption = "Rules"
-        .Left = PAD: .Top = yPos: .Width = 40: .Height = LBL_H
-        .Font.Size = 9: .Font.Bold = True
-    End With
-
-    Set btnSelectAll = Me.Controls.Add("Forms.CommandButton.1", "btnSelectAll")
-    With btnSelectAll
-        .Caption = "Select All"
-        .Left = PAD + 44: .Top = yPos - 1: .Width = 62: .Height = 18
-        .Font.Size = 7
-    End With
-
-    Set btnDeselectAll = Me.Controls.Add("Forms.CommandButton.1", "btnDeselectAll")
-    With btnDeselectAll
-        .Caption = "Deselect All"
-        .Left = PAD + 44 + 64: .Top = yPos - 1: .Width = 62: .Height = 18
-        .Font.Size = 7
-    End With
+    AddLabel Me, "lblRulesHeader", "Rules", PAD, yPos, 40, LBL_H, 9, True
+    Set btnSelectAll = AddButton(Me, "btnSelectAll", "Select All", PAD + 44, yPos - 1, 62, 18, 7)
+    Set btnDeselectAll = AddButton(Me, "btnDeselectAll", "Deselect All", PAD + 44 + 64, yPos - 1, 62, 18, 7)
 
     yPos = yPos + 18 + ITEM_GAP
 
@@ -191,36 +269,17 @@ Private Sub UserForm_Initialize()
     cboW = rightW - lblOptW - 2
 
     ' ---- LEFT COLUMN: Page Range ----
-    Set lbl = Me.Controls.Add("Forms.Label.1", "lblPageHeader")
-    With lbl
-        .Caption = "Page Range"
-        .Left = colLeft: .Top = yPos: .Width = 120: .Height = LBL_H
-        .Font.Size = 9: .Font.Bold = True
-    End With
+    AddLabel Me, "lblPageHeader", "Page Range", colLeft, yPos, 120, LBL_H, 9, True
     yPos = yPos + LBL_H + ITEM_GAP
 
-    Set lbl = Me.Controls.Add("Forms.Label.1", "lblPageRange")
-    With lbl
-        .Caption = "Pages:"
-        .Left = colLeft: .Top = yPos + 2: .Width = 36: .Height = LBL_H
-    End With
-
-    Set txtPageRange = Me.Controls.Add("Forms.TextBox.1", "txtPageRange")
-    With txtPageRange
-        .Left = colLeft + 36: .Top = yPos: .Width = leftW - 40: .Height = TXT_H
-        .Text = ""
-    End With
-    InitPageRangePlaceholder
+    AddLabel Me, "lblPageRange", "Pages:", colLeft, yPos + 2, 36, LBL_H
+    Set txtPageRange = AddTextBox(Me, "txtPageRange", colLeft + 36, yPos, leftW - 40, TXT_H)
+    InitPlaceholder txtPageRange, PAGE_RANGE_PLACEHOLDER, mPageRangeShowingPlaceholder
 
     yPos = yPos + TXT_H + SEC_GAP
 
     ' ---- LEFT COLUMN: Custom Rules (unified section) ----
-    Set lbl = Me.Controls.Add("Forms.Label.1", "lblCustomRulesHeader")
-    With lbl
-        .Caption = "Custom Rules"
-        .Left = colLeft: .Top = yPos: .Width = 80: .Height = LBL_H
-        .Font.Size = 9: .Font.Bold = True
-    End With
+    AddLabel Me, "lblCustomRulesHeader", "Custom Rules", colLeft, yPos, 80, LBL_H, 9, True
 
     yPos = yPos + LBL_H + ITEM_GAP
 
@@ -234,35 +293,19 @@ Private Sub UserForm_Initialize()
 
     ' Clickable column header labels (wired via clsHeaderClick)
     Dim lblH As MSForms.Label
-    Set lblH = Me.Controls.Add("Forms.Label.1", "lblHdrNum")
-    With lblH
-        .Caption = " #"
-        .Left = colLeft: .Top = yPos: .Width = colWNum: .Height = hdrH
-        .Font.Size = 7: .Font.Bold = True: .TextAlign = fmTextAlignCenter
-        .BackColor = RGB(230, 230, 230): .BackStyle = fmBackStyleOpaque
-    End With
+    Set lblH = AddLabel(Me, "lblHdrNum", " #", colLeft, yPos, colWNum, hdrH, 7, True)
+    lblH.TextAlign = fmTextAlignCenter
+    lblH.BackColor = RGB(230, 230, 230): lblH.BackStyle = fmBackStyleOpaque
     Set mHdrNum = New clsHeaderClick
     mHdrNum.Init Me, lblH, 0
 
-    Set lblH = Me.Controls.Add("Forms.Label.1", "lblHdrCorrect")
-    With lblH
-        .Caption = " Correct"
-        .Left = colLeft + colWNum: .Top = yPos
-        .Width = colWCorrect: .Height = hdrH
-        .Font.Size = 7: .Font.Bold = True
-        .BackColor = RGB(198, 239, 206): .BackStyle = fmBackStyleOpaque
-    End With
+    Set lblH = AddLabel(Me, "lblHdrCorrect", " Correct", colLeft + colWNum, yPos, colWCorrect, hdrH, 7, True)
+    lblH.BackColor = RGB(198, 239, 206): lblH.BackStyle = fmBackStyleOpaque
     Set mHdrCorrect = New clsHeaderClick
     mHdrCorrect.Init Me, lblH, 1
 
-    Set lblH = Me.Controls.Add("Forms.Label.1", "lblHdrVariants")
-    With lblH
-        .Caption = " Incorrect Variants"
-        .Left = colLeft + colWNum + colWCorrect: .Top = yPos
-        .Width = colWVariants: .Height = hdrH
-        .Font.Size = 7: .Font.Bold = True
-        .BackColor = RGB(255, 199, 206): .BackStyle = fmBackStyleOpaque
-    End With
+    Set lblH = AddLabel(Me, "lblHdrVariants", " Incorrect Variants", colLeft + colWNum + colWCorrect, yPos, colWVariants, hdrH, 7, True)
+    lblH.BackColor = RGB(255, 199, 206): lblH.BackStyle = fmBackStyleOpaque
     Set mHdrVariants = New clsHeaderClick
     mHdrVariants.Init Me, lblH, 2
 
@@ -288,73 +331,24 @@ Private Sub UserForm_Initialize()
     Dim ruleBtnY As Single
     ruleBtnY = yPos
 
-    Set btnAddRule = Me.Controls.Add("Forms.CommandButton.1", "btnAddRule")
-    With btnAddRule
-        .Caption = "Add"
-        .Left = btnX: .Top = ruleBtnY: .Width = BTN_W: .Height = BTN_H
-        .Font.Size = 7.5
-    End With
+    Set btnAddRule = AddButton(Me, "btnAddRule", "Add", btnX, ruleBtnY, BTN_W, BTN_H)
     ruleBtnY = ruleBtnY + BTN_H + 1
-
-    Set btnEditRule = Me.Controls.Add("Forms.CommandButton.1", "btnEditRule")
-    With btnEditRule
-        .Caption = "Edit"
-        .Left = btnX: .Top = ruleBtnY: .Width = BTN_W / 2 - 1: .Height = BTN_H
-        .Font.Size = 7
-    End With
-
-    Set btnRemoveRule = Me.Controls.Add("Forms.CommandButton.1", "btnRemoveRule")
-    With btnRemoveRule
-        .Caption = "Remove"
-        .Left = btnX + BTN_W / 2 + 1: .Top = ruleBtnY: .Width = BTN_W / 2 - 1: .Height = BTN_H
-        .Font.Size = 7
-    End With
+    Set btnEditRule = AddButton(Me, "btnEditRule", "Edit", btnX, ruleBtnY, BTN_W / 2 - 1, BTN_H, 7)
+    Set btnRemoveRule = AddButton(Me, "btnRemoveRule", "Remove", btnX + BTN_W / 2 + 1, ruleBtnY, BTN_W / 2 - 1, BTN_H, 7)
     ruleBtnY = ruleBtnY + BTN_H + 1
-
-    Set btnSaveRules = Me.Controls.Add("Forms.CommandButton.1", "btnSaveRules")
-    With btnSaveRules
-        .Caption = "Save"
-        .Left = btnX: .Top = ruleBtnY: .Width = BTN_W / 2 - 1: .Height = BTN_H
-        .Font.Size = 7
-    End With
-
-    Set btnLoadRules = Me.Controls.Add("Forms.CommandButton.1", "btnLoadRules")
-    With btnLoadRules
-        .Caption = "Load"
-        .Left = btnX + BTN_W / 2 + 1: .Top = ruleBtnY: .Width = BTN_W / 2 - 1: .Height = BTN_H
-        .Font.Size = 7
-    End With
+    Set btnSaveRules = AddButton(Me, "btnSaveRules", "Save", btnX, ruleBtnY, BTN_W / 2 - 1, BTN_H, 7)
+    Set btnLoadRules = AddButton(Me, "btnLoadRules", "Load", btnX + BTN_W / 2 + 1, ruleBtnY, BTN_W / 2 - 1, BTN_H, 7)
 
     yPos = yPos + lstCustomRules.Height + ITEM_GAP
 
     ' Input row: Correct + Incorrect Variants
-    Set lbl = Me.Controls.Add("Forms.Label.1", "lblCorrectForm")
-    With lbl
-        .Caption = "Correct:"
-        .Left = colLeft: .Top = yPos + 2: .Width = 42: .Height = LBL_H
-        .Font.Size = 7.5
-    End With
+    AddLabel Me, "lblCorrectForm", "Correct:", colLeft, yPos + 2, 42, LBL_H
+    Set txtRuleCorrect = AddTextBox(Me, "txtRuleCorrect", colLeft + 42, yPos, 90, TXT_H)
+    InitPlaceholder txtRuleCorrect, CORRECT_PLACEHOLDER, mCorrectShowingPlaceholder
 
-    Set txtRuleCorrect = Me.Controls.Add("Forms.TextBox.1", "txtRuleCorrect")
-    With txtRuleCorrect
-        .Left = colLeft + 42: .Top = yPos: .Width = 90: .Height = TXT_H
-        .Font.Size = 7.5
-    End With
-    InitCorrectPlaceholder
-
-    Set lbl = Me.Controls.Add("Forms.Label.1", "lblIncorrectVars")
-    With lbl
-        .Caption = "Variants:"
-        .Left = colLeft + 136: .Top = yPos + 2: .Width = 42: .Height = LBL_H
-        .Font.Size = 7.5
-    End With
-
-    Set txtRuleVariants = Me.Controls.Add("Forms.TextBox.1", "txtRuleVariants")
-    With txtRuleVariants
-        .Left = colLeft + 178: .Top = yPos: .Width = ruleListW - 178 + colLeft: .Height = TXT_H
-        .Font.Size = 7.5
-    End With
-    InitVariantsPlaceholder
+    AddLabel Me, "lblIncorrectVars", "Variants:", colLeft + 136, yPos + 2, 42, LBL_H
+    Set txtRuleVariants = AddTextBox(Me, "txtRuleVariants", colLeft + 178, yPos, ruleListW - 178 + colLeft, TXT_H)
+    InitPlaceholder txtRuleVariants, VARIANTS_PLACEHOLDER, mVariantsShowingPlaceholder
 
     Dim leftBottomY As Single
     leftBottomY = yPos + TXT_H
@@ -363,179 +357,38 @@ Private Sub UserForm_Initialize()
     Dim optY As Single
     optY = row3Top
 
-    Set lbl = Me.Controls.Add("Forms.Label.1", "lblOptionsHeader")
-    With lbl
-        .Caption = "Options"
-        .Left = colRight: .Top = optY: .Width = 120: .Height = LBL_H
-        .Font.Size = 9: .Font.Bold = True
-    End With
+    AddLabel Me, "lblOptionsHeader", "Options", colRight, optY, 120, LBL_H, 9, True
     optY = optY + LBL_H + ITEM_GAP
 
-    Set chkAddComments = Me.Controls.Add("Forms.CheckBox.1", "chkAddComments")
-    With chkAddComments
-        .Caption = "Add comments"
-        .Left = colRight: .Top = optY: .Width = rightW: .Height = CHK_H
-        .Value = True
-        .Font.Size = 7.5
-    End With
+    Set chkAddComments = AddCheckBox(Me, "chkAddComments", "Add comments", colRight, optY, rightW, CHK_H)
     optY = optY + CHK_H + ITEM_GAP
 
-    Set chkTrackedChanges = Me.Controls.Add("Forms.CheckBox.1", "chkTrackedChanges")
-    With chkTrackedChanges
-        .Caption = "Tracked changes"
-        .Left = colRight: .Top = optY: .Width = rightW: .Height = CHK_H
-        .Value = True
-        .Font.Size = 7.5
-    End With
+    Set chkTrackedChanges = AddCheckBox(Me, "chkTrackedChanges", "Tracked changes", colRight, optY, rightW, CHK_H)
     optY = optY + CHK_H + ITEM_GAP
 
-    ' Spelling
-    Set lbl = Me.Controls.Add("Forms.Label.1", "lblSpellingMode")
-    With lbl
-        .Caption = "Spelling:"
-        .Left = colRight: .Top = optY + 2: .Width = lblOptW: .Height = LBL_H
-        .Font.Size = 7.5
-    End With
-    Set cboSpelling = Me.Controls.Add("Forms.ComboBox.1", "cboSpelling")
-    With cboSpelling
-        .Left = colRight + lblOptW + 2: .Top = optY: .Width = cboW: .Height = TXT_H
-        .Style = fmStyleDropDownList
-        .AddItem "UK"
-        .AddItem "US"
-        .ListIndex = 0
-        .Font.Size = 7.5
-    End With
-    optY = optY + TXT_H + ITEM_GAP
-
-    ' Primary quotation marks
-    Set lbl = Me.Controls.Add("Forms.Label.1", "lblQuoteNesting")
-    With lbl
-        .Caption = "Primary quotes:"
-        .Left = colRight: .Top = optY + 2: .Width = lblOptW: .Height = LBL_H
-        .Font.Size = 7.5
-    End With
-    Set cboQuoteNesting = Me.Controls.Add("Forms.ComboBox.1", "cboQuoteNesting")
-    With cboQuoteNesting
-        .Left = colRight + lblOptW + 2: .Top = optY: .Width = cboW: .Height = TXT_H
-        .Style = fmStyleDropDownList
-        .AddItem "Single"
-        .AddItem "Double"
-        .ListIndex = 0
-        .Font.Size = 7.5
-    End With
-    optY = optY + TXT_H + ITEM_GAP
-
-    ' Smart quotes
-    Set lbl = Me.Controls.Add("Forms.Label.1", "lblSmartQuotes")
-    With lbl
-        .Caption = "Smart quotes:"
-        .Left = colRight: .Top = optY + 2: .Width = lblOptW: .Height = LBL_H
-        .Font.Size = 7.5
-    End With
-    Set cboSmartQuotes = Me.Controls.Add("Forms.ComboBox.1", "cboSmartQuotes")
-    With cboSmartQuotes
-        .Left = colRight + lblOptW + 2: .Top = optY: .Width = cboW: .Height = TXT_H
-        .Style = fmStyleDropDownList
-        .AddItem "Smart"
-        .AddItem "Straight"
-        .ListIndex = 0
-        .Font.Size = 7.5
-    End With
-    optY = optY + TXT_H + ITEM_GAP
-
-    ' Date format
-    Set lbl = Me.Controls.Add("Forms.Label.1", "lblDateFormat")
-    With lbl
-        .Caption = "Date format:"
-        .Left = colRight: .Top = optY + 2: .Width = lblOptW: .Height = LBL_H
-        .Font.Size = 7.5
-    End With
-    Set cboDateFormat = Me.Controls.Add("Forms.ComboBox.1", "cboDateFormat")
-    With cboDateFormat
-        .Left = colRight + lblOptW + 2: .Top = optY: .Width = cboW: .Height = TXT_H
-        .Style = fmStyleDropDownList
-        .AddItem "UK (14 March 2026 / 14/03/2026)"
-        .AddItem "US (March 14, 2026 / 03/14/2026)"
-        .ListIndex = 0
-        .Font.Size = 7.5
-    End With
-    optY = optY + TXT_H + ITEM_GAP
-
-    ' Non-English Terms
-    Set lbl = Me.Controls.Add("Forms.Label.1", "lblNonEngTerms")
-    With lbl
-        .Caption = "Non-English terms:"
-        .Left = colRight: .Top = optY + 2: .Width = lblOptW: .Height = LBL_H
-        .Font.Size = 7.5
-    End With
-    Set cboNonEngTerms = Me.Controls.Add("Forms.ComboBox.1", "cboNonEngTerms")
-    With cboNonEngTerms
-        .Left = colRight + lblOptW + 2: .Top = optY: .Width = cboW: .Height = TXT_H
-        .Style = fmStyleDropDownList
-        .AddItem "Italics"
-        .AddItem "Regular text"
-        .ListIndex = 0
-        .Font.Size = 7.5
-    End With
-    optY = optY + TXT_H + ITEM_GAP
-
-    ' After full stop
-    Set lbl = Me.Controls.Add("Forms.Label.1", "lblSpaceStyle")
-    With lbl
-        .Caption = "After full stop:"
-        .Left = colRight: .Top = optY + 2: .Width = lblOptW: .Height = LBL_H
-        .Font.Size = 7.5
-    End With
-    Set cboSpaceStyle = Me.Controls.Add("Forms.ComboBox.1", "cboSpaceStyle")
-    With cboSpaceStyle
-        .Left = colRight + lblOptW + 2: .Top = optY: .Width = cboW: .Height = TXT_H
-        .Style = fmStyleDropDownList
-        .AddItem "One space"
-        .AddItem "Two spaces"
-        .ListIndex = 0
-        .Font.Size = 7.5
-    End With
-    optY = optY + TXT_H + ITEM_GAP
+    Set cboSpelling = AddOptionRow("Spelling:", "cboSpelling", optY, colRight, lblOptW, cboW, TXT_H, LBL_H, ITEM_GAP, Array("UK", "US"))
+    Set cboQuoteNesting = AddOptionRow("Primary quotes:", "cboQuoteNesting", optY, colRight, lblOptW, cboW, TXT_H, LBL_H, ITEM_GAP, Array("Single", "Double"))
+    Set cboSmartQuotes = AddOptionRow("Smart quotes:", "cboSmartQuotes", optY, colRight, lblOptW, cboW, TXT_H, LBL_H, ITEM_GAP, Array("Smart", "Straight"))
+    Set cboDateFormat = AddOptionRow("Date format:", "cboDateFormat", optY, colRight, lblOptW, cboW, TXT_H, LBL_H, ITEM_GAP, Array("UK (14 March 2026 / 14/03/2026)", "US (March 14, 2026 / 03/14/2026)"))
+    Set cboNonEngTerms = AddOptionRow("Non-English terms:", "cboNonEngTerms", optY, colRight, lblOptW, cboW, TXT_H, LBL_H, ITEM_GAP, Array("Italics", "Regular text"))
+    Set cboSpaceStyle = AddOptionRow("After full stop:", "cboSpaceStyle", optY, colRight, lblOptW, cboW, TXT_H, LBL_H, ITEM_GAP, Array("One space", "Two spaces"))
 
     ' Defined terms formatting pair
     Dim dtLblW As Single: dtLblW = 52
     Dim dtCboW As Single: dtCboW = (rightW - dtLblW - 14) / 2
-    Set lbl = Me.Controls.Add("Forms.Label.1", "lblDefinedTerms")
-    With lbl
-        .Caption = "Def. terms:"
-        .Left = colRight: .Top = optY + 2: .Width = dtLblW: .Height = LBL_H
-        .Font.Size = 7.5
-    End With
-    Set cboTermFormat = Me.Controls.Add("Forms.ComboBox.1", "cboTermFormat")
-    With cboTermFormat
-        .Left = colRight + dtLblW + 2: .Top = optY: .Width = dtCboW: .Height = TXT_H
-        .Style = fmStyleDropDownList
-        .AddItem "Bold"
-        .AddItem "Bold Italics"
-        .AddItem "Italics"
-        .AddItem "None"
-        .ListIndex = 0
-        .Font.Size = 7.5
-    End With
+    AddLabel Me, "lblDefinedTerms", "Def. terms:", colRight, optY + 2, dtLblW, LBL_H
+    Set cboTermFormat = AddCombo(Me, "cboTermFormat", colRight + dtLblW + 2, optY, dtCboW, TXT_H)
+    Dim tfItem As Variant
+    For Each tfItem In Array("Bold", "Bold Italics", "Italics", "None")
+        cboTermFormat.AddItem CStr(tfItem)
+    Next tfItem
+    cboTermFormat.ListIndex = 0
 
-    Dim lblAnd As MSForms.Label
-    Set lblAnd = Me.Controls.Add("Forms.Label.1", "lblTermAnd")
-    With lblAnd
-        .Caption = "+"
-        .Left = colRight + dtLblW + dtCboW + 4: .Top = optY + 2
-        .Width = 10: .Height = LBL_H
-        .Font.Size = 7.5
-    End With
-    Set cboTermQuotes = Me.Controls.Add("Forms.ComboBox.1", "cboTermQuotes")
-    With cboTermQuotes
-        .Left = colRight + dtLblW + dtCboW + 14: .Top = optY
-        .Width = dtCboW: .Height = TXT_H
-        .Style = fmStyleDropDownList
-        .AddItem "Single quotes"
-        .AddItem "Double quotes"
-        .ListIndex = 1
-        .Font.Size = 7.5
-    End With
+    AddLabel Me, "lblTermAnd", "+", colRight + dtLblW + dtCboW + 4, optY + 2, 10, LBL_H
+    Set cboTermQuotes = AddCombo(Me, "cboTermQuotes", colRight + dtLblW + dtCboW + 14, optY, dtCboW, TXT_H)
+    cboTermQuotes.AddItem "Single quotes"
+    cboTermQuotes.AddItem "Double quotes"
+    cboTermQuotes.ListIndex = 1
 
     ' Use the taller of left-column or right-column bottoms
     Dim row3BottomY As Single
@@ -549,38 +402,16 @@ Private Sub UserForm_Initialize()
     Const ACT_BTN_W As Single = 100
     Const ACT_GAP As Single = 8
 
-    Set btnRun = Me.Controls.Add("Forms.CommandButton.1", "btnRun")
-    With btnRun
-        .Caption = "Run Checks"
-        .Left = PAD: .Top = yPos: .Width = ACT_BTN_W: .Height = ACT_BTN_H
-        .Font.Bold = True
-    End With
-
-    Set btnExport = Me.Controls.Add("Forms.CommandButton.1", "btnExport")
-    With btnExport
-        .Caption = "Export Report"
-        .Left = PAD + ACT_BTN_W + ACT_GAP: .Top = yPos
-        .Width = ACT_BTN_W: .Height = ACT_BTN_H
-    End With
-
-    Set btnClose = Me.Controls.Add("Forms.CommandButton.1", "btnClose")
-    With btnClose
-        .Caption = "Close"
-        .Left = PAD + 2 * (ACT_BTN_W + ACT_GAP): .Top = yPos
-        .Width = 70: .Height = ACT_BTN_H
-    End With
+    Set btnRun = AddButton(Me, "btnRun", "Run Checks", PAD, yPos, ACT_BTN_W, ACT_BTN_H, , True)
+    Set btnExport = AddButton(Me, "btnExport", "Export Report", PAD + ACT_BTN_W + ACT_GAP, yPos, ACT_BTN_W, ACT_BTN_H)
+    Set btnClose = AddButton(Me, "btnClose", "Close", PAD + 2 * (ACT_BTN_W + ACT_GAP), yPos, 70, ACT_BTN_H)
 
     yPos = yPos + ACT_BTN_H + ITEM_GAP
 
     ' ==========================================================
     '  ROW 5: Status Bar
     ' ==========================================================
-    Set lblStatus = Me.Controls.Add("Forms.Label.1", "lblStatus")
-    With lblStatus
-        .Caption = "Ready. Select rules and click Run."
-        .Left = PAD: .Top = yPos: .Width = FULL_W: .Height = LBL_H
-        .Font.Size = 8
-    End With
+    Set lblStatus = AddLabel(Me, "lblStatus", "Ready. Select rules and click Run.", PAD, yPos, FULL_W, LBL_H, 8)
 
     ' -- Load custom rules from engine -------------------------
     LoadCustomRulesFromEngine
@@ -952,12 +783,11 @@ Private Sub btnRun_Click()
     Dim formCfg As Object
     Set formCfg = GatherFormConfig()
 
-    ' Reset cancel flag and bind Escape key to cancel
+    ' Reset cancel flag before run
     PleadingsEngine.ResetCancelRun
-    Application.OnKey "{ESC}", "PleadingsEngine.RequestCancelRun"
 
     ' Run checks with cancellation support
-    lblStatus.Caption = "Running checks... (press Esc to cancel)"
+    lblStatus.Caption = "Running checks..."
     Me.Repaint
     DoEvents
 
@@ -1005,7 +835,7 @@ Private Sub btnRun_Click()
                vbYesNo + vbQuestion, "Pleadings Checker")
 
         If reply = vbYes Then
-            lblStatus.Caption = "Applying suggestions... (press Esc to cancel)"
+            lblStatus.Caption = "Applying suggestions..."
             Me.Repaint
             DoEvents
 
@@ -1024,12 +854,9 @@ Private Sub btnRun_Click()
         End If
     End If
 
-    ' Unbind Escape key
-    Application.OnKey "{ESC}"
     Exit Sub
 
 RunCancelled:
-    Application.OnKey "{ESC}"
     If Err.Number = vbObjectError + 513 Then
         lblStatus.Caption = "Run cancelled."
         MsgBox "Run cancelled.", vbInformation, "Pleadings Checker"
@@ -1206,10 +1033,10 @@ Private Sub btnAddRule_Click()
         AddCustomRule correctForm, incorrectVars
     End If
 
-    ClearCorrect
-    InitCorrectPlaceholder
-    ClearVariants
-    InitVariantsPlaceholder
+    ClearPlaceholderText txtRuleCorrect, mCorrectShowingPlaceholder
+    InitPlaceholder txtRuleCorrect, CORRECT_PLACEHOLDER, mCorrectShowingPlaceholder
+    ClearPlaceholderText txtRuleVariants, mVariantsShowingPlaceholder
+    InitPlaceholder txtRuleVariants, VARIANTS_PLACEHOLDER, mVariantsShowingPlaceholder
     RefreshCustomRulesList
 End Sub
 
@@ -1232,10 +1059,10 @@ Private Sub btnRemoveRule_Click()
     If editingRuleIndex >= 0 Then
         editingRuleIndex = -1
         btnAddRule.Caption = "Add"
-        ClearCorrect
-        InitCorrectPlaceholder
-        ClearVariants
-        InitVariantsPlaceholder
+        ClearPlaceholderText txtRuleCorrect, mCorrectShowingPlaceholder
+        InitPlaceholder txtRuleCorrect, CORRECT_PLACEHOLDER, mCorrectShowingPlaceholder
+        ClearPlaceholderText txtRuleVariants, mVariantsShowingPlaceholder
+        InitPlaceholder txtRuleVariants, VARIANTS_PLACEHOLDER, mVariantsShowingPlaceholder
     End If
 
     RefreshCustomRulesList
@@ -1255,9 +1082,9 @@ Private Sub btnEditRule_Click()
     If dataIdx < 0 Then Exit Sub
 
     editingRuleIndex = lstCustomRules.ListIndex
-    ClearCorrect
+    ClearPlaceholderText txtRuleCorrect, mCorrectShowingPlaceholder
     txtRuleCorrect.Text = crCorrect(dataIdx)
-    ClearVariants
+    ClearPlaceholderText txtRuleVariants, mVariantsShowingPlaceholder
     txtRuleVariants.Text = crVariants(dataIdx)
     btnAddRule.Caption = "Save Edit"
 End Sub
@@ -1455,103 +1282,83 @@ Private Function GetCustomRulesPath() As String
 End Function
 
 ' ============================================================
-'  CORRECT TEXTBOX PLACEHOLDER HELPERS
+'  SHARED PLACEHOLDER HELPERS
+'  Generic init / get / clear / enter / exit for any textbox.
 ' ============================================================
-Private Sub InitCorrectPlaceholder()
-    If txtRuleCorrect Is Nothing Then Exit Sub
-    With txtRuleCorrect
-        .Text = CORRECT_PLACEHOLDER
-        .ForeColor = RGB(150, 150, 150)
-    End With
-    mCorrectShowingPlaceholder = True
+Private Sub InitPlaceholder(ByVal tb As MSForms.TextBox, _
+                            ByVal placeholder As String, _
+                            ByRef flag As Boolean)
+    If tb Is Nothing Then Exit Sub
+    tb.Text = placeholder
+    tb.ForeColor = RGB(150, 150, 150)
+    flag = True
 End Sub
 
-Private Function GetCorrectText() As String
-    If mCorrectShowingPlaceholder Then
-        GetCorrectText = vbNullString
+Private Function GetPlaceholderText(ByVal tb As MSForms.TextBox, _
+                                    ByVal placeholder As String, _
+                                    ByVal showing As Boolean) As String
+    If showing Then
+        GetPlaceholderText = vbNullString
         Exit Function
     End If
     Dim raw As String
-    raw = Trim$(txtRuleCorrect.Text)
-    ' Safety net: treat placeholder text as empty even if flag desynced
-    If raw = CORRECT_PLACEHOLDER Then
-        GetCorrectText = vbNullString
+    raw = Trim$(tb.Text)
+    If raw = placeholder Then
+        GetPlaceholderText = vbNullString
     Else
-        GetCorrectText = raw
+        GetPlaceholderText = raw
     End If
 End Function
 
-Private Sub ClearCorrect()
-    txtRuleCorrect.Text = ""
-    txtRuleCorrect.ForeColor = RGB(0, 0, 0)
-    mCorrectShowingPlaceholder = False
+Private Sub ClearPlaceholderText(ByVal tb As MSForms.TextBox, ByRef flag As Boolean)
+    tb.Text = ""
+    tb.ForeColor = RGB(0, 0, 0)
+    flag = False
 End Sub
 
-Private Sub txtRuleCorrect_Enter()
-    If mCorrectShowingPlaceholder Then
-        txtRuleCorrect.Text = ""
-        txtRuleCorrect.ForeColor = RGB(0, 0, 0)
-        mCorrectShowingPlaceholder = False
+Private Sub HandlePlaceholderEnter(ByVal tb As MSForms.TextBox, ByRef flag As Boolean)
+    If flag Then
+        tb.Text = ""
+        tb.ForeColor = RGB(0, 0, 0)
+        flag = False
     End If
+End Sub
+
+Private Sub HandlePlaceholderExit(ByVal tb As MSForms.TextBox, _
+                                  ByVal placeholder As String, _
+                                  ByRef flag As Boolean)
+    If Len(Trim$(tb.Text)) = 0 Then
+        InitPlaceholder tb, placeholder, flag
+    Else
+        tb.ForeColor = RGB(0, 0, 0)
+        flag = False
+    End If
+End Sub
+
+' -- Thin wrappers for the three placeholdered textboxes (keep named accessors) --
+Private Function GetCorrectText() As String
+    GetCorrectText = GetPlaceholderText(txtRuleCorrect, CORRECT_PLACEHOLDER, mCorrectShowingPlaceholder)
+End Function
+
+Private Function GetVariantsText() As String
+    GetVariantsText = GetPlaceholderText(txtRuleVariants, VARIANTS_PLACEHOLDER, mVariantsShowingPlaceholder)
+End Function
+
+' Event handlers must be separate subs; they delegate to shared helpers.
+Private Sub txtRuleCorrect_Enter()
+    HandlePlaceholderEnter txtRuleCorrect, mCorrectShowingPlaceholder
 End Sub
 
 Private Sub txtRuleCorrect_Exit(ByVal Cancel As MSForms.ReturnBoolean)
-    If Len(Trim$(txtRuleCorrect.Text)) = 0 Then
-        InitCorrectPlaceholder
-    Else
-        txtRuleCorrect.ForeColor = RGB(0, 0, 0)
-        mCorrectShowingPlaceholder = False
-    End If
-End Sub
-
-' ============================================================
-'  VARIANTS TEXTBOX PLACEHOLDER HELPERS
-' ============================================================
-Private Sub InitVariantsPlaceholder()
-    If txtRuleVariants Is Nothing Then Exit Sub
-    With txtRuleVariants
-        .Text = VARIANTS_PLACEHOLDER
-        .ForeColor = RGB(150, 150, 150)
-    End With
-    mVariantsShowingPlaceholder = True
-End Sub
-
-Private Function GetVariantsText() As String
-    If mVariantsShowingPlaceholder Then
-        GetVariantsText = vbNullString
-        Exit Function
-    End If
-    Dim raw As String
-    raw = Trim$(txtRuleVariants.Text)
-    ' Safety net: treat placeholder text as empty even if flag desynced
-    If raw = VARIANTS_PLACEHOLDER Then
-        GetVariantsText = vbNullString
-    Else
-        GetVariantsText = raw
-    End If
-End Function
-
-Private Sub ClearVariants()
-    txtRuleVariants.Text = ""
-    txtRuleVariants.ForeColor = RGB(0, 0, 0)
-    mVariantsShowingPlaceholder = False
+    HandlePlaceholderExit txtRuleCorrect, CORRECT_PLACEHOLDER, mCorrectShowingPlaceholder
 End Sub
 
 Private Sub txtRuleVariants_Enter()
-    If mVariantsShowingPlaceholder Then
-        txtRuleVariants.Text = ""
-        txtRuleVariants.ForeColor = RGB(0, 0, 0)
-        mVariantsShowingPlaceholder = False
-    End If
+    HandlePlaceholderEnter txtRuleVariants, mVariantsShowingPlaceholder
 End Sub
 
 Private Sub txtRuleVariants_Exit(ByVal Cancel As MSForms.ReturnBoolean)
-    If Len(Trim$(txtRuleVariants.Text)) = 0 Then
-        InitVariantsPlaceholder
-    Else
-        txtRuleVariants.ForeColor = RGB(0, 0, 0)
-        mVariantsShowingPlaceholder = False
-    End If
+    HandlePlaceholderExit txtRuleVariants, VARIANTS_PLACEHOLDER, mVariantsShowingPlaceholder
 End Sub
 
 ' Normalise comma-separated variants: trim each, remove blanks
@@ -1571,48 +1378,17 @@ Private Function NormaliseVariants(ByVal raw As String) As String
     NormaliseVariants = result
 End Function
 
-' ============================================================
-'  PAGE RANGE PLACEHOLDER HELPERS
-' ============================================================
-Private Sub InitPageRangePlaceholder()
-    If txtPageRange Is Nothing Then Exit Sub
-    With txtPageRange
-        .Text = PAGE_RANGE_PLACEHOLDER
-        .ForeColor = RGB(150, 150, 150)
-    End With
-    mPageRangeShowingPlaceholder = True
-End Sub
-
+' -- Page-range placeholder (delegates to shared helpers) --
 Public Function GetPageRangeInput() As String
-    If mPageRangeShowingPlaceholder Then
-        GetPageRangeInput = vbNullString
-        Exit Function
-    End If
-    Dim raw As String
-    raw = Trim$(txtPageRange.Text)
-    ' Safety net: treat placeholder text as empty even if flag desynced
-    If raw = PAGE_RANGE_PLACEHOLDER Then
-        GetPageRangeInput = vbNullString
-    Else
-        GetPageRangeInput = raw
-    End If
+    GetPageRangeInput = GetPlaceholderText(txtPageRange, PAGE_RANGE_PLACEHOLDER, mPageRangeShowingPlaceholder)
 End Function
 
 Private Sub txtPageRange_Enter()
-    If mPageRangeShowingPlaceholder Then
-        txtPageRange.Text = ""
-        txtPageRange.ForeColor = RGB(0, 0, 0)
-        mPageRangeShowingPlaceholder = False
-    End If
+    HandlePlaceholderEnter txtPageRange, mPageRangeShowingPlaceholder
 End Sub
 
 Private Sub txtPageRange_Exit(ByVal Cancel As MSForms.ReturnBoolean)
-    If Len(Trim$(txtPageRange.Text)) = 0 Then
-        InitPageRangePlaceholder
-    Else
-        txtPageRange.ForeColor = RGB(0, 0, 0)
-        mPageRangeShowingPlaceholder = False
-    End If
+    HandlePlaceholderExit txtPageRange, PAGE_RANGE_PLACEHOLDER, mPageRangeShowingPlaceholder
 End Sub
 
 ' ============================================================

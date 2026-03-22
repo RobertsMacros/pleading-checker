@@ -139,7 +139,7 @@ Private Sub CheckCancellation()
     If gCancelRun Then Err.Raise ERR_RUN_CANCELLED, "PleadingsEngine", "Run cancelled"
 End Sub
 
-' Public macro target for Application.OnKey "{ESC}".
+' Public macro target for cooperative cancellation.
 ' Must be a parameterless Public Sub so Word can call it by name.
 Public Sub CancelCurrentRun()
     RequestCancelRun
@@ -2160,9 +2160,8 @@ Public Function RunAllPleadingsRules(doc As Document, _
     ' -- Initialise grouped report / comment suppression state --
     InitGroupedReportState
 
-    ' -- Wire Escape cancellation before any long work begins --
+    ' -- Reset cancellation flag before any long work begins --
     ResetCancelRun
-    Application.OnKey "{ESC}", "CancelCurrentRun"
 
     ' -- Capture and suppress screen redraws for performance ----
     Dim wasScreenUpdating As Boolean
@@ -2297,7 +2296,6 @@ RunnerCleanup:
     On Error Resume Next
     Application.ScreenUpdating = wasScreenUpdating
     Application.StatusBar = False   ' restore default status bar
-    Application.OnKey "{ESC}"       ' always restore Escape key
     On Error GoTo 0
 
     ' -- 4. Post-processing: skip if cancelled or errored --------
@@ -2503,7 +2501,6 @@ HighlightCleanup:
     On Error Resume Next
     Application.ScreenUpdating = wasScreenUpdating
     Application.StatusBar = False
-    Application.OnKey "{ESC}"  ' always restore Escape key
     On Error GoTo 0
     TraceExit "ApplyHighlights"
     If hlCancelled Then
@@ -2805,7 +2802,6 @@ TrackedCleanup:
     doc.TrackRevisions = wasTrackingChanges
     Application.ScreenUpdating = wasScreenUpdating
     Application.StatusBar = False
-    Application.OnKey "{ESC}"  ' always restore Escape key
     On Error GoTo 0
     TraceStep "ApplyTrackedChanges", "SUMMARY: applied=" & cntApplied & _
               " comment_only=" & cntCommentOnly & " skipped_anchor=" & cntSkippedAnchor & _
