@@ -599,6 +599,10 @@ Public Function TryDeleteRange(ByVal rng As Range, _
 End Function
 
 ' --- Try to add a comment ---
+' Returns True only if a non-blank comment was successfully created.
+' If commentText is blank after trimming, exits immediately (no comment created).
+' After creation, verifies the comment body is non-empty; deletes the
+' comment if Word left it blank.
 Public Function TryAddComment(ByVal doc As Document, _
                               ByVal anchorRange As Range, _
                               ByVal commentText As String, _
@@ -607,11 +611,38 @@ Public Function TryAddComment(ByVal doc As Document, _
                               ByVal stepName As String) As Boolean
     TryAddComment = False
     Set newComment = Nothing
+
+    ' --- Blank-text guard ---
+    If Len(Trim$(commentText)) = 0 Then
+        Debug.Print "[TryAddComment] SUPPRESSED blank comment text at " & _
+                    procName & "." & stepName
+        Exit Function
+    End If
+
     If Not DEBUG_MODE Then
         On Error Resume Next
         Set newComment = doc.Comments.Add(Range:=anchorRange, Text:=commentText)
-        TryAddComment = (Err.Number = 0)
-        Err.Clear
+        If Err.Number <> 0 Then
+            Err.Clear
+            On Error GoTo 0
+            Exit Function
+        End If
+        ' Verify the comment body is non-empty
+        Dim bodyCheck As String
+        bodyCheck = ""
+        bodyCheck = newComment.Range.Text
+        If Err.Number <> 0 Then bodyCheck = "": Err.Clear
+        If Len(Trim$(bodyCheck)) = 0 Then
+            ' Word created a blank comment -- delete it
+            newComment.Delete
+            If Err.Number <> 0 Then Err.Clear
+            Set newComment = Nothing
+            On Error GoTo 0
+            Debug.Print "[TryAddComment] DELETED blank-body comment at " & _
+                        procName & "." & stepName
+            Exit Function
+        End If
+        TryAddComment = True
         On Error GoTo 0
         Exit Function
     End If
@@ -626,6 +657,20 @@ Public Function TryAddComment(ByVal doc As Document, _
     If Err.Number <> 0 Then
         DebugLogError procName, stepName & " Comments.Add", Err.Number, Err.Description
         Err.Clear
+        On Error GoTo 0
+        Exit Function
+    End If
+
+    ' Verify the comment body is non-empty
+    Dim dbgBody As String
+    dbgBody = ""
+    dbgBody = newComment.Range.Text
+    If Err.Number <> 0 Then dbgBody = "": Err.Clear
+    If Len(Trim$(dbgBody)) = 0 Then
+        DebugLog procName & "." & stepName & ": DELETED blank-body comment"
+        newComment.Delete
+        If Err.Number <> 0 Then Err.Clear
+        Set newComment = Nothing
         On Error GoTo 0
         Exit Function
     End If

@@ -2470,9 +2470,16 @@ Public Sub ApplyHighlights(doc As Document, _
                 If addComments Then
                     If ShouldCreateCommentForRule( _
                             CStr(GetIssueProp(finding, "RuleName")), finding) Then
-                        TryAddComment doc, rng, BuildCommentText(finding), cmtRef, _
-                            "ApplyHighlights", "comment i=" & i
-                        gCommentsCreated = gCommentsCreated + 1
+                        Dim hlCommentText As String
+                        hlCommentText = BuildCommentText(finding)
+                        If Len(Trim$(hlCommentText)) > 0 Then
+                            If TryAddComment(doc, rng, hlCommentText, cmtRef, _
+                                "ApplyHighlights", "comment i=" & i) Then
+                                gCommentsCreated = gCommentsCreated + 1
+                            End If
+                        Else
+                            Debug.Print "[ApplyHighlights] SUPPRESSED blank comment i=" & i
+                        End If
                     End If
                 End If
             Else
@@ -2549,9 +2556,6 @@ Public Sub ApplySuggestionsAsTrackedChanges(doc As Document, _
     Dim sugText As String
     Dim origText As String
     Dim skipAmendment As Boolean
-    Dim chIdx As Long, ch As String
-    Dim isOnlyWhitespace As Boolean
-    Dim origHasPeriod As Boolean, sugHasPeriod As Boolean
 
     ' Get document story length for anchor validation
     Dim docStoryLen As Long
@@ -2563,8 +2567,15 @@ Public Sub ApplySuggestionsAsTrackedChanges(doc As Document, _
     ' Counters for debug summary
     Dim cntApplied As Long, cntCommentOnly As Long
     Dim cntSkippedAnchor As Long, cntSkippedUnsafe As Long
+    Dim cntCommentAttempt As Long, cntCommentCreated As Long
+    Dim cntBlankSuppressed As Long, cntHardBlocked As Long
     cntApplied = 0: cntCommentOnly = 0
     cntSkippedAnchor = 0: cntSkippedUnsafe = 0
+    cntCommentAttempt = 0: cntCommentCreated = 0
+    cntBlankSuppressed = 0: cntHardBlocked = 0
+
+    ' Shared comment-text local used throughout the loop
+    Dim commentText As String
 
     ' Process from end of document backwards so tracked-change
     ' insertions / deletions do not shift positions of later issues
@@ -2603,49 +2614,57 @@ Public Sub ApplySuggestionsAsTrackedChanges(doc As Document, _
                     origStart = rng.Start
                     origLen = rng.End - rng.Start
 
-                    ' --- FINDING OUTPUT MODE GATE (Section A) ---
-                    ' Only OUTPUT_TRACKED_SAFE findings proceed to tracked edit
+                    ' ============================================================
+                    '  SINGLE DECISION GATE: GetFindingOutputMode
+                    '  This is the ONE place that decides tracked-safe vs
+                    '  comment-only vs report-only.  Hard-block, tracked-safe
+                    '  allow-list, comment-safe allow-list, and operation-type
+                    '  validation are all centralised there.
+                    ' ============================================================
                     Dim outputMode As String
                     outputMode = GetFindingOutputMode(finding, doc)
+
+                    Debug.Print "[ApplyTC] i=" & i & " rule=" & thisRuleName & _
+                                " outputMode=" & outputMode
+
                     If outputMode <> OUTPUT_TRACKED_SAFE Then
-                        cntSkippedUnsafe = cntSkippedUnsafe + 1
+                        cntHardBlocked = cntHardBlocked + 1
                         gEditsSkippedUnsafe = gEditsSkippedUnsafe + 1
                         TraceStep "ApplyTrackedChanges", "SKIPPED output_mode=" & outputMode & _
                                   " i=" & i & " rule=" & thisRuleName
                         If addComments And outputMode = OUTPUT_COMMENT_ONLY And _
                            ShouldCreateCommentForRule(thisRuleName, finding) Then
-                            TryAddComment doc, rng, BuildCommentText(finding), cmtRef, _
-                                "ApplyTrackedChanges", "mode-downgrade-comment i=" & i
-                            gCommentsCreated = gCommentsCreated + 1
+                            commentText = BuildCommentText(finding)
+                            cntCommentAttempt = cntCommentAttempt + 1
+                            If Len(Trim$(commentText)) > 0 Then
+                                Debug.Print "[ApplyTC] i=" & i & " comment text='" & _
+                                            Left$(commentText, 60) & "'"
+                                If TryAddComment(doc, rng, commentText, cmtRef, _
+                                    "ApplyTrackedChanges", "mode-downgrade-comment i=" & i) Then
+                                    gCommentsCreated = gCommentsCreated + 1
+                                    cntCommentCreated = cntCommentCreated + 1
+                                    Debug.Print "[ApplyTC] i=" & i & " comment CREATED"
+                                Else
+                                    Debug.Print "[ApplyTC] i=" & i & " comment FAILED"
+                                End If
+                            Else
+                                cntBlankSuppressed = cntBlankSuppressed + 1
+                                Debug.Print "[ApplyTC] i=" & i & " SUPPRESSED blank comment"
+                            End If
                         End If
                         GoTo NextApplyIssue
                     End If
 
-                    ' --- UNSAFE AUTOFIX CATEGORY GATE (legacy, kept as belt-and-braces) ---
-                    If IsUnsafeAutofixRule(thisRuleName) Then
-                        cntSkippedUnsafe = cntSkippedUnsafe + 1
-                        gEditsSkippedUnsafe = gEditsSkippedUnsafe + 1
-                        TraceStep "ApplyTrackedChanges", "SKIPPED unsafe-category i=" & i & _
-                                  " rule=" & thisRuleName
-                        If addComments And ShouldCreateCommentForRule(thisRuleName, finding) Then
-                            TryAddComment doc, rng, BuildCommentText(finding), cmtRef, _
-                                "ApplyTrackedChanges", "unsafe-category-comment i=" & i
-                            gCommentsCreated = gCommentsCreated + 1
-                        End If
-                        GoTo NextApplyIssue
-                    End If
+                    ' --- From here, outputMode = OUTPUT_TRACKED_SAFE ---
 
                     ' Use ReplacementText only.  Suggestion is human-readable
                     ' prose and must NEVER be applied as literal replacement text.
                     sugText = ""
                     If Not HasReplacementText(finding) Then
+                        cntSkippedUnsafe = cntSkippedUnsafe + 1
                         TraceStep "ApplyTrackedChanges", "NO ReplacementText for i=" & i & _
-                                  " rule=" & thisRuleName & "; comment-only"
-                        If addComments And ShouldCreateCommentForRule(thisRuleName, finding) Then
-                            TryAddComment doc, rng, BuildCommentText(finding), cmtRef, _
-                                "ApplyTrackedChanges", "no-replacement-comment i=" & i
-                            gCommentsCreated = gCommentsCreated + 1
-                        End If
+                                  " rule=" & thisRuleName & "; skip"
+                        Debug.Print "[ApplyTC] i=" & i & " SKIPPED: no ReplacementText"
                         GoTo NextApplyIssue
                     End If
                     sugText = CStr(GetIssueProp(finding, "ReplacementText"))
@@ -2655,79 +2674,29 @@ Public Sub ApplySuggestionsAsTrackedChanges(doc As Document, _
                     origText = rng.Text
                     If Err.Number <> 0 Then origText = "": Err.Clear
 
-                    skipAmendment = False
-
-                    ' --- STRONG ANCHOR GATE ---
-                    ' Require: MatchedText non-empty, contains alphanumeric,
-                    ' current rng.Text exactly equals MatchedText
+                    ' --- STALE-TEXT CHECK ---
+                    ' Verify the document text still matches what the rule saw.
+                    ' This is the only inline validation needed; the output-mode
+                    ' gate already validated rule family, operation type, and
+                    ' document complexity.
                     Dim storedMatch As String
                     storedMatch = CStr(GetIssueProp(finding, "MatchedText"))
+                    skipAmendment = False
 
                     If Len(storedMatch) = 0 Then
                         skipAmendment = True
-                        Debug.Print "STRONG_ANCHOR: Skipped -- empty MatchedText for rule=" & thisRuleName
-                    ElseIf Not IsStrongTrackedAnchor(storedMatch) Then
-                        skipAmendment = True
-                        Debug.Print "STRONG_ANCHOR: Skipped -- no alphanumeric in '" & Left$(storedMatch, 30) & "'"
+                        Debug.Print "[ApplyTC] i=" & i & " SKIPPED: empty MatchedText"
                     ElseIf Len(origText) > 0 And origText <> storedMatch Then
                         skipAmendment = True
-                        Debug.Print "STRONG_ANCHOR: Skipped stale -- stored='" & Left$(storedMatch, 30) & "' actual='" & Left$(origText, 30) & "'"
+                        Debug.Print "[ApplyTC] i=" & i & " SKIPPED stale: stored='" & _
+                                    Left$(storedMatch, 30) & "' actual='" & Left$(origText, 30) & "'"
                     End If
 
-                    ' --- WHITESPACE-ONLY GATE ---
-                    ' Never auto-apply findings whose MatchedText is only whitespace/punctuation
-                    If Not skipAmendment And Len(origText) > 0 Then
-                        If Not IsStrongTrackedAnchor(origText) Then
+                    ' --- UNICODE SAFETY: reject replacement char U+FFFD ---
+                    If Not skipAmendment Then
+                        If Not IsReplacementSafe(sugText) Then
                             skipAmendment = True
-                            Debug.Print "WHITESPACE GATE: Skipped -- origText has no alphanumeric"
-                        End If
-                    End If
-
-                    ' For deletions (empty suggestion = delete the range)
-                    If Not skipAmendment Then
-                        If Len(sugText) = 0 And Len(origText) > 0 Then
-                            For chIdx = 1 To Len(origText)
-                                ch = Mid$(origText, chIdx, 1)
-                                If (ch >= "A" And ch <= "Z") Or _
-                                   (ch >= "a" And ch <= "z") Or _
-                                   (ch >= "0" And ch <= "9") Or _
-                                   ch = "." Then
-                                    skipAmendment = True
-                                    Debug.Print "WHITESPACE VALIDATION: Skipped deletion of '" & origText & "'"
-                                    Exit For
-                                End If
-                            Next chIdx
-                        End If
-                    End If
-
-                    ' For replacements, verify we are only changing whitespace
-                    If Not skipAmendment Then
-                        If Len(sugText) > 0 And Len(origText) > 0 Then
-                            isOnlyWhitespace = True
-                            For chIdx = 1 To Len(origText)
-                                ch = Mid$(origText, chIdx, 1)
-                                If ch <> " " And ch <> vbTab And ch <> ChrW(160) Then
-                                    isOnlyWhitespace = False
-                                    Exit For
-                                End If
-                            Next chIdx
-
-                            ' Whitespace-only origText: never tracked-change
-                            If isOnlyWhitespace Then
-                                skipAmendment = True
-                                Debug.Print "WHITESPACE GATE: Skipped whitespace-only origText"
-                            End If
-
-                            If Not skipAmendment And Not isOnlyWhitespace Then
-                                If Len(sugText) < Len(origText) Then
-                                    origHasPeriod = (InStr(1, origText, ".") > 0)
-                                    sugHasPeriod = (InStr(1, sugText, ".") > 0)
-                                    If origHasPeriod And Not sugHasPeriod Then
-                                        skipAmendment = True
-                                        Debug.Print "WHITESPACE VALIDATION: Skipped -- would remove period"
-                                    End If
-                                End If
-                            End If
+                            Debug.Print "[ApplyTC] i=" & i & " SKIPPED: unsafe replacement (U+FFFD)"
                         End If
                     End If
 
@@ -2736,28 +2705,12 @@ Public Sub ApplySuggestionsAsTrackedChanges(doc As Document, _
                         gEditsSkippedUnsafe = gEditsSkippedUnsafe + 1
                         TraceStep "ApplyTrackedChanges", "SKIPPED amendment i=" & i & _
                                   " orig=""" & Left$(origText, 30) & """ sug=""" & Left$(sugText, 30) & """"
-                        If addComments And ShouldCreateCommentForRule(thisRuleName, finding) Then
-                            TryAddComment doc, rng, BuildCommentText(finding), cmtRef, _
-                                "ApplyTrackedChanges", "skip-comment i=" & i
-                            gCommentsCreated = gCommentsCreated + 1
-                        End If
                         GoTo NextApplyIssue
                     End If
 
-                    ' --- UNICODE SAFETY: reject replacement char U+FFFD ---
-                    If Not IsReplacementSafe(sugText) Then
-                        cntSkippedUnsafe = cntSkippedUnsafe + 1
-                        gEditsSkippedUnsafe = gEditsSkippedUnsafe + 1
-                        TraceStep "ApplyTrackedChanges", "SKIPPED UNSAFE REPLACEMENT (U+FFFD) i=" & i
-                        If addComments And ShouldCreateCommentForRule(thisRuleName, finding) Then
-                            TryAddComment doc, rng, BuildCommentText(finding), cmtRef, _
-                                "ApplyTrackedChanges", "unsafe-replacement-comment i=" & i
-                            gCommentsCreated = gCommentsCreated + 1
-                        End If
-                        GoTo NextApplyIssue
-                    End If
-
-                    ' Apply tracked change
+                    ' --- APPLY TRACKED CHANGE ---
+                    Debug.Print "[ApplyTC] i=" & i & " APPLYING: '" & _
+                                Left$(origText, 30) & "' -> '" & Left$(sugText, 30) & "'"
                     TraceStep "ApplyTrackedChanges", "APPLYING i=" & i & _
                               " range=" & origStart & "-" & (origStart + origLen) & _
                               " orig=""" & Left$(origText, 30) & """ -> """ & Left$(sugText, 30) & """"
@@ -2766,12 +2719,24 @@ Public Sub ApplySuggestionsAsTrackedChanges(doc As Document, _
                     cntApplied = cntApplied + 1
                     gTrackedEditsApplied = gTrackedEditsApplied + 1
                 Else
+                    ' autoFix = False -- comment-only finding
                     cntCommentOnly = cntCommentOnly + 1
                     If addComments And ShouldCreateCommentForRule( _
                             CStr(GetIssueProp(finding, "RuleName")), finding) Then
-                        TryAddComment doc, rng, BuildCommentText(finding), cmtRef, _
-                            "ApplyTrackedChanges", "comment-only i=" & i
-                        gCommentsCreated = gCommentsCreated + 1
+                        commentText = BuildCommentText(finding)
+                        cntCommentAttempt = cntCommentAttempt + 1
+                        If Len(Trim$(commentText)) > 0 Then
+                            Debug.Print "[ApplyTC] i=" & i & " comment-only text='" & _
+                                        Left$(commentText, 60) & "'"
+                            If TryAddComment(doc, rng, commentText, cmtRef, _
+                                "ApplyTrackedChanges", "comment-only i=" & i) Then
+                                gCommentsCreated = gCommentsCreated + 1
+                                cntCommentCreated = cntCommentCreated + 1
+                            End If
+                        Else
+                            cntBlankSuppressed = cntBlankSuppressed + 1
+                            Debug.Print "[ApplyTC] i=" & i & " SUPPRESSED blank comment-only"
+                        End If
                     End If
                 End If
             Else
@@ -2807,12 +2772,21 @@ TrackedCleanup:
     Application.ScreenUpdating = wasScreenUpdating
     Application.StatusBar = False
     On Error GoTo 0
-    TraceStep "ApplyTrackedChanges", "SUMMARY: applied=" & cntApplied & _
-              " comment_only=" & cntCommentOnly & " skipped_anchor=" & cntSkippedAnchor & _
-              " skipped_unsafe=" & cntSkippedUnsafe
-    Debug.Print "ApplyTrackedChanges SUMMARY: applied=" & cntApplied & _
-                " comment_only=" & cntCommentOnly & " skipped_anchor=" & cntSkippedAnchor & _
-                " skipped_unsafe=" & cntSkippedUnsafe
+
+    ' --- Diagnostic summary ---
+    Dim summaryMsg As String
+    summaryMsg = "ApplyTrackedChanges SUMMARY:" & vbCrLf & _
+                 "  tracked-eligible:   " & (cntApplied + cntSkippedUnsafe) & vbCrLf & _
+                 "  tracked-applied:    " & cntApplied & vbCrLf & _
+                 "  comment-attempt:    " & cntCommentAttempt & vbCrLf & _
+                 "  comment-created:    " & cntCommentCreated & vbCrLf & _
+                 "  blank-suppressed:   " & cntBlankSuppressed & vbCrLf & _
+                 "  hard-blocked:       " & cntHardBlocked & vbCrLf & _
+                 "  skipped-anchor:     " & cntSkippedAnchor & vbCrLf & _
+                 "  skipped-unsafe:     " & cntSkippedUnsafe & vbCrLf & _
+                 "  comment-only:       " & cntCommentOnly
+    Debug.Print summaryMsg
+    TraceStep "ApplyTrackedChanges", summaryMsg
     TraceExit "ApplyTrackedChanges"
     If tcCancelled Then
         Err.Raise ERR_RUN_CANCELLED, "PleadingsEngine", "Run cancelled"
@@ -2826,10 +2800,10 @@ End Sub
 ' ============================================================
 Private Function BuildCommentText(ByVal finding As Object) As String
     Dim txt As String
-    txt = GetIssueProp(finding, "Issue")
+    txt = CStr(GetIssueProp(finding, "Issue"))
 
     Dim rn As String
-    rn = LCase$(GetIssueProp(finding, "RuleName"))
+    rn = LCase$(CStr(GetIssueProp(finding, "RuleName")))
 
     ' Repeated word: clean to "Repeated word 'X'" only
     If rn = "repeated_words" Then
@@ -2837,6 +2811,8 @@ Private Function BuildCommentText(ByVal finding As Object) As String
         Dim dashPos As Long
         dashPos = InStr(1, txt, " -- ")
         If dashPos > 0 Then txt = Left$(txt, dashPos - 1)
+        If Len(Trim$(txt)) = 0 Then txt = CStr(GetIssueProp(finding, "Suggestion"))
+        If Len(Trim$(txt)) = 0 Then txt = "Review this finding."
         BuildCommentText = txt
         Exit Function
     End If
@@ -2850,15 +2826,23 @@ Private Function BuildCommentText(ByVal finding As Object) As String
         If dotEnd > 0 And dotEnd < Len(txt) Then
             txt = Left$(txt, dotEnd)
         End If
+        If Len(Trim$(txt)) = 0 Then txt = CStr(GetIssueProp(finding, "Suggestion"))
+        If Len(Trim$(txt)) = 0 Then txt = "Review this finding."
         BuildCommentText = txt
         Exit Function
     End If
 
     Dim sug As String
-    sug = GetIssueProp(finding, "Suggestion")
+    sug = CStr(GetIssueProp(finding, "Suggestion"))
     ' Only append suggestion text if it's human-readable (not a literal replacement)
-    If Len(sug) > 0 And Len(Trim(sug)) > 1 Then
+    If Len(sug) > 0 And Len(Trim$(sug)) > 1 Then
         txt = txt & " -- Suggestion: " & sug
+    End If
+
+    ' Defensive fallback: never return blank
+    If Len(Trim$(txt)) = 0 Then
+        txt = sug
+        If Len(Trim$(txt)) = 0 Then txt = "Review this finding."
     End If
     BuildCommentText = txt
 End Function
