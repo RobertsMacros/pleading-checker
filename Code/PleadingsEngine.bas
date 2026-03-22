@@ -408,12 +408,16 @@ End Function
 
 ' Is this rule explicitly in the tracked-safe allow-list?
 Public Function IsTrackedSafeRule(ByVal ruleName As String) As Boolean
-    If gTrackedSafeRules Is Nothing Then
-        IsTrackedSafeRule = False
-        Exit Function
-    End If
+    If gTrackedSafeRules Is Nothing Then EnsureAllowListsInitialized
     IsTrackedSafeRule = gTrackedSafeRules.Exists(LCase$(ruleName))
 End Function
+
+' Lazy-init allow-list dictionaries so public queries work
+' before a full engine run (e.g. from unit tests).
+Private Sub EnsureAllowListsInitialized()
+    If Not gTrackedSafeRules Is Nothing Then Exit Sub
+    InitGroupedReportState
+End Sub
 
 ' Is this rule allowed to create inline comments?
 Public Function IsCommentSafeRule(ByVal ruleName As String) As Boolean
@@ -600,7 +604,10 @@ Private Function IsPunctuationOnlyChange(ByVal orig As String, _
             replAlpha = replAlpha & Mid$(repl, i, 1)
         End If
     Next i
-    IsPunctuationOnlyChange = (origAlpha = replAlpha And Len(origAlpha) > 0)
+    ' Both strings are non-empty (caller guarantees this).  If the alpha
+    ' content is identical (including both-empty = pure punctuation), the
+    ' change is punctuation-only.  E.g. "-" -> en-dash.
+    IsPunctuationOnlyChange = (origAlpha = replAlpha)
 End Function
 
 ' Public accessors for grouped report data
@@ -3474,6 +3481,17 @@ Public Function ParsePageList(ByVal inputText As String) As Long()
 
     inputText = NormalizePageRangeInput(inputText)
     If Len(inputText) = 0 Then GoTo EmptyExit
+
+    ' Reject inputs whose first non-space character is not a digit.
+    ' Valid page ranges always start with a number; this catches
+    ' leaked placeholder text like "e.g. 1,3,5-8,9:30".
+    Dim firstNonSpace As Long
+    Dim fc As String
+    For firstNonSpace = 1 To Len(inputText)
+        fc = Mid$(inputText, firstNonSpace, 1)
+        If fc <> " " Then Exit For
+    Next firstNonSpace
+    If Not (fc >= "0" And fc <= "9") Then GoTo EmptyExit
 
     parts = Split(inputText, ",")
     For i = LBound(parts) To UBound(parts)
