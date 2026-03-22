@@ -164,7 +164,6 @@ Private Sub InitGroupedReportState()
 
     ' -- Unsafe autofix rules (report-only, never tracked-edit) --
     Set gUnsafeAutofixRules = CreateObject("Scripting.Dictionary")
-    gUnsafeAutofixRules("double_spaces") = True
     gUnsafeAutofixRules("missing_space_after_dot") = True
     gUnsafeAutofixRules("space_before_punct") = True
     gUnsafeAutofixRules("hyphens") = True
@@ -183,13 +182,11 @@ Private Sub InitGroupedReportState()
     gUnsafeAutofixRules("custom_rule") = True
     gUnsafeAutofixRules("brand_name_enforcement") = True
 
-    ' -- Tracked-safe allow-list (EMPTY -- no rules are tracked-safe) --
-    ' All auto-fix via tracked changes is disabled.  Spelling, legal
-    ' terms, capitalisation, repeated words, hyphens, dashes, brackets,
-    ' footnotes, custom rules, and brand rules are all EXCLUDED.
+    ' -- Tracked-safe allow-list --
     ' Only add a rule here after it has been proven exact-match safe
     ' on large, heavily-redlined documents.
     Set gTrackedSafeRules = CreateObject("Scripting.Dictionary")
+    gTrackedSafeRules("double_spaces") = True
 
     ' -- Comment-safe allow-list (rules that may create inline comments) --
     Set gCommentSafeRules = CreateObject("Scripting.Dictionary")
@@ -397,7 +394,7 @@ Public Function GetFindingOutputMode(ByVal finding As Object, _
         ' Structural / punctuation / spacing
         Case "hyphens", "dash_usage", "bracket_integrity", _
              "slash_style", "triplicate_punctuation", _
-             "double_spaces", "missing_space_after_dot", _
+             "missing_space_after_dot", _
              "space_before_punct", "double_commas", "trailing_spaces"
             hardBlock = True
         ' Footnote rules
@@ -717,17 +714,24 @@ Public Function GenerateTextReport(issues As Collection, _
     On Error GoTo TxtReportErr
 
     ' ASCII art header
-    Print #fileNum, "============================================================"
-    Print #fileNum, "  ____       _               _   _       "
-    Print #fileNum, " |  _ \ ___ | |__   ___ _ __| |_( )___   "
-    Print #fileNum, " | |_) / _ \| '_ \ / _ \ '__| __|// __| "
-    Print #fileNum, " |  _ < (_) | |_) |  __/ |  | |_  \__ \ "
-    Print #fileNum, " |_| \_\___/|_.__/ \___|_|   \__| |___/  "
-    Print #fileNum, "  __  __                              "
-    Print #fileNum, " |  \/  | __ _  ___ _ __ ___  ___     "
-    Print #fileNum, " | |\/| |/ _` |/ __| '__/ _ \/ __|    "
-    Print #fileNum, " | |  | | (_| | (__| | | (_) \__ \    "
-    Print #fileNum, " |_|  |_|\__,_|\___|_|  \___/|___/    "
+    Print #fileNum, ""
+    Print #fileNum, " .==================-.   :=======.        -=======."
+    Print #fileNum, " .:::::::::===========-  =========       ========="
+    Print #fileNum, "         =============== .=========.     =========-"
+    Print #fileNum, "  :::::::......:======== :=========-   :==========."
+    Print #fileNum, " -======.        ======: ===========. -==========="
+    Print #fileNum, " .=======        :======..===========--===========-"
+    Print #fileNum, " :=======      .======== :=================:======."
+    Print #fileNum, " -=====================  ======: ========- ======="
+    Print #fileNum, " .====================   .======  :======:  ======-"
+    Print #fileNum, " :======-  =======-      -======   -====   :======."
+    Print #fileNum, " -======    -=======     ======:    ==-    ======="
+    Print #fileNum, "  =======     -=======   :======     .:     ======:"
+    Print #fileNum, " :=======      :=======  -======           :======."
+    Print #fileNum, " -======.       :======= ======:           ======="
+    Print #fileNum, ""
+    Print #fileNum, "  ::: ::  -:-:- :-:.--::-:--  -:.:: ::  :-:-:..:-.::.:-"
+    Print #fileNum, "  .:.:- =  = = =--:-=:.=. =.=  - = == - :::-:-=.=  = -.-:"
     Print #fileNum, ""
     Print #fileNum, "  PLEADINGS CHECKER REPORT"
     Print #fileNum, "============================================================"
