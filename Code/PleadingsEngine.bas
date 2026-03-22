@@ -139,6 +139,12 @@ Private Sub CheckCancellation()
     If gCancelRun Then Err.Raise ERR_RUN_CANCELLED, "PleadingsEngine", "Run cancelled"
 End Sub
 
+' Public macro target for Application.OnKey "{ESC}".
+' Must be a parameterless Public Sub so Word can call it by name.
+Public Sub CancelCurrentRun()
+    RequestCancelRun
+End Sub
+
 ' ============================================================
 '  GROUPED REPORT + COMMENT SUPPRESSION HELPERS
 ' ============================================================
@@ -264,7 +270,7 @@ Private Sub BuildSpellingGroups(ByVal issues As Collection)
                 repTxt = CStr(GetIssueProp(finding, "Suggestion"))
             End If
             If Len(matched) = 0 Then matched = "(unknown)"
-            If Len(repTxt) = 0 Then repTxt = "(no suggestion)"
+            If Len(repTxt) = 0 Then repTxt = "(no replacement)"
             Dim pairKey As String
             pairKey = LCase$(matched) & "|" & LCase$(repTxt)
             If gSpellingGroups.Exists(pairKey) Then
@@ -1003,7 +1009,8 @@ End Function
 '  QUICK RUN (fallback when launcher/form is not imported)
 '  Prompts for target document via GetTargetDocument(), then
 '  asks for an optional page range before running all rules
-'  with UK spelling.  Shows summary via MsgBox.
+'  with UK spelling.  Report/review only -- does NOT auto-edit
+'  the document.  Use the full form for apply options.
 ' ============================================================
 Public Sub RunQuick()
     TraceEnter "RunQuick"
@@ -1036,8 +1043,9 @@ Public Sub RunQuick()
     If issues.Count = 0 Then
         MsgBox "No issues found.", vbInformation, "Pleadings Checker"
     Else
-        MsgBox summary, vbInformation, "Pleadings Checker"
-        ApplySuggestionsAsTrackedChanges targetDoc, issues, True
+        MsgBox summary & vbCrLf & vbCrLf & _
+               "Use the full form (PleadingsChecker) to apply suggestions.", _
+               vbInformation, "Pleadings Checker"
     End If
     TraceExit "RunQuick", issues.Count & " issues"
 End Sub
@@ -2131,6 +2139,10 @@ Public Function RunAllPleadingsRules(doc As Document, _
     ' -- Initialise grouped report / comment suppression state --
     InitGroupedReportState
 
+    ' -- Wire Escape cancellation before any long work begins --
+    ResetCancelRun
+    Application.OnKey "{ESC}", "CancelCurrentRun"
+
     ' -- Capture and suppress screen redraws for performance ----
     Dim wasScreenUpdating As Boolean
     wasScreenUpdating = Application.ScreenUpdating
@@ -2234,58 +2246,65 @@ Public Function RunAllPleadingsRules(doc As Document, _
     End If
 
 RunnerCleanup:
-    ' -- Check if we got here via cancellation --
+    ' -- 1. Capture whether we arrived via cancellation ----------
     Dim wasCancelled As Boolean
     wasCancelled = (Err.Number = ERR_RUN_CANCELLED)
     If wasCancelled Then Err.Clear
 
-    ' -- Free prechecks cached data --------------------------------
+    ' -- 2. Tear down caches (always) ----------------------------
+    On Error Resume Next
     Prechecks.ClearPrechecks
+    On Error GoTo 0
 
-    ' -- Restore application state (always runs) ----------------
+    ' -- 3. Restore application state (always) -------------------
     On Error Resume Next
     Application.ScreenUpdating = wasScreenUpdating
     Application.StatusBar = False   ' restore default status bar
     Application.OnKey "{ESC}"       ' always restore Escape key
     On Error GoTo 0
 
-    ' -- Re-raise cancellation so caller can handle it --
+    ' -- 4. Post-processing: skip if cancelled -------------------
+    If Not wasCancelled Then
+        ' Filter out issues inside block quotes / quoted text
+        On Error Resume Next
+        PerfTimerStart "FilterBlockQuoteIssues"
+        Set allIssues = FilterBlockQuoteIssues(doc, allIssues)
+        If Err.Number <> 0 Then
+            ruleErrorCount = ruleErrorCount + 1
+            ruleErrorLog = ruleErrorLog & "FilterBlockQuoteIssues (Err " & Err.Number & ": " & Err.Description & ")" & vbCrLf
+            DebugLogError "RunAllPleadingsRules", "FilterBlockQuoteIssues", Err.Number, Err.Description
+            Err.Clear
+        End If
+        PerfTimerEnd "FilterBlockQuoteIssues"
+        On Error GoTo 0
+
+        ' Build grouped report data (must happen after all filtering)
+        BuildSpellingGroups allIssues
+        BuildFootnoteGroups allIssues
+
+        ' Print performance summary
+        If ENABLE_PROFILING Then
+            Dim perfSummary As String
+            perfSummary = GetPerformanceSummary()
+            Debug.Print perfSummary
+        End If
+
+        ' Print debug summary
+        PrintDebugSummary allIssues
+
+        TraceStep "RunAllPleadingsRules", "total issues: " & allIssues.Count & _
+                  ", rule errors: " & ruleErrorCount
+        TraceExit "RunAllPleadingsRules", allIssues.Count & " issues"
+    Else
+        TraceExit "RunAllPleadingsRules", "CANCELLED"
+    End If
+
+    Set RunAllPleadingsRules = allIssues
+
+    ' -- 5. Re-raise cancellation AFTER all state is restored ----
     If wasCancelled Then
         Err.Raise ERR_RUN_CANCELLED, "PleadingsEngine", "Run cancelled"
     End If
-
-    ' -- Filter out issues inside block quotes / quoted text -----
-    On Error Resume Next
-    PerfTimerStart "FilterBlockQuoteIssues"
-    Set allIssues = FilterBlockQuoteIssues(doc, allIssues)
-    If Err.Number <> 0 Then
-        ruleErrorCount = ruleErrorCount + 1
-        ruleErrorLog = ruleErrorLog & "FilterBlockQuoteIssues (Err " & Err.Number & ": " & Err.Description & ")" & vbCrLf
-        DebugLogError "RunAllPleadingsRules", "FilterBlockQuoteIssues", Err.Number, Err.Description
-        Err.Clear
-    End If
-    PerfTimerEnd "FilterBlockQuoteIssues"
-    On Error GoTo 0
-
-    ' -- Build grouped report data (must happen after all filtering) --
-    BuildSpellingGroups allIssues
-    BuildFootnoteGroups allIssues
-
-    ' -- Print performance summary --------------------------------
-    If ENABLE_PROFILING Then
-        Dim perfSummary As String
-        perfSummary = GetPerformanceSummary()
-        Debug.Print perfSummary
-    End If
-
-    ' -- Print debug summary --------------------------------
-    PrintDebugSummary allIssues
-
-    TraceStep "RunAllPleadingsRules", "total issues: " & allIssues.Count & _
-              ", rule errors: " & ruleErrorCount
-    TraceExit "RunAllPleadingsRules", allIssues.Count & " issues"
-
-    Set RunAllPleadingsRules = allIssues
 End Function
 
 ' ============================================================
