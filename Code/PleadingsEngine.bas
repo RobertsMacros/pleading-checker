@@ -2267,10 +2267,26 @@ Public Function RunAllPleadingsRules(doc As Document, _
     End If
 
 RunnerCleanup:
-    ' -- 1. Capture whether we arrived via cancellation ----------
+    ' -- 1. Capture the error that brought us here ---------------
     Dim wasCancelled As Boolean
-    wasCancelled = (Err.Number = ERR_RUN_CANCELLED)
-    If wasCancelled Then Err.Clear
+    Dim hadUnexpectedErr As Boolean
+    Dim savedErrNum As Long
+    Dim savedErrDesc As String
+    Dim savedErrSrc As String
+
+    savedErrNum = Err.Number
+    savedErrDesc = Err.Description
+    savedErrSrc = Err.Source
+    wasCancelled = (savedErrNum = ERR_RUN_CANCELLED)
+    hadUnexpectedErr = (savedErrNum <> 0 And Not wasCancelled)
+    If savedErrNum <> 0 Then Err.Clear
+
+    ' Log unexpected errors so they are visible in the error log
+    If hadUnexpectedErr Then
+        ruleErrorCount = ruleErrorCount + 1
+        ruleErrorLog = ruleErrorLog & "RunnerCleanup (Err " & savedErrNum & _
+                       ": " & savedErrDesc & " [" & savedErrSrc & "])" & vbCrLf
+    End If
 
     ' -- 2. Tear down caches (always) ----------------------------
     On Error Resume Next
@@ -2284,8 +2300,8 @@ RunnerCleanup:
     Application.OnKey "{ESC}"       ' always restore Escape key
     On Error GoTo 0
 
-    ' -- 4. Post-processing: skip if cancelled -------------------
-    If Not wasCancelled Then
+    ' -- 4. Post-processing: skip if cancelled or errored --------
+    If Not wasCancelled And Not hadUnexpectedErr Then
         ' Filter out issues inside block quotes / quoted text
         On Error Resume Next
         PerfTimerStart "FilterBlockQuoteIssues"
@@ -2316,15 +2332,19 @@ RunnerCleanup:
         TraceStep "RunAllPleadingsRules", "total issues: " & allIssues.Count & _
                   ", rule errors: " & ruleErrorCount
         TraceExit "RunAllPleadingsRules", allIssues.Count & " issues"
-    Else
+    ElseIf wasCancelled Then
         TraceExit "RunAllPleadingsRules", "CANCELLED"
+    Else
+        TraceExit "RunAllPleadingsRules", "ERROR " & savedErrNum
     End If
 
     Set RunAllPleadingsRules = allIssues
 
-    ' -- 5. Re-raise cancellation AFTER all state is restored ----
+    ' -- 5. Re-raise the original error AFTER all state is restored --
     If wasCancelled Then
         Err.Raise ERR_RUN_CANCELLED, "PleadingsEngine", "Run cancelled"
+    ElseIf hadUnexpectedErr Then
+        Err.Raise savedErrNum, savedErrSrc, savedErrDesc
     End If
 End Function
 
@@ -2468,15 +2488,29 @@ NextHighlightIssue:
 
 HighlightCleanup:
     Dim hlCancelled As Boolean
-    hlCancelled = (Err.Number = ERR_RUN_CANCELLED)
-    If hlCancelled Then Err.Clear
+    Dim hlHadErr As Boolean
+    Dim hlErrNum As Long
+    Dim hlErrDesc As String
+    Dim hlErrSrc As String
+
+    hlErrNum = Err.Number
+    hlErrDesc = Err.Description
+    hlErrSrc = Err.Source
+    hlCancelled = (hlErrNum = ERR_RUN_CANCELLED)
+    hlHadErr = (hlErrNum <> 0 And Not hlCancelled)
+    If hlErrNum <> 0 Then Err.Clear
+
     On Error Resume Next
     Application.ScreenUpdating = wasScreenUpdating
     Application.StatusBar = False
     Application.OnKey "{ESC}"  ' always restore Escape key
     On Error GoTo 0
     TraceExit "ApplyHighlights"
-    If hlCancelled Then Err.Raise ERR_RUN_CANCELLED, "PleadingsEngine", "Run cancelled"
+    If hlCancelled Then
+        Err.Raise ERR_RUN_CANCELLED, "PleadingsEngine", "Run cancelled"
+    ElseIf hlHadErr Then
+        Err.Raise hlErrNum, hlErrSrc, hlErrDesc
+    End If
 End Sub
 
 ' ============================================================
@@ -2754,8 +2788,18 @@ NextApplyIssue:
 
 TrackedCleanup:
     Dim tcCancelled As Boolean
-    tcCancelled = (Err.Number = ERR_RUN_CANCELLED)
-    If tcCancelled Then Err.Clear
+    Dim tcHadErr As Boolean
+    Dim tcErrNum As Long
+    Dim tcErrDesc As String
+    Dim tcErrSrc As String
+
+    tcErrNum = Err.Number
+    tcErrDesc = Err.Description
+    tcErrSrc = Err.Source
+    tcCancelled = (tcErrNum = ERR_RUN_CANCELLED)
+    tcHadErr = (tcErrNum <> 0 And Not tcCancelled)
+    If tcErrNum <> 0 Then Err.Clear
+
     ' Single cleanup path: always restore document and application state.
     On Error Resume Next
     doc.TrackRevisions = wasTrackingChanges
@@ -2770,7 +2814,11 @@ TrackedCleanup:
                 " comment_only=" & cntCommentOnly & " skipped_anchor=" & cntSkippedAnchor & _
                 " skipped_unsafe=" & cntSkippedUnsafe
     TraceExit "ApplyTrackedChanges"
-    If tcCancelled Then Err.Raise ERR_RUN_CANCELLED, "PleadingsEngine", "Run cancelled"
+    If tcCancelled Then
+        Err.Raise ERR_RUN_CANCELLED, "PleadingsEngine", "Run cancelled"
+    ElseIf tcHadErr Then
+        Err.Raise tcErrNum, tcErrSrc, tcErrDesc
+    End If
 End Sub
 
 ' ============================================================
@@ -3120,7 +3168,7 @@ Public Function GetUILabel(ByVal ruleName As String) As String
     Dim rn As String
     rn = LCase$(ruleName)
 
-    ' Punctuation sub-rules -> "Punctuation"
+    ' Punctuation sub-rules -> "Punctuation Checker"
     Select Case rn
         Case "slash_style", "bracket_integrity", "hyphens", "dash_usage", _
              "double_commas", "space_before_punct", "missing_space_after_dot", _
@@ -3129,6 +3177,13 @@ Public Function GetUILabel(ByVal ruleName As String) As String
             Exit Function
         Case "spellchecker", "spelling", "licence_license", "check_cheque"
             GetUILabel = "Spellchecker"
+            Exit Function
+        ' Footnote sub-rules -> "Footnote Rules"
+        Case "footnote_integrity", "footnote_harts", _
+             "footnote_terminal_full_stop", "footnote_initial_capital", _
+             "footnote_abbreviation", "footnote_abbreviation_dictionary", _
+             "footnotes_not_endnotes", "footnote_rules", "duplicate_footnotes"
+            GetUILabel = "Footnote Rules"
             Exit Function
         Case "non_english_terms", "known_anglicised_terms_not_italic", _
              "foreign_names_not_italic"
@@ -3213,13 +3268,8 @@ Public Function ShouldCreateCommentForRule(ByVal ruleName As String, _
         End If
     End If
 
-    ' Gate 6: Footnotes -- per-bucket threshold
-    If bucket = "footnote" Then
-        If gGroupedFootnoteCount > MAX_INLINE_FOOTNOTE_COMMENTS Then
-            ShouldCreateCommentForRule = False
-            Exit Function
-        End If
-    End If
+    ' Gate 6: (removed -- unreachable because Gate 2b already
+    ' returns False for all footnote-bucket rules.)
 
     ' Gate 7: Check issue text for spacing sub-types emitted under other rule names
     If Not finding Is Nothing Then
@@ -3817,7 +3867,13 @@ Private Function IssueToJSON(ByVal finding As Object) As String
         repText = CStr(GetIssueProp(finding, "ReplacementText"))
         s = s & "      ""replacement_text"": """ & EscJSON(repText) & """," & vbCrLf
     End If
-    s = s & "      ""auto_fix_safe"": " & IIf(CBool(GetIssueProp(finding, "AutoFixSafe")), "true", "false") & "," & vbCrLf
+    Dim afs As Boolean
+    afs = False
+    On Error Resume Next
+    afs = CBool(GetIssueProp(finding, "AutoFixSafe"))
+    If Err.Number <> 0 Then afs = False: Err.Clear
+    On Error GoTo 0
+    s = s & "      ""auto_fix_safe"": " & IIf(afs, "true", "false") & "," & vbCrLf
     ' Enriched metadata
     Dim mt As String: mt = CStr(GetIssueProp(finding, "MatchedText"))
     If Len(mt) > 0 Then s = s & "      ""matched_text"": """ & EscJSON(Left$(mt, 80)) & """," & vbCrLf
