@@ -585,9 +585,9 @@ Private Sub Test_TrackedSafeGateRejectsDash()
     AssertFalse PleadingsEngine.IsTrackedSafeRule("bracket_integrity"), _
         "TrackedSafeGate: bracket_integrity not tracked-safe"
 
-    ' Spelling should be tracked-safe (it's in the allow-list)
-    AssertTrue PleadingsEngine.IsTrackedSafeRule("spellchecker"), _
-        "TrackedSafeGate: spellchecker IS tracked-safe"
+    ' Spelling must NOT be tracked-safe (allow-list is empty)
+    AssertFalse PleadingsEngine.IsTrackedSafeRule("spellchecker"), _
+        "TrackedSafeGate: spellchecker not tracked-safe"
 
     ' Custom rules must NOT be tracked-safe
     AssertFalse PleadingsEngine.IsTrackedSafeRule("custom_rule"), _
@@ -650,17 +650,15 @@ Private Sub Test_GetFindingOutputMode()
     AssertTrue mode <> PleadingsEngine.OUTPUT_TRACKED_SAFE, _
         "GetFindingOutputMode: dash finding is NOT tracked-safe (got " & mode & ")"
 
-    ' A spelling finding with replacement should be tracked-safe
+    ' A spelling finding must NOT be tracked-safe (hard-blocked);
+    ' it should be comment-only since spellchecker is comment-safe.
     Dim spellFinding As Object
     Set spellFinding = TextAnchoring.CreateIssueDict("spellchecker", "page 1", _
         "US spelling", "Use UK form", 10, 15, "error", True, "colour", "color")
 
     mode = PleadingsEngine.GetFindingOutputMode(spellFinding)
-    ' May be tracked-safe or comment-only depending on doc complexity
-    ' At minimum it should not be REPORT_ONLY for a spelling finding
-    AssertTrue mode = PleadingsEngine.OUTPUT_TRACKED_SAFE Or _
-               mode = PleadingsEngine.OUTPUT_COMMENT_ONLY, _
-        "GetFindingOutputMode: spelling finding is tracked-safe or comment-only (got " & mode & ")"
+    AssertTrue mode = PleadingsEngine.OUTPUT_COMMENT_ONLY, _
+        "GetFindingOutputMode: spelling finding is comment-only (got " & mode & ")"
 End Sub
 
 Private Sub Test_GetReplacementOperationType()

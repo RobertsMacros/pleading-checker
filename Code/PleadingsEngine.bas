@@ -177,17 +177,13 @@ Private Sub InitGroupedReportState()
     gUnsafeAutofixRules("custom_rule") = True
     gUnsafeAutofixRules("brand_name_enforcement") = True
 
-    ' -- Tracked-safe allow-list (very narrow, conservative) --
-    ' Only whitespace/punctuation-only fixes where range exactly matches
-    ' and the rule is known safe. Hyphen, dash, footnote, spelling,
-    ' bracket, and custom rules are explicitly EXCLUDED.
+    ' -- Tracked-safe allow-list (EMPTY -- no rules are tracked-safe) --
+    ' All auto-fix via tracked changes is disabled.  Spelling, legal
+    ' terms, capitalisation, repeated words, hyphens, dashes, brackets,
+    ' footnotes, custom rules, and brand rules are all EXCLUDED.
+    ' Only add a rule here after it has been proven exact-match safe
+    ' on large, heavily-redlined documents.
     Set gTrackedSafeRules = CreateObject("Scripting.Dictionary")
-    gTrackedSafeRules("spellchecker") = True
-    gTrackedSafeRules("licence_license") = True
-    gTrackedSafeRules("check_cheque") = True
-    gTrackedSafeRules("always_capitalise_terms") = True
-    gTrackedSafeRules("mandated_legal_term_forms") = True
-    gTrackedSafeRules("repeated_words") = True
 
     ' -- Comment-safe allow-list (rules that may create inline comments) --
     Set gCommentSafeRules = CreateObject("Scripting.Dictionary")
@@ -200,11 +196,8 @@ Private Sub InitGroupedReportState()
     gCommentSafeRules("brand_name_enforcement") = True
     gCommentSafeRules("custom_rule") = True
     gCommentSafeRules("bracket_integrity") = True
-    gCommentSafeRules("footnote_integrity") = True
-    gCommentSafeRules("footnotes_not_endnotes") = True
-    gCommentSafeRules("footnote_terminal_full_stop") = True
-    gCommentSafeRules("footnote_initial_capital") = True
-    gCommentSafeRules("footnote_abbreviation_dictionary") = True
+    ' Footnote rules are intentionally EXCLUDED from comment-safe.
+    ' They default to grouped/report mode, not inline comments.
     gCommentSafeRules("known_anglicised_terms_not_italic") = True
     gCommentSafeRules("foreign_names_not_italic") = True
     gCommentSafeRules("date_time_format") = True
@@ -258,13 +251,22 @@ Private Sub BuildSpellingGroups(ByVal issues As Collection)
         If GetRuleBucket(CStr(GetIssueProp(finding, "RuleName"))) = "spelling" Then
             gGroupedSpellingCount = gGroupedSpellingCount + 1
             Dim matched As String
-            Dim sug As String
+            Dim repTxt As String
             matched = CStr(GetIssueProp(finding, "MatchedText"))
-            sug = CStr(GetIssueProp(finding, "Suggestion"))
+            ' Canonical key: MatchedText + ReplacementText (not Suggestion).
+            ' ReplacementText is the actual correction; Suggestion is prose.
+            ' Fall back to Suggestion only when ReplacementText is absent.
+            repTxt = ""
+            If HasReplacementText(finding) Then
+                repTxt = CStr(GetIssueProp(finding, "ReplacementText"))
+            End If
+            If Len(repTxt) = 0 Then
+                repTxt = CStr(GetIssueProp(finding, "Suggestion"))
+            End If
             If Len(matched) = 0 Then matched = "(unknown)"
-            If Len(sug) = 0 Then sug = "(no suggestion)"
+            If Len(repTxt) = 0 Then repTxt = "(no suggestion)"
             Dim pairKey As String
-            pairKey = LCase$(matched) & "|" & LCase$(sug)
+            pairKey = LCase$(matched) & "|" & LCase$(repTxt)
             If gSpellingGroups.Exists(pairKey) Then
                 gSpellingGroups(pairKey) = CLng(gSpellingGroups(pairKey)) + 1
             Else
@@ -373,6 +375,17 @@ Public Function GetFindingOutputMode(ByVal finding As Object, _
     If Err.Number <> 0 Then autoFix = False: Err.Clear
     On Error GoTo 0
 
+    ' Step 0: Hard-block -- these rules must NEVER be tracked-safe,
+    ' regardless of AutoFixSafe, allow-list contents, or any other gate.
+    Dim hardBlock As Boolean
+    hardBlock = False
+    Select Case rn
+        Case "spellchecker", "licence_license", "check_cheque", _
+             "repeated_words", "always_capitalise_terms", _
+             "mandated_legal_term_forms"
+            hardBlock = True
+    End Select
+
     ' Step 1: Check if this should be grouped report
     If ShouldForceGroupedReport(bucket, GetBucketCount(bucket), doc) Then
         GetFindingOutputMode = OUTPUT_GROUPED_REPORT
@@ -380,7 +393,8 @@ Public Function GetFindingOutputMode(ByVal finding As Object, _
     End If
 
     ' Step 2: Check if rule is explicitly tracked-safe AND has replacement
-    If autoFix And IsTrackedSafeRule(rn) And HasReplacementText(finding) Then
+    ' Skip entirely for hard-blocked rules.
+    If (Not hardBlock) And autoFix And IsTrackedSafeRule(rn) And HasReplacementText(finding) Then
         ' Additional gate: document must not be complex for inline markup
         If Not DocumentLooksComplexForInlineMarkup(doc) Then
             ' Check operation type is allowed
