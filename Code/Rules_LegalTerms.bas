@@ -20,12 +20,18 @@ Attribute VB_Name = "Rules_LegalTerms"
 '   reliable context handling.
 '
 ' Dependencies:
-'   - PleadingsEngine.bas (IsInPageRange, GetLocationString)
+'   - TextAnchoring.bas (SafeRange, SafeLocationString, AddIssue,
+'     FindAll, IterateParagraphs)
 ' ============================================================
 Option Explicit
 
 Private Const RULE28_NAME As String = "mandated_legal_term_forms"
 Private Const RULE29_NAME As String = "always_capitalise_terms"
+
+' -- Module-level cached term list for Rule29 ----------------
+' Built once, reused across all paragraphs.
+Private r29Terms As Variant
+Private r29Initialised As Boolean
 
 ' -- Module-level dictionary for Rule28 ----------------------
 ' Key = LCase(correct form), Value = correct form (String)
@@ -71,58 +77,36 @@ Private Sub SearchAndFlag(doc As Document, _
                            searchPhrase As String, _
                            correctForm As String, _
                            ByRef issues As Collection)
+    ' Use FindAll: wholeWord=True, matchCase=False (to catch all case variants)
+    Dim matches As Collection
+    Set matches = TextAnchoring.FindAll(doc, searchPhrase, True, False)
+
+    Dim i As Long
+    Dim matchArr As Variant
+    Dim matchText As String
+    Dim startPos As Long
+    Dim endPos As Long
     Dim rng As Range
-    Dim found As Boolean
-    Dim finding As Object
-    Dim locStr As String
 
-    Set rng = doc.Content.Duplicate
-    With rng.Find
-        .ClearFormatting
-        .Text = searchPhrase
-        .MatchWholeWord = True
-        .MatchCase = False
-        .MatchWildcards = False
-        .Wrap = wdFindStop
-        .Forward = True
-    End With
-
-    Dim lastPos As Long
-    lastPos = -1
-    Do
-        On Error Resume Next
-        found = rng.Find.Execute
-        If Err.Number <> 0 Then Err.Clear: On Error GoTo 0: Exit Do
-        On Error GoTo 0
-
-        If Not found Then Exit Do
-        If rng.Start <= lastPos Then Exit Do   ' stall guard
-        lastPos = rng.Start
+    For i = 1 To matches.Count
+        matchArr = matches(i)
+        startPos = matchArr(0)
+        endPos = matchArr(1)
+        matchText = matchArr(2)
 
         ' Skip if the matched text already has the correct hyphenated form
-        If StrComp(rng.Text, correctForm, vbTextCompare) = 0 Then
-            GoTo SkipMatch
+        If StrComp(matchText, correctForm, vbTextCompare) = 0 Then
+            GoTo NextMatch
         End If
 
-        ' Verify it is not actually the hyphenated form by checking
-        ' the surrounding context -- the Find matched with MatchCase=False
-        ' and spaces, so an exact binary comparison rules out false positives
-        If EngineIsInPageRange(rng) Then
-            On Error Resume Next
-            locStr = EngineGetLocationString(rng, doc)
-            If Err.Number <> 0 Then locStr = "unknown location": Err.Clear
-            On Error GoTo 0
+        Set rng = TextAnchoring.SafeRange(doc, startPos, endPos)
+        TextAnchoring.AddIssue issues, RULE28_NAME, doc, rng, _
+            "Mandatory term is not hyphenated in the approved form.", _
+            "Use '" & correctForm & "'.", _
+            startPos, endPos, "warning"
 
-            Set finding = CreateIssueDict(RULE28_NAME, locStr, "Mandatory term is not hyphenated in the approved form.", "Use '" & correctForm & "'.", rng.Start, rng.End, "warning", False)
-            issues.Add finding
-        End If
-
-SkipMatch:
-        On Error Resume Next
-        rng.Collapse wdCollapseEnd
-        If Err.Number <> 0 Then Err.Clear: On Error GoTo 0: Exit Do
-        On Error GoTo 0
-    Loop
+NextMatch:
+    Next i
 End Sub
 
 ' ============================================================
@@ -157,53 +141,10 @@ End Sub
 '  RULE 29 -- MAIN ENTRY POINT
 ' ============================================================
 Public Function Check_AlwaysCapitaliseTerms(doc As Document) As Collection
-    Dim issues As New Collection
-
     ' -- Seed dictionary of correct forms -------------------
-    Dim terms As Variant
-    Dim batch1 As Variant, batch2 As Variant
-    batch1 = Array( _
-        "Act", "Bill", "Attorney-General", "Cabinet", _
-        "Commonwealth", "Constitution", "Crown", _
-        "Executive Council", "Governor", "Governor-General", _
-        "Her Majesty", "the Queen")
-    batch2 = Array( _
-        "his Honour", "her Honour", "their Honours", _
-        "Law Lords", "their Lordships", "Lords Justices", _
-        "Member States", "Parliament", "Labour Party", _
-        "Prime Minister", "Vice-Chancellor")
-    terms = MergeArrays2(batch1, batch2)
-
-    ' -- Iterate paragraphs ---------------------------------
-    Dim para As Paragraph
-    Dim paraRng As Range
-    Dim paraText As String
-    Dim paraStart As Long
-
-    For Each para In doc.Paragraphs
-        On Error Resume Next
-        Set paraRng = para.Range
-        If Err.Number <> 0 Then Err.Clear: On Error GoTo 0: GoTo NextPara
-        On Error GoTo 0
-
-        ' Check page range filter
-        If Not EngineIsInPageRange(paraRng) Then GoTo NextPara
-
-        paraText = paraRng.Text
-        paraStart = paraRng.Start
-
-        If Len(paraText) = 0 Then GoTo NextPara
-
-        ' -- Check each term against this paragraph ---------
-        Dim t As Long
-        For t = LBound(terms) To UBound(terms)
-            CheckTermInParagraph doc, CStr(terms(t)), paraText, paraStart, paraRng, issues
-        Next t
-
-NextPara:
-    Next para
-
-    Set Check_AlwaysCapitaliseTerms = issues
+    ' (kept here for documentation; the actual per-paragraph
+    '  work re-builds the same array inside ProcessParagraph_AlwaysCapitalise)
+    Set Check_AlwaysCapitaliseTerms = TextAnchoring.IterateParagraphs(doc, "Rules_LegalTerms", "ProcessParagraph_AlwaysCapitalise")
 End Function
 
 ' ============================================================
@@ -214,14 +155,13 @@ Private Sub CheckTermInParagraph(doc As Document, _
                                   paraText As String, _
                                   paraStart As Long, _
                                   paraRng As Range, _
-                                  ByRef issues As Collection)
+                                  ByRef issues As Collection, _
+                                  Optional ByVal listPrefixLen As Long = 0)
     Dim termLen As Long
     Dim pos As Long
     Dim actualText As String
     Dim matchStart As Long
     Dim matchEnd As Long
-    Dim finding As Object
-    Dim locStr As String
     Dim charBefore As String
     Dim charAfter As String
 
@@ -255,18 +195,17 @@ Private Sub CheckTermInParagraph(doc As Document, _
         If IsInsideQuote(paraText, pos) Then GoTo NextMatch
 
         ' -- Calculate range positions ----------------------
-        matchStart = paraStart + pos - 1
+        ' Anchor model: paraText includes the list prefix, so we
+        ' subtract listPrefixLen to map back to document positions.
+        matchStart = paraStart + (pos - 1) - listPrefixLen
         matchEnd = matchStart + termLen
 
-        On Error Resume Next
-        Dim matchRng As Range
-        Set matchRng = doc.Range(matchStart, matchEnd)
-        locStr = EngineGetLocationString(matchRng, doc)
-        If Err.Number <> 0 Then locStr = "unknown location": Err.Clear
-        On Error GoTo 0
-
-        Set finding = CreateIssueDict(RULE29_NAME, locStr, "Term should be capitalised in the approved form.", "Use '" & correctForm & "'.", matchStart, matchEnd, "warning", False)
-        issues.Add finding
+        Dim rng As Range
+        Set rng = TextAnchoring.SafeRange(doc, matchStart, matchEnd)
+        TextAnchoring.AddIssue issues, RULE29_NAME, doc, rng, _
+            "Term should be capitalised in the approved form.", _
+            "Use '" & correctForm & "'.", _
+            matchStart, matchEnd, "warning"
 
 NextMatch:
         ' Search for next occurrence after current position
@@ -415,75 +354,24 @@ Private Function IsInsideQuote(paraText As String, matchPos As Long) As Boolean
     End If
 End Function
 
-
-' ----------------------------------------------------------------
-'  PRIVATE: Create a dictionary-based finding (no class dependency)
-' ----------------------------------------------------------------
-Private Function CreateIssueDict(ByVal ruleName_ As String, _
-                                 ByVal location_ As String, _
-                                 ByVal issue_ As String, _
-                                 ByVal suggestion_ As String, _
-                                 ByVal rangeStart_ As Long, _
-                                 ByVal rangeEnd_ As Long, _
-                                 Optional ByVal severity_ As String = "error", _
-                                 Optional ByVal autoFixSafe_ As Boolean = False, _
-                                 Optional ByVal replacementText_ As String = "") As Object
-    Dim d As Object
-    Set d = CreateObject("Scripting.Dictionary")
-    d("RuleName") = ruleName_
-    d("Location") = location_
-    d("Issue") = issue_
-    d("Suggestion") = suggestion_
-    d("RangeStart") = rangeStart_
-    d("RangeEnd") = rangeEnd_
-    d("Severity") = severity_
-    d("AutoFixSafe") = autoFixSafe_
-    If autoFixSafe_ Then d("ReplacementText") = replacementText_
-    Set CreateIssueDict = d
-End Function
-
-
-' ----------------------------------------------------------------
-'  Late-bound wrapper: PleadingsEngine.IsInPageRange
-' ----------------------------------------------------------------
-Private Function EngineIsInPageRange(rng As Object) As Boolean
-    On Error Resume Next
-    EngineIsInPageRange = Application.Run("PleadingsEngine.IsInPageRange", rng)
-    If Err.Number <> 0 Then
-        Debug.Print "EngineIsInPageRange: fallback (Err " & Err.Number & ": " & Err.Description & ")"
-        EngineIsInPageRange = True
-        Err.Clear
+' ============================================================
+'  ProcessParagraph_AlwaysCapitalise
+'  Extracts per-paragraph logic from Check_AlwaysCapitaliseTerms.
+' ============================================================
+Public Sub ProcessParagraph_AlwaysCapitalise(doc As Document, paraRange As Range, paraText As String, paraStart As Long, listPrefixLen As Long, ByRef issues As Collection)
+    ' Build the term list once at module scope and reuse it.
+    If Not r29Initialised Then
+        Dim batch1 As Variant, batch2 As Variant
+        batch1 = Array("Act", "Bill", "Attorney-General", "Cabinet", "Commonwealth", "Constitution", "Crown", _
+            "Executive Council", "Governor", "Governor-General", "Her Majesty", "the Queen")
+        batch2 = Array("his Honour", "her Honour", "their Honours", "Law Lords", "their Lordships", _
+            "Lords Justices", "Member States", "Parliament", "Labour Party", "Prime Minister", "Vice-Chancellor")
+        r29Terms = TextAnchoring.MergeArrays2(batch1, batch2)
+        r29Initialised = True
     End If
-    On Error GoTo 0
-End Function
 
-' ----------------------------------------------------------------
-'  Late-bound wrapper: PleadingsEngine.GetLocationString
-' ----------------------------------------------------------------
-Private Function EngineGetLocationString(rng As Object, doc As Document) As String
-    On Error Resume Next
-    EngineGetLocationString = Application.Run("PleadingsEngine.GetLocationString", rng, doc)
-    If Err.Number <> 0 Then
-        Debug.Print "EngineGetLocationString: fallback (Err " & Err.Number & ": " & Err.Description & ")"
-        EngineGetLocationString = "unknown location"
-        Err.Clear
-    End If
-    On Error GoTo 0
-End Function
-
-' ----------------------------------------------------------------
-'  Merge 2 Variant arrays into one flat Variant array
-' ----------------------------------------------------------------
-Private Function MergeArrays2(a1 As Variant, a2 As Variant) As Variant
-    Dim total As Long
-    total = UBound(a1) - LBound(a1) + 1 _
-          + UBound(a2) - LBound(a2) + 1
-    Dim out() As Variant
-    ReDim out(0 To total - 1)
-    Dim idx As Long
-    idx = 0
-    Dim v As Variant
-    For Each v In a1: out(idx) = v: idx = idx + 1: Next v
-    For Each v In a2: out(idx) = v: idx = idx + 1: Next v
-    MergeArrays2 = out
-End Function
+    Dim t As Long
+    For t = LBound(r29Terms) To UBound(r29Terms)
+        CheckTermInParagraph doc, CStr(r29Terms(t)), paraText, paraStart, paraRange, issues, listPrefixLen
+    Next t
+End Sub

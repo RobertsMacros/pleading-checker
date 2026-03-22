@@ -8,13 +8,14 @@ Attribute VB_Name = "Rules_Italics"
 '     places or courts that should not be italicised.
 '
 ' Dependencies:
-'   - PleadingsEngine.bas (IsInPageRange, GetLocationString)
+'   - TextAnchoring.bas (IterateParagraphs, SafeRange, AddIssue,
+'     IsLetterChar, MergeArrays3)
 ' ============================================================
 Option Explicit
 
 ' -- Rule-name constants -------------------------------------
-Private Const RULE_NAME_ANGLICISED As String = "known_anglicised_terms_not_italic"
-Private Const RULE_NAME_FOREIGN   As String = "foreign_names_not_italic"
+Private Const RULE_NAME_ANGLICISED As String = "non_english_terms"
+Private Const RULE_NAME_FOREIGN   As String = "non_english_terms"
 
 ' -- Seed list of anglicised terms (Rule 30) -----------------
 Private seedTerms As Variant
@@ -111,87 +112,37 @@ Private Sub InitSeedTerms()
         "raison d'etre", "ratio decidendi", "stare decisis", _
         "terra nullius", "ultra vires", "vice versa", _
         "vis-a-vis", "viz")
-    seedTerms = MergeArrays(batch1, batch2, batch3)
+    seedTerms = TextAnchoring.MergeArrays3(batch1, batch2, batch3)
+    ' Sort longest-first so that "ex post facto" is matched before
+    ' "ex post", preventing shorter terms from shadowing longer ones.
+    SortLongestFirst seedTerms
     seedInitialised = True
+End Sub
+
+' ------------------------------------------------------------
+'  Sort a Variant array of strings in descending order of length
+'  (simple bubble sort -- only runs once at init time)
+' ------------------------------------------------------------
+Private Sub SortLongestFirst(ByRef arr As Variant)
+    Dim i As Long, j As Long
+    Dim tmp As String
+    For i = LBound(arr) To UBound(arr) - 1
+        For j = i + 1 To UBound(arr)
+            If Len(CStr(arr(j))) > Len(CStr(arr(i))) Then
+                tmp = arr(i)
+                arr(i) = arr(j)
+                arr(j) = tmp
+            End If
+        Next j
+    Next i
 End Sub
 
 ' ------------------------------------------------------------
 '  MAIN ENTRY POINT -- Rule 30
 ' ------------------------------------------------------------
 Public Function Check_AnglicisedTermsNotItalic(doc As Document) As Collection
-    Dim issues As New Collection
-
     InitSeedTerms
-
-    Dim para As Paragraph
-    Dim paraText As String
-    Dim pos As Long
-    Dim termIdx As Long
-    Dim term As String
-    Dim termLen As Long
-    Dim charBefore As String
-    Dim charAfter As String
-    Dim rng As Range
-    Dim locStr As String
-    Dim finding As Object
-
-    For Each para In doc.Paragraphs
-        ' Skip paragraphs outside the configured page range
-        On Error Resume Next
-        Dim inRange As Boolean
-        inRange = EngineIsInPageRange(para.Range)
-        If Err.Number <> 0 Then inRange = True: Err.Clear
-        On Error GoTo 0
-        If Not inRange Then GoTo NextParaR30
-
-        On Error Resume Next
-        paraText = para.Range.Text
-        If Err.Number <> 0 Then Err.Clear: On Error GoTo 0: GoTo NextParaR30
-        On Error GoTo 0
-        If Len(paraText) = 0 Then GoTo NextParaR30
-
-        For termIdx = LBound(seedTerms) To UBound(seedTerms)
-            term = CStr(seedTerms(termIdx))
-            termLen = Len(term)
-
-            pos = InStr(1, paraText, term, vbTextCompare)
-            Do While pos > 0
-                If pos > 1 Then
-                    charBefore = Mid$(paraText, pos - 1, 1)
-                    If IsLetter(charBefore) Then GoTo NextMatchR30
-                End If
-
-                If pos + termLen <= Len(paraText) Then
-                    charAfter = Mid$(paraText, pos + termLen, 1)
-                    If IsLetter(charAfter) Then GoTo NextMatchR30
-                End If
-
-                On Error Resume Next
-                Set rng = doc.Range( _
-                    para.Range.Start + pos - 1, _
-                    para.Range.Start + pos - 1 + termLen)
-                If Err.Number <> 0 Then Err.Clear: On Error GoTo 0: GoTo NextMatchR30
-                On Error GoTo 0
-
-                If IsRangeItalic(rng) Then
-                    On Error Resume Next
-                    locStr = EngineGetLocationString(rng, doc)
-                    If Err.Number <> 0 Then locStr = "unknown location": Err.Clear
-                    On Error GoTo 0
-
-                    Set finding = CreateIssueDict(RULE_NAME_ANGLICISED, locStr, "Anglicised foreign term is italicised.", "Set '" & term & "' in roman, not italics.", rng.Start, rng.End, "warning", False)
-                    issues.Add finding
-                End If
-
-NextMatchR30:
-                pos = InStr(pos + 1, paraText, term, vbTextCompare)
-            Loop
-        Next termIdx
-
-NextParaR30:
-    Next para
-
-    Set Check_AnglicisedTermsNotItalic = issues
+    Set Check_AnglicisedTermsNotItalic = TextAnchoring.IterateParagraphs(doc, "Rules_Italics", "ProcessParagraph_AnglicisedTerms")
 End Function
 
 ' ============================================================
@@ -227,158 +178,120 @@ End Sub
 '  MAIN ENTRY POINT -- Rule 31
 ' ------------------------------------------------------------
 Public Function Check_ForeignNamesNotItalic(doc As Document) As Collection
-    Dim issues As New Collection
-
     ' Initialise defaults if not yet loaded
     If foreignNames Is Nothing Then
         InitSeedNames
     End If
+    Set Check_ForeignNamesNotItalic = TextAnchoring.IterateParagraphs(doc, "Rules_Italics", "ProcessParagraph_ForeignNames")
+End Function
 
-    Dim para As Paragraph
-    Dim paraText As String
-    Dim pos As Long
-    Dim nameKey As Variant
+' ============================================================
+'  ProcessParagraph_AnglicisedTerms
+'  Extracts per-paragraph logic from Check_AnglicisedTermsNotItalic.
+' ============================================================
+Public Sub ProcessParagraph_AnglicisedTerms(doc As Document, paraRange As Range, paraText As String, paraStart As Long, listPrefixLen As Long, ByRef issues As Collection)
+    InitSeedTerms
+
+    Dim termIdx As Long
     Dim term As String
     Dim termLen As Long
+    Dim pos As Long
     Dim charBefore As String
     Dim charAfter As String
     Dim rng As Range
-    Dim locStr As String
-    Dim finding As Object
+    Dim adjStart As Long
+
+    For termIdx = LBound(seedTerms) To UBound(seedTerms)
+        term = CStr(seedTerms(termIdx))
+        termLen = Len(term)
+
+        pos = InStr(1, paraText, term, vbTextCompare)
+        Do While pos > 0
+            If pos > 1 Then
+                charBefore = Mid$(paraText, pos - 1, 1)
+                If TextAnchoring.IsLetterChar(charBefore) Then GoTo NextMatchAT
+            End If
+
+            If pos + termLen <= Len(paraText) Then
+                charAfter = Mid$(paraText, pos + termLen, 1)
+                If TextAnchoring.IsLetterChar(charAfter) Then GoTo NextMatchAT
+            End If
+
+            ' Anchor model: paraText includes the list prefix, so we
+            ' subtract listPrefixLen to map back to document positions.
+            ' Formula: docPos = paraStart + (pos - 1) - listPrefixLen
+            adjStart = paraStart + (pos - 1) - listPrefixLen
+
+            Set rng = TextAnchoring.SafeRange(doc, adjStart, adjStart + termLen)
+            If rng Is Nothing Then GoTo NextMatchAT
+
+            If IsRangeItalic(rng) Then
+                TextAnchoring.AddIssue issues, RULE_NAME_ANGLICISED, doc, rng, _
+                    "Anglicised foreign term is italicised.", _
+                    "Set '" & term & "' in roman, not italics.", _
+                    rng.Start, rng.End, "warning"
+            End If
+
+NextMatchAT:
+            pos = InStr(pos + 1, paraText, term, vbTextCompare)
+        Loop
+    Next termIdx
+End Sub
+
+' ============================================================
+'  ProcessParagraph_ForeignNames
+'  Extracts per-paragraph logic from Check_ForeignNamesNotItalic.
+' ============================================================
+Public Sub ProcessParagraph_ForeignNames(doc As Document, paraRange As Range, paraText As String, paraStart As Long, listPrefixLen As Long, ByRef issues As Collection)
+    If foreignNames Is Nothing Then
+        InitSeedNames
+    End If
+
     Dim keys As Variant
+    Dim k As Long
+    Dim term As String
+    Dim termLen As Long
+    Dim pos As Long
+    Dim charBefore As String
+    Dim charAfter As String
+    Dim rng As Range
+    Dim adjStart As Long
 
     keys = foreignNames.keys
 
-    For Each para In doc.Paragraphs
-        On Error Resume Next
-        Dim inRange31 As Boolean
-        inRange31 = EngineIsInPageRange(para.Range)
-        If Err.Number <> 0 Then inRange31 = True: Err.Clear
-        On Error GoTo 0
-        If Not inRange31 Then GoTo NextParaR31
+    For k = 0 To foreignNames.Count - 1
+        term = CStr(keys(k))
+        termLen = Len(term)
 
-        On Error Resume Next
-        paraText = para.Range.Text
-        If Err.Number <> 0 Then Err.Clear: On Error GoTo 0: GoTo NextParaR31
-        On Error GoTo 0
-        If Len(paraText) = 0 Then GoTo NextParaR31
+        pos = InStr(1, paraText, term, vbTextCompare)
+        Do While pos > 0
+            If pos > 1 Then
+                charBefore = Mid$(paraText, pos - 1, 1)
+                If TextAnchoring.IsLetterChar(charBefore) Then GoTo NextMatchFN
+            End If
 
-        Dim k As Long
-        For k = 0 To foreignNames.Count - 1
-            term = CStr(keys(k))
-            termLen = Len(term)
+            If pos + termLen <= Len(paraText) Then
+                charAfter = Mid$(paraText, pos + termLen, 1)
+                If TextAnchoring.IsLetterChar(charAfter) Then GoTo NextMatchFN
+            End If
 
-            pos = InStr(1, paraText, term, vbTextCompare)
-            Do While pos > 0
-                If pos > 1 Then
-                    charBefore = Mid$(paraText, pos - 1, 1)
-                    If IsLetter(charBefore) Then GoTo NextMatchR31
-                End If
+            ' Anchor model: paraText includes the list prefix, so we
+            ' subtract listPrefixLen to map back to document positions.
+            adjStart = paraStart + (pos - 1) - listPrefixLen
 
-                If pos + termLen <= Len(paraText) Then
-                    charAfter = Mid$(paraText, pos + termLen, 1)
-                    If IsLetter(charAfter) Then GoTo NextMatchR31
-                End If
+            Set rng = TextAnchoring.SafeRange(doc, adjStart, adjStart + termLen)
+            If rng Is Nothing Then GoTo NextMatchFN
 
-                On Error Resume Next
-                Set rng = doc.Range( _
-                    para.Range.Start + pos - 1, _
-                    para.Range.Start + pos - 1 + termLen)
-                If Err.Number <> 0 Then Err.Clear: On Error GoTo 0: GoTo NextMatchR31
-                On Error GoTo 0
+            If IsRangeItalic(rng) Then
+                TextAnchoring.AddIssue issues, RULE_NAME_FOREIGN, doc, rng, _
+                    "Foreign name or institution should not be italicised.", _
+                    "Set '" & term & "' in roman, not italics.", _
+                    rng.Start, rng.End, "warning"
+            End If
 
-                If IsRangeItalic(rng) Then
-                    On Error Resume Next
-                    locStr = EngineGetLocationString(rng, doc)
-                    If Err.Number <> 0 Then locStr = "unknown location": Err.Clear
-                    On Error GoTo 0
+NextMatchFN:
+            pos = InStr(pos + 1, paraText, term, vbTextCompare)
+        Loop
+    Next k
+End Sub
 
-                    Set finding = CreateIssueDict(RULE_NAME_FOREIGN, locStr, "Foreign name or institution should not be italicised.", "Set '" & term & "' in roman, not italics.", rng.Start, rng.End, "warning", False)
-                    issues.Add finding
-                End If
-
-NextMatchR31:
-                pos = InStr(pos + 1, paraText, term, vbTextCompare)
-            Loop
-        Next k
-
-NextParaR31:
-    Next para
-
-    Set Check_ForeignNamesNotItalic = issues
-End Function
-
-
-' ----------------------------------------------------------------
-'  PRIVATE: Create a dictionary-based finding (no class dependency)
-' ----------------------------------------------------------------
-Private Function CreateIssueDict(ByVal ruleName_ As String, _
-                                 ByVal location_ As String, _
-                                 ByVal issue_ As String, _
-                                 ByVal suggestion_ As String, _
-                                 ByVal rangeStart_ As Long, _
-                                 ByVal rangeEnd_ As Long, _
-                                 Optional ByVal severity_ As String = "error", _
-                                 Optional ByVal autoFixSafe_ As Boolean = False, _
-                                 Optional ByVal replacementText_ As String = "") As Object
-    Dim d As Object
-    Set d = CreateObject("Scripting.Dictionary")
-    d("RuleName") = ruleName_
-    d("Location") = location_
-    d("Issue") = issue_
-    d("Suggestion") = suggestion_
-    d("RangeStart") = rangeStart_
-    d("RangeEnd") = rangeEnd_
-    d("Severity") = severity_
-    d("AutoFixSafe") = autoFixSafe_
-    If autoFixSafe_ Then d("ReplacementText") = replacementText_
-    Set CreateIssueDict = d
-End Function
-
-
-' ----------------------------------------------------------------
-'  Late-bound wrapper: PleadingsEngine.IsInPageRange
-' ----------------------------------------------------------------
-Private Function EngineIsInPageRange(rng As Object) As Boolean
-    On Error Resume Next
-    EngineIsInPageRange = Application.Run("PleadingsEngine.IsInPageRange", rng)
-    If Err.Number <> 0 Then
-        Debug.Print "EngineIsInPageRange: fallback (Err " & Err.Number & ": " & Err.Description & ")"
-        EngineIsInPageRange = True
-        Err.Clear
-    End If
-    On Error GoTo 0
-End Function
-
-' ----------------------------------------------------------------
-'  Late-bound wrapper: PleadingsEngine.GetLocationString
-' ----------------------------------------------------------------
-Private Function EngineGetLocationString(rng As Object, doc As Document) As String
-    On Error Resume Next
-    EngineGetLocationString = Application.Run("PleadingsEngine.GetLocationString", rng, doc)
-    If Err.Number <> 0 Then
-        Debug.Print "EngineGetLocationString: fallback (Err " & Err.Number & ": " & Err.Description & ")"
-        EngineGetLocationString = "unknown location"
-        Err.Clear
-    End If
-    On Error GoTo 0
-End Function
-
-' ----------------------------------------------------------------
-'  Merge up to 3 Variant arrays into one flat Variant array
-' ----------------------------------------------------------------
-Private Function MergeArrays(a1 As Variant, a2 As Variant, a3 As Variant) As Variant
-    Dim total As Long
-    total = UBound(a1) - LBound(a1) + 1 _
-          + UBound(a2) - LBound(a2) + 1 _
-          + UBound(a3) - LBound(a3) + 1
-    Dim out() As Variant
-    ReDim out(0 To total - 1)
-    Dim idx As Long
-    idx = 0
-    Dim v As Variant
-    For Each v In a1: out(idx) = v: idx = idx + 1: Next v
-    For Each v In a2: out(idx) = v: idx = idx + 1: Next v
-    For Each v In a3: out(idx) = v: idx = idx + 1: Next v
-    MergeArrays = out
-End Function

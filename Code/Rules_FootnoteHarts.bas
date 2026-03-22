@@ -8,7 +8,7 @@ Attribute VB_Name = "Rules_FootnoteHarts"
 '   - Rule27: flags unapproved footnote abbreviation variants
 '
 ' Dependencies:
-'   - PleadingsEngine.bas (IsInPageRange, GetLocationString)
+'   - TextAnchoring.bas (AddIssue, ForEachFootnote, SafeLocationString)
 ' ============================================================
 Option Explicit
 
@@ -20,13 +20,60 @@ Private Const RULE25_NAME As String = "footnote_terminal_full_stop"
 Private Const RULE26_NAME As String = "footnote_initial_capital"
 Private Const RULE27_NAME As String = "footnote_abbreviation_dictionary"
 
+' Module-level cached dictionaries for Rule 26 and Rule 27.
+' Built once by InitFootnoteCaches before the consolidated
+' footnote loop, cleared by ClearFootnoteCaches afterwards.
+Private mAllowedLC As Object      ' Rule 26 allowed lower-case starts
+Private mApproved As Object       ' Rule 27 approved (case-sensitive)
+Private mApprovedLC As Object     ' Rule 27 approved (case-insensitive)
+Private mUnapproved As Object     ' Rule 27 unapproved variants
+
+' ============================================================
+'  Cache management -- called by RunFootnoteRules
+' ============================================================
+
+Public Sub InitFootnoteCaches()
+    ' Rule 26: allowed lower-case starts
+    Set mAllowedLC = CreateObject("Scripting.Dictionary")
+    mAllowedLC.CompareMode = vbTextCompare
+    mAllowedLC.Add "c", True
+    mAllowedLC.Add "cf", True
+    mAllowedLC.Add "cp", True
+    mAllowedLC.Add "eg", True
+    mAllowedLC.Add "ie", True
+    mAllowedLC.Add "p", True
+    mAllowedLC.Add "pp", True
+    mAllowedLC.Add "ibid", True
+
+    ' Rule 27: approved (case-sensitive)
+    Set mApproved = CreateObject("Scripting.Dictionary")
+    mApproved.CompareMode = vbBinaryCompare
+    BuildApprovedDict mApproved
+
+    ' Rule 27: approved (case-insensitive, for dotted-form check)
+    Set mApprovedLC = CreateObject("Scripting.Dictionary")
+    mApprovedLC.CompareMode = vbTextCompare
+    BuildApprovedLCDict mApprovedLC
+
+    ' Rule 27: unapproved variant mapping
+    Set mUnapproved = CreateObject("Scripting.Dictionary")
+    mUnapproved.CompareMode = vbTextCompare
+    BuildUnapprovedDict mUnapproved
+End Sub
+
+Public Sub ClearFootnoteCaches()
+    Set mAllowedLC = Nothing
+    Set mApproved = Nothing
+    Set mApprovedLC = Nothing
+    Set mUnapproved = Nothing
+End Sub
+
 ' ============================================================
 '  RULE 24 -- FOOTNOTES NOT ENDNOTES
 ' ============================================================
 
 Public Function Check_FootnotesNotEndnotes(doc As Document) As Collection
     Dim issues As New Collection
-    Dim finding As Object
 
     On Error Resume Next
 
@@ -45,13 +92,15 @@ Public Function Check_FootnotesNotEndnotes(doc As Document) As Collection
 
     If endCount > 0 And fnCount = 0 Then
         ' Document uses only endnotes
-        Set finding = CreateIssueDict(RULE24_NAME, "document level", "Document uses endnotes instead of footnotes.", "Use footnotes rather than endnotes.", 0, 0, "error", False)
-        issues.Add finding
+        TextAnchoring.AddIssue issues, RULE24_NAME, doc, Nothing, _
+            "Document uses endnotes instead of footnotes.", _
+            "Use footnotes rather than endnotes.", 0, 0, "error", False
 
     ElseIf endCount > 0 And fnCount > 0 Then
         ' Document uses both
-        Set finding = CreateIssueDict(RULE24_NAME, "document level", "Document uses both footnotes and endnotes.", "Use footnotes rather than endnotes.", 0, 0, "error", False)
-        issues.Add finding
+        TextAnchoring.AddIssue issues, RULE24_NAME, doc, Nothing, _
+            "Document uses both footnotes and endnotes.", _
+            "Use footnotes rather than endnotes.", 0, 0, "error", False
     End If
 
     ' If only footnotes exist (endCount = 0): no finding
@@ -64,236 +113,172 @@ End Function
 ' ============================================================
 
 Public Function Check_FootnoteTerminalFullStop(doc As Document) As Collection
-    Dim issues As New Collection
-    Dim fn As Footnote
-    Dim finding As Object
-    Dim locStr As String
-    Dim noteText As String
+    Set Check_FootnoteTerminalFullStop = TextAnchoring.ForEachFootnote(doc, "Rules_FootnoteHarts", "ProcessFootnote_TerminalFullStop")
+End Function
+
+Public Sub ProcessFootnote_TerminalFullStop(doc As Document, fn As Footnote, noteText As String, ByRef issues As Collection)
     Dim trimmed As String
     Dim lastChar As String
     Dim penultChar As String
-    Dim i As Long
 
-    For i = 1 To doc.Footnotes.Count
-        On Error Resume Next
-        Set fn = doc.Footnotes(i)
-        If Err.Number <> 0 Then
-            Err.Clear
-            On Error GoTo 0
-            GoTo NextFootnote25
+    ' -- Trim trailing whitespace / paragraph marks -------
+    trimmed = TrimTrailingWhitespace(noteText)
+
+    ' -- Skip empty footnotes -----------------------------
+    If Len(trimmed) = 0 Then Exit Sub
+
+    ' -- Get last character -------------------------------
+    lastChar = Mid(trimmed, Len(trimmed), 1)
+
+    ' -- If last char is closing bracket/quote, check penultimate --
+    If IsClosingPunctuation(lastChar) Then
+        If Len(trimmed) >= 2 Then
+            penultChar = Mid(trimmed, Len(trimmed) - 1, 1)
+            If penultChar = "." Then Exit Sub
         End If
-        On Error GoTo 0
+        ' Fall through to flag
+    ElseIf lastChar = "." Then
+        Exit Sub
+    End If
 
-        ' -- Check page range on the reference mark -----------
-        On Error Resume Next
-        If Not EngineIsInPageRange(fn.Reference) Then
-            On Error GoTo 0
-            GoTo NextFootnote25
-        End If
-        On Error GoTo 0
-
-        ' -- Get footnote text --------------------------------
-        On Error Resume Next
-        noteText = fn.Range.Text
-        If Err.Number <> 0 Then
-            Err.Clear
-            On Error GoTo 0
-            GoTo NextFootnote25
-        End If
-        On Error GoTo 0
-
-        ' -- Trim trailing whitespace / paragraph marks -------
-        trimmed = noteText
-        trimmed = TrimTrailingWhitespace(trimmed)
-
-        ' -- Skip empty footnotes -----------------------------
-        If Len(trimmed) = 0 Then GoTo NextFootnote25
-
-        ' -- Get last character -------------------------------
-        lastChar = Mid(trimmed, Len(trimmed), 1)
-
-        ' -- If last char is closing bracket/quote, check penultimate --
-        If IsClosingPunctuation(lastChar) Then
-            If Len(trimmed) >= 2 Then
-                penultChar = Mid(trimmed, Len(trimmed) - 1, 1)
-                If penultChar = "." Then GoTo NextFootnote25
-            End If
-            ' Fall through to flag
-        ElseIf lastChar = "." Then
-            GoTo NextFootnote25
-        End If
-
-        ' -- Flag missing full stop ---------------------------
-        On Error Resume Next
-        locStr = EngineGetLocationString(fn.Reference, doc)
-        If Err.Number <> 0 Then locStr = "unknown location": Err.Clear
-        On Error GoTo 0
-
-        Set finding = CreateIssueDict(RULE25_NAME, locStr, "Footnote does not end with a full stop.", "Add a full stop at the end of the footnote.", fn.Range.Start, fn.Range.End, "warning", False)
-        issues.Add finding
-
-NextFootnote25:
-    Next i
-
-    Set Check_FootnoteTerminalFullStop = issues
-End Function
+    ' -- Flag missing full stop ---------------------------
+    TextAnchoring.AddIssue issues, RULE25_NAME, doc, fn.Reference, _
+        "Footnote " & fn.Index & ": does not end with a full stop.", _
+        "Add a full stop at the end of the footnote.", _
+        fn.Reference.Start, fn.Reference.End, "warning", False
+End Sub
 
 ' ============================================================
 '  RULE 26 -- FOOTNOTE INITIAL CAPITAL
 ' ============================================================
 
 Public Function Check_FootnoteInitialCapital(doc As Document) As Collection
-    Dim issues As New Collection
-    Dim allowed As Object
-    Dim fn As Footnote
-    Dim finding As Object
-    Dim locStr As String
-    Dim noteText As String
+    Set Check_FootnoteInitialCapital = TextAnchoring.ForEachFootnote(doc, "Rules_FootnoteHarts", "ProcessFootnote_InitialCapital")
+End Function
+
+Public Sub ProcessFootnote_InitialCapital(doc As Document, fn As Footnote, noteText As String, ByRef issues As Collection)
     Dim trimmed As String
     Dim token As String
     Dim firstCharCode As Long
-    Dim i As Long
     Dim j As Long
     Dim ch As String
 
-    ' -- Build allowed lower-case starts dictionary -----------
-    Set allowed = CreateObject("Scripting.Dictionary")
-    allowed.CompareMode = vbTextCompare
-    allowed.Add "c", True
-    allowed.Add "cf", True
-    allowed.Add "cp", True
-    allowed.Add "eg", True
-    allowed.Add "ie", True
-    allowed.Add "p", True
-    allowed.Add "pp", True
-    allowed.Add "ibid", True
+    ' Use module-level cache (built by InitFootnoteCaches).
+    ' Fall back to lazy init for standalone Check_ entry point.
+    If mAllowedLC Is Nothing Then InitFootnoteCaches
 
-    For i = 1 To doc.Footnotes.Count
-        On Error Resume Next
-        Set fn = doc.Footnotes(i)
-        If Err.Number <> 0 Then
-            Err.Clear
-            On Error GoTo 0
-            GoTo NextFootnote26
+    ' -- Trim leading whitespace --------------------------
+    trimmed = LTrim(noteText)
+    If Len(trimmed) = 0 Then Exit Sub
+
+    ' -- Skip past leading punctuation (quotes, brackets) -
+    j = 1
+    Do While j <= Len(trimmed)
+        ch = Mid(trimmed, j, 1)
+        If IsLeadingPunctuation(ch) Then
+            j = j + 1
+        Else
+            Exit Do
         End If
-        On Error GoTo 0
+    Loop
 
-        ' -- Check page range on the reference mark -----------
-        On Error Resume Next
-        If Not EngineIsInPageRange(fn.Reference) Then
-            On Error GoTo 0
-            GoTo NextFootnote26
-        End If
-        On Error GoTo 0
+    If j > Len(trimmed) Then Exit Sub
+    trimmed = Mid(trimmed, j)
+    If Len(trimmed) = 0 Then Exit Sub
 
-        ' -- Get footnote text --------------------------------
-        On Error Resume Next
-        noteText = fn.Range.Text
-        If Err.Number <> 0 Then
-            Err.Clear
-            On Error GoTo 0
-            GoTo NextFootnote26
-        End If
-        On Error GoTo 0
+    ' -- Extract first lexical token (letters only) -------
+    token = ExtractFirstToken(trimmed)
+    If Len(token) = 0 Then Exit Sub
 
-        ' -- Trim leading whitespace --------------------------
-        trimmed = LTrim(noteText)
-        If Len(trimmed) = 0 Then GoTo NextFootnote26
+    ' -- Check if token is in allowed list ----------------
+    If mAllowedLC.Exists(LCase(token)) Then Exit Sub
 
-        ' -- Skip past leading punctuation (quotes, brackets) -
-        j = 1
-        Do While j <= Len(trimmed)
-            ch = Mid(trimmed, j, 1)
-            If IsLeadingPunctuation(ch) Then
-                j = j + 1
-            Else
-                Exit Do
-            End If
-        Loop
-
-        If j > Len(trimmed) Then GoTo NextFootnote26
-        trimmed = Mid(trimmed, j)
-        If Len(trimmed) = 0 Then GoTo NextFootnote26
-
-        ' -- Extract first lexical token (letters only) -------
-        token = ExtractFirstToken(trimmed)
-        If Len(token) = 0 Then GoTo NextFootnote26
-
-        ' -- Check if token is in allowed list ----------------
-        If allowed.Exists(LCase(token)) Then GoTo NextFootnote26
-
-        ' -- Check if first character is lower-case -----------
-        firstCharCode = AscW(Mid(token, 1, 1))
-        If firstCharCode >= 97 And firstCharCode <= 122 Then
-            ' Lower-case and not in allowed list: flag
-            On Error Resume Next
-            locStr = EngineGetLocationString(fn.Reference, doc)
-            If Err.Number <> 0 Then locStr = "unknown location": Err.Clear
-            On Error GoTo 0
-
-            Set finding = CreateIssueDict(RULE26_NAME, locStr, "Footnote begins with lower-case text outside the approved exceptions.", "Begin the footnote with a capital letter, unless it starts with an approved lower-case abbreviation.", fn.Range.Start, fn.Range.End, "warning", False)
-            issues.Add finding
-        End If
-
-NextFootnote26:
-    Next i
-
-    Set Check_FootnoteInitialCapital = issues
-End Function
+    ' -- Check if first character is lower-case -----------
+    firstCharCode = AscW(Mid(token, 1, 1))
+    If firstCharCode >= 97 And firstCharCode <= 122 Then
+        ' Lower-case and not in allowed list: flag
+        TextAnchoring.AddIssue issues, RULE26_NAME, doc, fn.Reference, _
+            "Footnote " & fn.Index & ": begins with lower-case text outside the approved exceptions.", _
+            "Begin the footnote with a capital letter, unless it starts with an approved lower-case abbreviation.", _
+            fn.Reference.Start, fn.Reference.End, "warning", False
+    End If
+End Sub
 
 ' ============================================================
 '  RULE 27 -- FOOTNOTE ABBREVIATION DICTIONARY
 ' ============================================================
 
 Public Function Check_FootnoteAbbreviationDictionary(doc As Document) As Collection
-    Dim issues As New Collection
-    Dim approved As Object
-    Dim approvedLC As Object
-    Dim unapproved As Object
-    Dim fn As Footnote
-    Dim i As Long
-
-    ' -- Build approved abbreviations set (case-sensitive) ----
-    Set approved = CreateObject("Scripting.Dictionary")
-    approved.CompareMode = vbBinaryCompare
-    BuildApprovedDict approved
-
-    ' -- Build approved lower-case set for dotted-form check --
-    Set approvedLC = CreateObject("Scripting.Dictionary")
-    approvedLC.CompareMode = vbTextCompare
-    BuildApprovedLCDict approvedLC
-
-    ' -- Build unapproved variant mapping (LCase key) --------
-    Set unapproved = CreateObject("Scripting.Dictionary")
-    unapproved.CompareMode = vbTextCompare
-    BuildUnapprovedDict unapproved
-
-    ' -- Process each footnote --------------------------------
-    For i = 1 To doc.Footnotes.Count
-        On Error Resume Next
-        Set fn = doc.Footnotes(i)
-        If Err.Number <> 0 Then
-            Err.Clear
-            On Error GoTo 0
-            GoTo NextFootnote27
-        End If
-        On Error GoTo 0
-
-        ' -- Check page range on the reference mark -----------
-        On Error Resume Next
-        If Not EngineIsInPageRange(fn.Reference) Then
-            On Error GoTo 0
-            GoTo NextFootnote27
-        End If
-        On Error GoTo 0
-
-        CheckFootnoteText doc, fn, approved, approvedLC, unapproved, issues
-
-NextFootnote27:
-    Next i
-
-    Set Check_FootnoteAbbreviationDictionary = issues
+    Set Check_FootnoteAbbreviationDictionary = TextAnchoring.ForEachFootnote(doc, "Rules_FootnoteHarts", "ProcessFootnote_AbbreviationDictionary")
 End Function
+
+Public Sub ProcessFootnote_AbbreviationDictionary(doc As Document, fn As Footnote, noteText As String, ByRef issues As Collection)
+    ' Use module-level caches (built by InitFootnoteCaches).
+    ' Fall back to lazy init for standalone Check_ entry point.
+    If mApproved Is Nothing Then InitFootnoteCaches
+
+    ' -- Tokenize on spaces -----------------------------------
+    Dim tokens() As String
+    Dim token As String
+    Dim stripped As String
+    Dim noDots As String
+    Dim lcToken As String
+    Dim preferred As String
+    Dim j As Long
+    Dim issueText As String
+    Dim suggText As String
+
+    tokens = Split(noteText, " ")
+
+    For j = LBound(tokens) To UBound(tokens)
+        token = Trim(tokens(j))
+        If Len(token) = 0 Then GoTo NextToken
+
+        ' Clean token boundaries: strip leading/trailing non-letter, non-dot chars
+        token = CleanTokenBoundaries(token)
+        If Len(token) = 0 Then GoTo NextToken
+
+        ' -- Check 1: Unapproved variant (without trailing dot) --
+        stripped = StripTrailingDot(token)
+        lcToken = LCase(stripped)
+
+        If mUnapproved.Exists(lcToken) Then
+            preferred = mUnapproved(lcToken)
+
+            issueText = "Footnote " & fn.Index & ": unapproved abbreviation."
+            suggText = "Use '" & preferred & "' instead of '" & stripped & "'."
+
+            TextAnchoring.AddIssue issues, RULE27_NAME, doc, fn.Reference, _
+                issueText, suggText, fn.Reference.Start, fn.Reference.End, "warning", False
+            GoTo NextToken
+        End If
+
+        ' -- Check 2: Dotted form of approved abbreviation -------
+        ' Only flag tokens that contain dots
+        If InStr(1, token, ".") > 0 Then
+            ' Strip trailing dot and check
+            stripped = StripTrailingDot(token)
+
+            ' Remove all internal dots (e.g. "e.g." -> "eg", "i.e." -> "ie")
+            noDots = Replace(stripped, ".", "")
+
+            If Len(noDots) > 0 Then
+                ' Check if the undotted form is an approved abbreviation
+                If mApprovedLC.Exists(noDots) Then
+                    ' This is a dotted form of an approved abbrev -- flag it
+                    issueText = "Footnote " & fn.Index & ": unapproved abbreviation."
+                    suggText = "Use '" & noDots & "' instead of '" & token & "'."
+
+                    TextAnchoring.AddIssue issues, RULE27_NAME, doc, fn.Reference, _
+                        issueText, suggText, fn.Reference.Start, fn.Reference.End, "warning", False
+                    GoTo NextToken
+                End If
+            End If
+        End If
+
+NextToken:
+    Next j
+End Sub
 
 ' ============================================================
 '  PRIVATE HELPERS -- Rule 25
@@ -362,98 +347,6 @@ End Function
 ' ============================================================
 '  PRIVATE HELPERS -- Rule 27
 ' ============================================================
-
-' Check a single footnote's text for abbreviation issues
-Private Sub CheckFootnoteText(doc As Document, _
-                               fn As Footnote, _
-                               ByRef approved As Object, _
-                               ByRef approvedLC As Object, _
-                               ByRef unapproved As Object, _
-                               ByRef issues As Collection)
-    Dim noteText As String
-    Dim tokens() As String
-    Dim token As String
-    Dim stripped As String
-    Dim noDots As String
-    Dim lcToken As String
-    Dim preferred As String
-    Dim finding As Object
-    Dim locStr As String
-    Dim j As Long
-    Dim issueText As String
-    Dim suggText As String
-
-    On Error Resume Next
-    noteText = fn.Range.Text
-    If Err.Number <> 0 Then
-        Err.Clear
-        On Error GoTo 0
-        Exit Sub
-    End If
-    On Error GoTo 0
-
-    ' -- Tokenize on spaces -----------------------------------
-    tokens = Split(noteText, " ")
-
-    For j = LBound(tokens) To UBound(tokens)
-        token = Trim(tokens(j))
-        If Len(token) = 0 Then GoTo NextToken
-
-        ' Clean token boundaries: strip leading/trailing non-letter, non-dot chars
-        token = CleanTokenBoundaries(token)
-        If Len(token) = 0 Then GoTo NextToken
-
-        ' -- Check 1: Unapproved variant (without trailing dot) --
-        stripped = StripTrailingDot(token)
-        lcToken = LCase(stripped)
-
-        If unapproved.Exists(lcToken) Then
-            preferred = unapproved(lcToken)
-
-            On Error Resume Next
-            locStr = EngineGetLocationString(fn.Reference, doc)
-            If Err.Number <> 0 Then locStr = "unknown location": Err.Clear
-            On Error GoTo 0
-
-            issueText = "Unapproved footnote abbreviation."
-            suggText = "Use '" & preferred & "' instead of '" & stripped & "'."
-
-            Set finding = CreateIssueDict(RULE27_NAME, locStr, issueText, suggText, fn.Range.Start, fn.Range.End, "warning", False)
-            issues.Add finding
-            GoTo NextToken
-        End If
-
-        ' -- Check 2: Dotted form of approved abbreviation -------
-        ' Only flag tokens that contain dots
-        If InStr(1, token, ".") > 0 Then
-            ' Strip trailing dot and check
-            stripped = StripTrailingDot(token)
-
-            ' Remove all internal dots (e.g. "e.g." -> "eg", "i.e." -> "ie")
-            noDots = Replace(stripped, ".", "")
-
-            If Len(noDots) > 0 Then
-                ' Check if the undotted form is an approved abbreviation
-                If approvedLC.Exists(noDots) Then
-                    ' This is a dotted form of an approved abbrev -- flag it
-                    On Error Resume Next
-                    locStr = EngineGetLocationString(fn.Reference, doc)
-                    If Err.Number <> 0 Then locStr = "unknown location": Err.Clear
-                    On Error GoTo 0
-
-                    issueText = "Unapproved footnote abbreviation."
-                    suggText = "Use '" & noDots & "' instead of '" & token & "'."
-
-                    Set finding = CreateIssueDict(RULE27_NAME, locStr, issueText, suggText, fn.Range.Start, fn.Range.End, "warning", False)
-                    issues.Add finding
-                    GoTo NextToken
-                End If
-            End If
-        End If
-
-NextToken:
-    Next j
-End Sub
 
 ' Build approved abbreviations dictionary (case-sensitive binary compare)
 Private Sub BuildApprovedDict(ByRef d As Object)
@@ -590,60 +483,4 @@ Private Function IsWordChar(ByVal code As Long) As Boolean
     IsWordChar = (code >= 65 And code <= 90) Or _
                  (code >= 97 And code <= 122) Or _
                  (code >= 48 And code <= 57)
-End Function
-
-
-' ----------------------------------------------------------------
-'  PRIVATE: Create a dictionary-based finding (no class dependency)
-' ----------------------------------------------------------------
-Private Function CreateIssueDict(ByVal ruleName_ As String, _
-                                 ByVal location_ As String, _
-                                 ByVal issue_ As String, _
-                                 ByVal suggestion_ As String, _
-                                 ByVal rangeStart_ As Long, _
-                                 ByVal rangeEnd_ As Long, _
-                                 Optional ByVal severity_ As String = "error", _
-                                 Optional ByVal autoFixSafe_ As Boolean = False, _
-                                 Optional ByVal replacementText_ As String = "") As Object
-    Dim d As Object
-    Set d = CreateObject("Scripting.Dictionary")
-    d("RuleName") = ruleName_
-    d("Location") = location_
-    d("Issue") = issue_
-    d("Suggestion") = suggestion_
-    d("RangeStart") = rangeStart_
-    d("RangeEnd") = rangeEnd_
-    d("Severity") = severity_
-    d("AutoFixSafe") = autoFixSafe_
-    If autoFixSafe_ Then d("ReplacementText") = replacementText_
-    Set CreateIssueDict = d
-End Function
-
-
-' ----------------------------------------------------------------
-'  Late-bound wrapper: PleadingsEngine.IsInPageRange
-' ----------------------------------------------------------------
-Private Function EngineIsInPageRange(rng As Object) As Boolean
-    On Error Resume Next
-    EngineIsInPageRange = Application.Run("PleadingsEngine.IsInPageRange", rng)
-    If Err.Number <> 0 Then
-        Debug.Print "EngineIsInPageRange: fallback (Err " & Err.Number & ": " & Err.Description & ")"
-        EngineIsInPageRange = True
-        Err.Clear
-    End If
-    On Error GoTo 0
-End Function
-
-' ----------------------------------------------------------------
-'  Late-bound wrapper: PleadingsEngine.GetLocationString
-' ----------------------------------------------------------------
-Private Function EngineGetLocationString(rng As Object, doc As Document) As String
-    On Error Resume Next
-    EngineGetLocationString = Application.Run("PleadingsEngine.GetLocationString", rng, doc)
-    If Err.Number <> 0 Then
-        Debug.Print "EngineGetLocationString: fallback (Err " & Err.Number & ": " & Err.Description & ")"
-        EngineGetLocationString = "unknown location"
-        Err.Clear
-    End If
-    On Error GoTo 0
 End Function

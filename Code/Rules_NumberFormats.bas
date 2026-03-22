@@ -5,25 +5,24 @@ Attribute VB_Name = "Rules_NumberFormats"
 '   - Rule09: Date and time format consistency
 '   - Rule19: Currency and number format consistency
 '
-' RETIRED (not engine-wired):
-'   - Rule18 page-range helpers: kept for backwards compatibility
-'     but not dispatched by RunAllPleadingsRules. The engine
-'     manages page ranges directly via SetPageRangeFromString.
-'
 ' Public functions:
 '   Check_DateTimeFormat        (Rule09)
 '   Check_CurrencyNumberFormat  (Rule19)
 '
 ' Dependencies:
-'   - PleadingsEngine.bas (IsInPageRange, GetLocationString)
+'   - TextAnchoring.bas (AddIssue, SafeRange, FindAll,
+'     GetDateFormatPref, IsInPageRange, IsPastPageFilter,
+'     CreateRegex)
+'
+' NOTE: Date/time detection uses VBScript.RegExp over paragraph
+' text (not Word Find wildcards) for reliable pattern matching.
+' Currency detection still uses Word Find wildcards with valid
+' syntax (the @ quantifier, which Word supports).
 ' ============================================================
 Option Explicit
 
 ' -- Rule name constants ---------------------------------------
 Private Const RULE_NAME_DATE_TIME As String = "date_time_format"
-' RETIRED -- DEAD CODE: page_range is not engine-wired and this constant is unused.
-' Kept only so the module compiles if an external caller references it.
-Private Const RETIRED_RULE_NAME_PAGE_RANGE As String = "page_range"
 Private Const RULE_NAME_CURRENCY As String = "currency_number_format"
 
 ' -- Currency format category constants (Rule19) ---------------
@@ -32,9 +31,6 @@ Private Const FMT_ABBREVIATED As String = "abbreviated"
 Private Const FMT_FULL_NUMERIC As String = "full_numeric"
 Private Const FMT_ISO_PREFIX As String = "iso_prefix"
 
-' -- Module-level page range state (Rule18) --------------------
-Private mStartPage As Long   ' 0 = no restriction
-Private mEndPage   As Long   ' 0 = no restriction
 
 ' ============================================================
 '  PRIVATE HELPERS  -  Rule09 (Date/Time)
@@ -55,42 +51,73 @@ Private Function IsValidMonth(ByVal monthName As String) As Boolean
     IsValidMonth = False
 End Function
 
-' -- Helper: search and collect date/time occurrences ----------
-Private Sub FindWithWildcard(doc As Document, ByVal pattern As String, _
-                              results As Collection, ByVal formatType As String)
-    Dim rng As Range
-    Dim info() As Variant
-    Set rng = doc.Content.Duplicate
-
-    With rng.Find
-        .ClearFormatting
-        .Text = pattern
-        .Forward = True
-        .Wrap = wdFindStop
-        .MatchWildcards = True
-        .MatchCase = False
-    End With
-
-    Dim lastPos As Long
-    lastPos = -1
-    Do While rng.Find.Execute
-        If rng.Start <= lastPos Then Exit Do  ' stall guard
-        lastPos = rng.Start
-        If EngineIsInPageRange(rng) Then
-            ReDim info(0 To 3)
+' -- Helper: scan a paragraph with a regex and collect matches --
+' Each match is added to results as an Array(formatType, matchText,
+' docStart, docEnd).  paraStart and listPrefixLen are used to map
+' regex positions back to document positions.
+Private Sub RegexScanParagraph(ByVal re As Object, _
+                                ByVal paraText As String, _
+                                ByVal paraStart As Long, _
+                                ByVal listPrefixLen As Long, _
+                                ByRef results As Collection, _
+                                ByVal formatType As String)
+    Dim mc As Object
+    Set mc = re.Execute(paraText)
+    Dim m As Object
+    For Each m In mc
+        ' Map regex 0-based offset to document position
+        Dim docStart As Long
+        docStart = paraStart + m.FirstIndex - listPrefixLen
+        Dim docEnd As Long
+        docEnd = docStart + m.Length
+        If docStart >= 0 Then
+            Dim info(0 To 3) As Variant
             info(0) = formatType
-            info(1) = rng.Text
-            info(2) = rng.Start
-            info(3) = rng.End
+            info(1) = m.Value
+            info(2) = docStart
+            info(3) = docEnd
             results.Add info
         End If
-        rng.Collapse wdCollapseEnd
-    Loop
+    Next m
+End Sub
+
+' -- Helper: iterate paragraphs and run a regex, collecting results --
+' Respects page-range filtering.
+Private Sub FindWithRegex(doc As Document, _
+                           ByVal re As Object, _
+                           ByRef results As Collection, _
+                           ByVal formatType As String)
+    Dim para As Paragraph
+    On Error Resume Next
+    For Each para In doc.Paragraphs
+        Err.Clear
+        Dim paraRange As Range
+        Set paraRange = para.Range
+        If Err.Number <> 0 Then Err.Clear: GoTo NextParaFWR
+        If TextAnchoring.IsPastPageFilter(paraRange.Start) Then Exit For
+        If Not TextAnchoring.IsInPageRange(paraRange) Then GoTo NextParaFWR
+
+        Dim paraText As String
+        paraText = paraRange.Text
+        If Err.Number <> 0 Then Err.Clear: GoTo NextParaFWR
+        If Len(paraText) < 3 Then GoTo NextParaFWR
+
+        Dim paraStart As Long
+        paraStart = paraRange.Start
+        Dim listPrefixLen As Long
+        listPrefixLen = TextAnchoring.GetListPrefixLen(para, paraText)
+
+        RegexScanParagraph re, paraText, paraStart, listPrefixLen, results, formatType
+NextParaFWR:
+    Next para
+    On Error GoTo 0
 End Sub
 
 ' -- Helper: check if a time match looks like a clause reference,
 '  ratio, date component, or other non-time pattern.
 '  Examines characters before and after the HH:MM match.
+'  NOTE: creates Range objects for single characters, but this runs
+'  only on the small set of time-pattern matches, not per-paragraph.
 ' ----------------------------------------------------------------
 Private Function LooksLikeNonTimeContext(doc As Document, _
         ByVal matchStart As Long, ByVal matchEnd As Long) As Boolean
@@ -188,6 +215,8 @@ End Function
 ' -- Check format consistency for a single symbol --------------
 '  Searches for words, abbreviated, and full_numeric formats,
 '  determines the dominant format, and flags minorities.
+'  NOTE: Currency detection still uses Word Find wildcards with
+'  valid syntax (@ = one or more of preceding character class).
 Private Sub CheckSymbolConsistency(doc As Document, _
                                     sym As String, _
                                     symLabel As String, _
@@ -204,133 +233,39 @@ Private Sub CheckSymbolConsistency(doc As Document, _
     Set numericRanges = New Collection
 
     ' -- Search for "words" format: symbol + digits + space + word --
-    ' Pattern: e.g. ?[0-9.]@ [a-z]@  (wildcard)
-    Dim rng As Range
-    Dim wordPattern As String
-    wordPattern = sym & "[0-9.]@" & " [a-z]@"
-
-    Set rng = doc.Content.Duplicate
-    With rng.Find
-        .ClearFormatting
-        .Text = wordPattern
-        .MatchWildcards = True
-        .MatchCase = False
-        .MatchWholeWord = False
-        .Wrap = wdFindStop
-        .Forward = True
-    End With
-
-    Dim lastPos As Long
-    lastPos = -1
-    Do
-        On Error Resume Next
-        Dim found As Boolean
-        found = rng.Find.Execute
-        If Err.Number <> 0 Then
-            Err.Clear
-            On Error GoTo 0
-            Exit Do
+    Dim wordMatches As Collection
+    Set wordMatches = TextAnchoring.FindAll(doc, sym & "[0-9.]@" & " [a-z]@", False, False, True)
+    Dim wi As Long
+    For wi = 1 To wordMatches.Count
+        Dim wm As Variant: wm = wordMatches(wi)
+        If IsMagnitudeWord(LCase(CStr(wm(2)))) Then
+            wordsCount = wordsCount + 1
+            wordsRanges.Add TextAnchoring.SafeRange(doc, CLng(wm(0)), CLng(wm(1)))
         End If
-        On Error GoTo 0
-
-        If Not found Then Exit Do
-        If rng.Start <= lastPos Then Exit Do   ' stall guard
-        lastPos = rng.Start
-
-        ' Validate that the trailing word is a magnitude word
-        Dim matchText As String
-        matchText = LCase(rng.Text)
-        If IsMagnitudeWord(matchText) Then
-            If EngineIsInPageRange(rng) Then
-                wordsCount = wordsCount + 1
-                wordsRanges.Add doc.Range(rng.Start, rng.End)
-            End If
-        End If
-
-        On Error Resume Next
-        rng.Collapse wdCollapseEnd
-        If Err.Number <> 0 Then Err.Clear: On Error GoTo 0: Exit Do
-        On Error GoTo 0
-    Loop
+    Next wi
 
     ' -- Search for "abbreviated" format: symbol + digits + m/bn/k --
-    Dim abbrPattern As String
-    abbrPattern = sym & "[0-9.]@[mbk]"
-
-    Set rng = doc.Content.Duplicate
-    With rng.Find
-        .ClearFormatting
-        .Text = abbrPattern
-        .MatchWildcards = True
-        .MatchCase = False
-        .MatchWholeWord = False
-        .Wrap = wdFindStop
-        .Forward = True
-    End With
-
-    lastPos = -1
-    Do
-        On Error Resume Next
-        found = rng.Find.Execute
-        If Err.Number <> 0 Then Err.Clear: On Error GoTo 0: Exit Do
-        On Error GoTo 0
-
-        If Not found Then Exit Do
-        If rng.Start <= lastPos Then Exit Do   ' stall guard
-        lastPos = rng.Start
-
-        If EngineIsInPageRange(rng) Then
-            abbrCount = abbrCount + 1
-            abbrRanges.Add doc.Range(rng.Start, rng.End)
-        End If
-
-        On Error Resume Next
-        rng.Collapse wdCollapseEnd
-        If Err.Number <> 0 Then Err.Clear: On Error GoTo 0: Exit Do
-        On Error GoTo 0
-    Loop
+    Dim abbrMatches As Collection
+    Set abbrMatches = TextAnchoring.FindAll(doc, sym & "[0-9.]@[mbk]", False, False, True)
+    Dim ai As Long
+    For ai = 1 To abbrMatches.Count
+        Dim am As Variant: am = abbrMatches(ai)
+        abbrCount = abbrCount + 1
+        abbrRanges.Add TextAnchoring.SafeRange(doc, CLng(am(0)), CLng(am(1)))
+    Next ai
 
     ' -- Search for "full_numeric" format: symbol + digits with commas --
-    Dim numPattern As String
-    numPattern = sym & "[0-9,.]@"
-
-    Set rng = doc.Content.Duplicate
-    With rng.Find
-        .ClearFormatting
-        .Text = numPattern
-        .MatchWildcards = True
-        .MatchCase = False
-        .MatchWholeWord = False
-        .Wrap = wdFindStop
-        .Forward = True
-    End With
-
-    lastPos = -1
-    Do
-        On Error Resume Next
-        found = rng.Find.Execute
-        If Err.Number <> 0 Then Err.Clear: On Error GoTo 0: Exit Do
-        On Error GoTo 0
-
-        If Not found Then Exit Do
-        If rng.Start <= lastPos Then Exit Do   ' stall guard
-        lastPos = rng.Start
-
-        ' Only count as full_numeric if it contains a comma and is long enough
-        Dim numText As String
-        numText = rng.Text
+    Dim numMatches As Collection
+    Set numMatches = TextAnchoring.FindAll(doc, sym & "[0-9,.]@", False, False, True)
+    Dim ni As Long
+    For ni = 1 To numMatches.Count
+        Dim nm As Variant: nm = numMatches(ni)
+        Dim numText As String: numText = CStr(nm(2))
         If InStr(numText, ",") > 0 And Len(numText) >= 5 Then
-            If EngineIsInPageRange(rng) Then
-                numericCount = numericCount + 1
-                numericRanges.Add doc.Range(rng.Start, rng.End)
-            End If
+            numericCount = numericCount + 1
+            numericRanges.Add TextAnchoring.SafeRange(doc, CLng(nm(0)), CLng(nm(1)))
         End If
-
-        On Error Resume Next
-        rng.Collapse wdCollapseEnd
-        If Err.Number <> 0 Then Err.Clear: On Error GoTo 0: Exit Do
-        On Error GoTo 0
-    Loop
+    Next ni
 
     ' -- Determine dominant format and flag minorities ----------
     Dim totalFormats As Long
@@ -367,87 +302,25 @@ End Sub
 
 ' -- Check ISO code prefixed amounts ---------------------------
 '  Searches for patterns like "GBP 1,500" or "USD 25.00"
-Private Sub CheckISOCodeFormat(doc As Document, _
-                                isoCode As String, _
-                                ByRef issues As Collection)
-    Dim rng As Range
-    Dim isoPattern As String
-    Dim finding As Object
-    Dim locStr As String
-
-    ' Search for ISO code followed by space and number
-    isoPattern = isoCode & " [0-9]@"
-
-    Set rng = doc.Content.Duplicate
-    With rng.Find
-        .ClearFormatting
-        .Text = isoPattern
-        .MatchWildcards = True
-        .MatchCase = True
-        .MatchWholeWord = False
-        .Wrap = wdFindStop
-        .Forward = True
-    End With
-
-    Dim isoCount As Long
-    isoCount = 0
-    Dim isoLastPos As Long
-    isoLastPos = -1
-
-    Do
-        On Error Resume Next
-        Dim isoFound As Boolean
-        isoFound = rng.Find.Execute
-        If Err.Number <> 0 Then Err.Clear: On Error GoTo 0: Exit Do
-        On Error GoTo 0
-
-        If Not isoFound Then Exit Do
-        If rng.Start <= isoLastPos Then Exit Do   ' stall guard
-        isoLastPos = rng.Start
-
-        If EngineIsInPageRange(rng) Then
-            isoCount = isoCount + 1
-
-            ' Flag ISO prefix usage as informational (possible_error)
-            ' since mixing ISO codes with symbol notation is inconsistent
-            On Error Resume Next
-            locStr = EngineGetLocationString(rng, doc)
-            If Err.Number <> 0 Then locStr = "unknown location": Err.Clear
-            On Error GoTo 0
-
-            Set finding = CreateIssueDict(RULE_NAME_CURRENCY, locStr, "ISO code format used: '" & rng.Text & "'", "Consider using symbol notation for consistency", rng.Start, rng.End, "possible_error")
-            issues.Add finding
-        End If
-
-        On Error Resume Next
-        rng.Collapse wdCollapseEnd
-        If Err.Number <> 0 Then Err.Clear: On Error GoTo 0: Exit Do
-        On Error GoTo 0
-    Loop
+Private Sub CheckISOCodeFormat(doc As Document, isoCode As String, ByRef issues As Collection)
+    Dim matches As Collection
+    Set matches = TextAnchoring.FindAll(doc, isoCode & " [0-9]@", False, True, True)
+    Dim i As Long
+    For i = 1 To matches.Count
+        Dim m As Variant: m = matches(i)
+        Dim rng As Range: Set rng = TextAnchoring.SafeRange(doc, CLng(m(0)), CLng(m(1)))
+        TextAnchoring.AddIssue issues, RULE_NAME_CURRENCY, doc, rng, "ISO code format used: '" & CStr(m(2)) & "'", "Consider using symbol notation for consistency", CLng(m(0)), CLng(m(1)), "possible_error"
+    Next i
 End Sub
 
 ' -- Flag all ranges in a minority format collection -----------
-Private Sub FlagMinorityRanges(doc As Document, _
-                                ranges As Collection, _
-                                symLabel As String, _
-                                minorityFmt As String, _
-                                dominantFmt As String, _
-                                ByRef issues As Collection)
+Private Sub FlagMinorityRanges(doc As Document, ranges As Collection, symLabel As String, minorityFmt As String, dominantFmt As String, ByRef issues As Collection)
     Dim i As Long
-    Dim rng As Range
-    Dim finding As Object
-    Dim locStr As String
-
     For i = 1 To ranges.Count
-        Set rng = ranges(i)
-
-        On Error Resume Next
-        locStr = EngineGetLocationString(rng, doc)
-        If Err.Number <> 0 Then locStr = "unknown location": Err.Clear
-        On Error GoTo 0
-
-        Set finding = CreateIssueDict(RULE_NAME_CURRENCY, locStr, symLabel & " amount uses '" & minorityFmt & "' format: '" & rng.Text & "'", "Use '" & dominantFmt & "' format for consistency (dominant style)", rng.Start, rng.End, "error")
-        issues.Add finding
+        Dim rng As Range: Set rng = ranges(i)
+        If Not rng Is Nothing Then
+            TextAnchoring.AddIssue issues, RULE_NAME_CURRENCY, doc, rng, symLabel & " amount uses '" & minorityFmt & "' format: '" & rng.Text & "'", "Use '" & dominantFmt & "' format for consistency (dominant style)", rng.Start, rng.End, "error"
+        End If
     Next i
 End Sub
 
@@ -474,11 +347,36 @@ End Function
 '  determines the dominant style, and flags deviations.
 '  Also checks for mixed 12-hour / 24-hour time formats.
 '
+'  Uses VBScript.RegExp over paragraph text (not Word Find
+'  wildcards) to avoid invalid {1,2} / {2,} quantifier issues.
+'
 '  24-hour detection recognises 00:00 through 23:59 with
 '  context filtering to exclude clause references and ratios.
 ' ================================================================
 Public Function Check_DateTimeFormat(doc As Document) As Collection
     Dim issues As New Collection
+
+    ' ==========================================================
+    '  Build regex objects (once per run)
+    ' ==========================================================
+    ' UK date: "1 January 2024" or "12 March 2025"
+    Dim reUK As Object
+    Set reUK = TextAnchoring.CreateRegex("\b(\d{1,2}) ([A-Z][a-z]{2,}) (\d{4})\b")
+    ' US date: "January 1, 2024" or "March 12, 2025"
+    Dim reUS As Object
+    Set reUS = TextAnchoring.CreateRegex("\b([A-Z][a-z]{2,}) (\d{1,2}), (\d{4})\b")
+    ' Numeric date: "01/02/2024" or "1/2/24"
+    Dim reNum As Object
+    Set reNum = TextAnchoring.CreateRegex("\b(\d{1,2})/(\d{1,2})/(\d{2,4})\b")
+    ' 12-hour time: "2:30 PM", "11:00 am" (colon separator)
+    Dim re12Colon As Object
+    Set re12Colon = TextAnchoring.CreateRegex("\b(\d{1,2}):(\d{2})\s*([AaPp][Mm])\b")
+    ' 12-hour time: "2.30 pm" (dot separator)
+    Dim re12Dot As Object
+    Set re12Dot = TextAnchoring.CreateRegex("\b(\d{1,2})\.(\d{2})\s*([AaPp][Mm])\b")
+    ' 24-hour time: "09:30", "23:15" (exactly 2 digits each side)
+    Dim re24 As Object
+    Set re24 = TextAnchoring.CreateRegex("\b(\d{2}):(\d{2})\b")
 
     ' ==========================================================
     '  PASS 1: Find all date occurrences
@@ -490,21 +388,16 @@ Public Function Check_DateTimeFormat(doc As Document) As Collection
     dateCounts.Add "US", 0
     dateCounts.Add "numeric", 0
 
-    ' -- UK format: "1 January 2024" or "12 March 2025" ------
-    ' VBA wildcard: one or two digits, space, word, space, four digits
+    ' -- UK dates --
     Dim ukResults As New Collection
-    FindWithWildcard doc, "[0-9]{1,2} [A-Z][a-z]{2,} [0-9]{4}", ukResults, "UK"
-
-    ' Validate UK results (check month name)
-    Dim ukItem As Variant
+    FindWithRegex doc, reUK, ukResults, "UK"
     Dim i As Long
     For i = 1 To ukResults.Count
         Dim ukInfo As Variant
         ukInfo = ukResults(i)
         Dim ukText As String
         ukText = CStr(ukInfo(1))
-
-        ' Extract month name (between first and last space)
+        ' Validate: middle token must be a real month name
         Dim parts() As String
         parts = Split(ukText, " ")
         If UBound(parts) >= 2 Then
@@ -515,16 +408,14 @@ Public Function Check_DateTimeFormat(doc As Document) As Collection
         End If
     Next i
 
-    ' -- US format: "January 1, 2024" or "March 12, 2025" ----
+    ' -- US dates --
     Dim usResults As New Collection
-    FindWithWildcard doc, "[A-Z][a-z]{2,} [0-9]{1,2}, [0-9]{4}", usResults, "US"
-
+    FindWithRegex doc, reUS, usResults, "US"
     For i = 1 To usResults.Count
         Dim usInfo As Variant
         usInfo = usResults(i)
         Dim usText As String
         usText = CStr(usInfo(1))
-
         parts = Split(usText, " ")
         If UBound(parts) >= 0 Then
             If IsValidMonth(parts(0)) Then
@@ -534,10 +425,9 @@ Public Function Check_DateTimeFormat(doc As Document) As Collection
         End If
     Next i
 
-    ' -- Numeric format: "01/02/2024" or "1/2/24" -------------
+    ' -- Numeric dates --
     Dim numResults As New Collection
-    FindWithWildcard doc, "[0-9]{1,2}/[0-9]{1,2}/[0-9]{2,4}", numResults, "numeric"
-
+    FindWithRegex doc, reNum, numResults, "numeric"
     For i = 1 To numResults.Count
         dateFinds.Add numResults(i)
         dateCounts("numeric") = dateCounts("numeric") + 1
@@ -550,7 +440,7 @@ Public Function Check_DateTimeFormat(doc As Document) As Collection
 
     ' Check user preference first
     Dim datePref As String
-    datePref = EngineGetDateFormatPref()
+    datePref = TextAnchoring.GetDateFormatPref()
 
     If datePref = "UK" Or datePref = "US" Then
         ' User has set a preference -- use it as dominant
@@ -585,28 +475,16 @@ Public Function Check_DateTimeFormat(doc As Document) As Collection
                 dType = CStr(dInfo(0))
 
                 If dType <> dominantDate Then
-                    Dim findingD As Object
                     Dim rngD As Range
-                    On Error Resume Next
-                    Set rngD = doc.Range(CLng(dInfo(2)), CLng(dInfo(3)))
-                    If Err.Number <> 0 Then Err.Clear: On Error GoTo 0: GoTo NextDateFind
-                    Dim locD As String
-                    locD = EngineGetLocationString(rngD, doc)
-                    If Err.Number <> 0 Then locD = "unknown location": Err.Clear
-                    On Error GoTo 0
-
+                    Set rngD = TextAnchoring.SafeRange(doc, CLng(dInfo(2)), CLng(dInfo(3)))
+                    If rngD Is Nothing Then GoTo NextDateFind
                     Dim suggestion As String
                     Select Case dominantDate
-                        Case "UK"
-                            suggestion = "Reformat to UK style (e.g., '1 January 2024')"
-                        Case "US"
-                            suggestion = "Reformat to US style (e.g., 'January 1, 2024')"
-                        Case "numeric"
-                            suggestion = "Reformat to numeric style (e.g., '01/01/2024')"
+                        Case "UK": suggestion = "Reformat to UK style (e.g., '1 January 2024')"
+                        Case "US": suggestion = "Reformat to US style (e.g., 'January 1, 2024')"
+                        Case "numeric": suggestion = "Reformat to numeric style (e.g., '01/01/2024')"
                     End Select
-
-                    Set findingD = CreateIssueDict(RULE_NAME_DATE_TIME, locD, "Inconsistent date format: '" & CStr(dInfo(1)) & "' uses " & dType & " format but dominant is " & dominantDate, suggestion, CLng(dInfo(2)), CLng(dInfo(3)), "error")
-                    issues.Add findingD
+                    TextAnchoring.AddIssue issues, RULE_NAME_DATE_TIME, doc, rngD, "Inconsistent date format: '" & CStr(dInfo(1)) & "' uses " & dType & " format but dominant is " & dominantDate, suggestion, CLng(dInfo(2)), CLng(dInfo(3)), "error"
                 End If
 NextDateFind:
             Next i
@@ -626,37 +504,50 @@ NextDateFind:
     timeCounts.Add "12hr", 0
     timeCounts.Add "24hr", 0
 
-    ' -- 12-hour format: "2:30 PM", "11:00 am" ----------------
-    Dim time12Results As New Collection
-    FindWithWildcard doc, "[0-9]{1,2}:[0-9]{2} [AaPp][Mm]", time12Results, "12hr"
+    ' Use a dictionary to track seen ranges and avoid duplicates
+    Dim seenTimeRanges As Object
+    Set seenTimeRanges = CreateObject("Scripting.Dictionary")
 
-    For i = 1 To time12Results.Count
-        timeFinds.Add time12Results(i)
-        timeCounts("12hr") = timeCounts("12hr") + 1
+    ' -- 12-hour format: colon separator (e.g. "2:30 PM") ------
+    Dim time12ColonResults As New Collection
+    FindWithRegex doc, re12Colon, time12ColonResults, "12hr"
+    For i = 1 To time12ColonResults.Count
+        Dim t12ci As Variant: t12ci = time12ColonResults(i)
+        Dim t12cKey As String: t12cKey = CLng(t12ci(2)) & ":" & CLng(t12ci(3))
+        If Not seenTimeRanges.Exists(t12cKey) Then
+            seenTimeRanges.Add t12cKey, True
+            timeFinds.Add t12ci
+            timeCounts("12hr") = timeCounts("12hr") + 1
+        End If
     Next i
 
-    ' Also catch dot-separated 12hr times: "2.30 pm"
+    ' -- 12-hour format: dot separator (e.g. "2.30 pm") ---------
     Dim time12DotResults As New Collection
-    FindWithWildcard doc, "[0-9]{1,2}.[0-9]{2} [AaPp][Mm]", time12DotResults, "12hr"
-
+    FindWithRegex doc, re12Dot, time12DotResults, "12hr"
     For i = 1 To time12DotResults.Count
-        timeFinds.Add time12DotResults(i)
-        timeCounts("12hr") = timeCounts("12hr") + 1
+        Dim t12di As Variant: t12di = time12DotResults(i)
+        Dim t12dKey As String: t12dKey = CLng(t12di(2)) & ":" & CLng(t12di(3))
+        If Not seenTimeRanges.Exists(t12dKey) Then
+            seenTimeRanges.Add t12dKey, True
+            timeFinds.Add t12di
+            timeCounts("12hr") = timeCounts("12hr") + 1
+        End If
     Next i
 
     ' -- 24-hour format: HH:MM (00:00 through 23:59) ----------
-    '  Search for two-digit colon two-digit patterns.
-    '  Filter: must be valid 00-23 hour and 00-59 minute.
-    '  Exclude matches followed by AM/PM (those are 12-hour).
-    '  Exclude matches in non-time context (clause refs, ratios).
     Dim time24Results As New Collection
-    FindWithWildcard doc, "[0-9]{2}:[0-9]{2}", time24Results, "24hr"
+    FindWithRegex doc, re24, time24Results, "24hr"
 
     For i = 1 To time24Results.Count
         Dim t24Info As Variant
         t24Info = time24Results(i)
         Dim t24Text As String
         t24Text = CStr(t24Info(1))
+
+        ' Skip if we already saw this range as a 12-hour match
+        Dim t24Key As String
+        t24Key = CLng(t24Info(2)) & ":" & CLng(t24Info(3))
+        If seenTimeRanges.Exists(t24Key) Then GoTo NextTime24
 
         ' Parse hour and minute
         Dim colonPos As Long
@@ -719,6 +610,7 @@ NextDateFind:
                 ' drive the dominant-style count (but are still collected
                 ' so they can be flagged if a clear dominant emerges).
                 If is24hrTime Then
+                    seenTimeRanges.Add t24Key, True
                     If hourVal >= 13 Or hourVal = 0 Then
                         ' Definite 24-hour: counts toward dominance
                         timeFinds.Add t24Info
@@ -738,6 +630,7 @@ NextDateFind:
                 End If
             End If
         End If
+NextTime24:
     Next i
 
     ' -- Determine dominant time format and flag deviations ----
@@ -769,25 +662,12 @@ NextDateFind:
                 ' Skip ambiguous times: they don't conflict with anything
                 If tType = "ambiguous" Then GoTo NextTimeFind
                 If tType <> dominantTime Then
-                    Dim findingT As Object
                     Dim rngT As Range
-                    On Error Resume Next
-                    Set rngT = doc.Range(CLng(tInfo(2)), CLng(tInfo(3)))
-                    If Err.Number <> 0 Then Err.Clear: On Error GoTo 0: GoTo NextTimeFind
-                    Dim locT As String
-                    locT = EngineGetLocationString(rngT, doc)
-                    If Err.Number <> 0 Then locT = "unknown location": Err.Clear
-                    On Error GoTo 0
-
+                    Set rngT = TextAnchoring.SafeRange(doc, CLng(tInfo(2)), CLng(tInfo(3)))
+                    If rngT Is Nothing Then GoTo NextTimeFind
                     Dim timeSugg As String
-                    If dominantTime = "12hr" Then
-                        timeSugg = "Use 12-hour format (e.g., '2:30 PM') for consistency"
-                    Else
-                        timeSugg = "Use 24-hour format (e.g., '14:30') for consistency"
-                    End If
-
-                    Set findingT = CreateIssueDict(RULE_NAME_DATE_TIME, locT, "Inconsistent time format: '" & CStr(tInfo(1)) & "' uses " & tType & " format but dominant is " & dominantTime, timeSugg, CLng(tInfo(2)), CLng(tInfo(3)), "error")
-                    issues.Add findingT
+                    If dominantTime = "12hr" Then timeSugg = "Use 12-hour format (e.g., '2:30 PM') for consistency" Else timeSugg = "Use 24-hour format (e.g., '14:30') for consistency"
+                    TextAnchoring.AddIssue issues, RULE_NAME_DATE_TIME, doc, rngT, "Inconsistent time format: '" & CStr(tInfo(1)) & "' uses " & tType & " format but dominant is " & dominantTime, timeSugg, CLng(tInfo(2)), CLng(tInfo(3)), "error"
                 End If
 NextTimeFind:
             Next i
@@ -797,41 +677,6 @@ NextTimeFind:
     Set Check_DateTimeFormat = issues
 End Function
 
-' ================================================================
-'  RETIRED Rule18: SetRange
-'  NOT dispatched by the engine. The engine manages page ranges
-'  directly via SetPageRangeFromString / SetPageRange.
-'  Kept ONLY for backwards compatibility if called externally.
-'  Will emit a debug warning when invoked.
-' ================================================================
-Public Sub SetRange(s As Long, e As Long)
-    Debug.Print "WARNING: Rules_NumberFormats.SetRange is RETIRED (Rule18). " & _
-                "Use PleadingsEngine.SetPageRange instead."
-    mStartPage = s
-    mEndPage = e
-End Sub
-
-' ================================================================
-'  RETIRED Rule18: Check_PageRange
-'  NOT dispatched by the engine. The engine manages page ranges
-'  directly via SetPageRangeFromString / SetPageRange.
-'  Kept ONLY for backwards compatibility if called externally.
-'  Returns an empty collection; will emit a debug warning.
-' ================================================================
-Public Function Check_PageRange(doc As Document) As Collection
-    Debug.Print "WARNING: Rules_NumberFormats.Check_PageRange is RETIRED (Rule18). " & _
-                "Not dispatched by RunAllPleadingsRules."
-    Dim issues As New Collection
-
-    On Error Resume Next
-
-    ' Push the stored page range into the engine
-    EngineSetPageRange mStartPage, mEndPage
-
-    On Error GoTo 0
-
-    Set Check_PageRange = issues
-End Function
 
 ' ================================================================
 '  Rule19: Check_CurrencyNumberFormat
@@ -865,87 +710,4 @@ Public Function Check_CurrencyNumberFormat(doc As Document) As Collection
     Next i
 
     Set Check_CurrencyNumberFormat = issues
-End Function
-
-
-' ----------------------------------------------------------------
-'  PRIVATE: Create a dictionary-based finding (no class dependency)
-' ----------------------------------------------------------------
-Private Function CreateIssueDict(ByVal ruleName_ As String, _
-                                 ByVal location_ As String, _
-                                 ByVal issue_ As String, _
-                                 ByVal suggestion_ As String, _
-                                 ByVal rangeStart_ As Long, _
-                                 ByVal rangeEnd_ As Long, _
-                                 Optional ByVal severity_ As String = "error", _
-                                 Optional ByVal autoFixSafe_ As Boolean = False, _
-                                 Optional ByVal replacementText_ As String = "") As Object
-    Dim d As Object
-    Set d = CreateObject("Scripting.Dictionary")
-    d("RuleName") = ruleName_
-    d("Location") = location_
-    d("Issue") = issue_
-    d("Suggestion") = suggestion_
-    d("RangeStart") = rangeStart_
-    d("RangeEnd") = rangeEnd_
-    d("Severity") = severity_
-    d("AutoFixSafe") = autoFixSafe_
-    If autoFixSafe_ Then d("ReplacementText") = replacementText_
-    Set CreateIssueDict = d
-End Function
-
-
-' ----------------------------------------------------------------
-'  Late-bound wrapper: PleadingsEngine.IsInPageRange
-' ----------------------------------------------------------------
-Private Function EngineIsInPageRange(rng As Object) As Boolean
-    On Error Resume Next
-    EngineIsInPageRange = Application.Run("PleadingsEngine.IsInPageRange", rng)
-    If Err.Number <> 0 Then
-        Debug.Print "EngineIsInPageRange: fallback (Err " & Err.Number & ": " & Err.Description & ")"
-        EngineIsInPageRange = True
-        Err.Clear
-    End If
-    On Error GoTo 0
-End Function
-
-' ----------------------------------------------------------------
-'  Late-bound wrapper: PleadingsEngine.GetLocationString
-' ----------------------------------------------------------------
-Private Function EngineGetLocationString(rng As Object, doc As Document) As String
-    On Error Resume Next
-    EngineGetLocationString = Application.Run("PleadingsEngine.GetLocationString", rng, doc)
-    If Err.Number <> 0 Then
-        Debug.Print "EngineGetLocationString: fallback (Err " & Err.Number & ": " & Err.Description & ")"
-        EngineGetLocationString = "unknown location"
-        Err.Clear
-    End If
-    On Error GoTo 0
-End Function
-
-' ----------------------------------------------------------------
-'  Late-bound wrapper: PleadingsEngine.SetPageRange
-' ----------------------------------------------------------------
-Private Sub EngineSetPageRange(ByVal startPg As Long, ByVal endPg As Long)
-    On Error Resume Next
-    Application.Run "PleadingsEngine.SetPageRange", startPg, endPg
-    If Err.Number <> 0 Then
-        Debug.Print "EngineSetPageRange: fallback (Err " & Err.Number & ": " & Err.Description & ")"
-        Err.Clear
-    End If
-    On Error GoTo 0
-End Sub
-
-' ----------------------------------------------------------------
-'  Late-bound wrapper: PleadingsEngine.GetDateFormatPref
-' ----------------------------------------------------------------
-Private Function EngineGetDateFormatPref() As String
-    On Error Resume Next
-    EngineGetDateFormatPref = Application.Run("PleadingsEngine.GetDateFormatPref")
-    If Err.Number <> 0 Then
-        Debug.Print "EngineGetDateFormatPref: fallback (Err " & Err.Number & ": " & Err.Description & ")"
-        EngineGetDateFormatPref = "UK"
-        Err.Clear
-    End If
-    On Error GoTo 0
 End Function

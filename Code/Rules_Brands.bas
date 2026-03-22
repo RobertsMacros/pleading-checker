@@ -13,7 +13,7 @@ Attribute VB_Name = "Rules_Brands"
 ' for user-customised brand lists.
 '
 ' Dependencies:
-'   - PleadingsEngine.bas (IsInPageRange, GetLocationString)
+'   - TextAnchoring.bas (FindAll, AddIssue, SafeRange)
 ' ============================================================
 Option Explicit
 
@@ -67,49 +67,20 @@ Private Sub SearchAndFlag(doc As Document, _
                            brandVariant As String, _
                            correctForm As String, _
                            ByRef issues As Collection)
+    Dim matches As Collection
+    Set matches = TextAnchoring.FindAll(doc, brandVariant, True, True)
+
+    Dim i As Long
+    Dim m As Variant
     Dim rng As Range
-    Dim found As Boolean
-    Dim finding As Object
-    Dim locStr As String
-
-    Set rng = doc.Content.Duplicate
-    With rng.Find
-        .ClearFormatting
-        .Text = brandVariant
-        .MatchWholeWord = True
-        .MatchCase = True
-        .MatchWildcards = False
-        .Wrap = wdFindStop
-        .Forward = True
-    End With
-
-    Dim lastPos As Long
-    lastPos = -1
-    Do
-        On Error Resume Next
-        found = rng.Find.Execute
-        If Err.Number <> 0 Then Err.Clear: On Error GoTo 0: Exit Do
-        On Error GoTo 0
-
-        If Not found Then Exit Do
-        If rng.Start <= lastPos Then Exit Do   ' stall guard
-        lastPos = rng.Start
-
-        If EngineIsInPageRange(rng) Then
-            On Error Resume Next
-            locStr = EngineGetLocationString(rng, doc)
-            If Err.Number <> 0 Then locStr = "unknown location": Err.Clear
-            On Error GoTo 0
-
-            Set finding = CreateIssueDict(RULE_NAME, locStr, "Incorrect brand name: '" & rng.Text & "'", "Use '" & correctForm & "'", rng.Start, rng.End, "error")
-            issues.Add finding
-        End If
-
-        On Error Resume Next
-        rng.Collapse wdCollapseEnd
-        If Err.Number <> 0 Then Err.Clear: On Error GoTo 0: Exit Do
-        On Error GoTo 0
-    Loop
+    For i = 1 To matches.Count
+        m = matches(i)          ' Array(startPos, endPos, matchText)
+        Set rng = TextAnchoring.SafeRange(doc, m(0), m(1))
+        TextAnchoring.AddIssue issues, RULE_NAME, doc, rng, _
+            "Incorrect brand name: '" & m(2) & "'", _
+            "Use '" & correctForm & "'", _
+            m(0), m(1)
+    Next i
 End Sub
 
 ' ============================================================
@@ -254,34 +225,6 @@ LoadError:
     End If
 End Function
 
-
-' ----------------------------------------------------------------
-'  PRIVATE: Create a dictionary-based finding (no class dependency)
-' ----------------------------------------------------------------
-Private Function CreateIssueDict(ByVal ruleName_ As String, _
-                                 ByVal location_ As String, _
-                                 ByVal issue_ As String, _
-                                 ByVal suggestion_ As String, _
-                                 ByVal rangeStart_ As Long, _
-                                 ByVal rangeEnd_ As Long, _
-                                 Optional ByVal severity_ As String = "error", _
-                                 Optional ByVal autoFixSafe_ As Boolean = False, _
-                                 Optional ByVal replacementText_ As String = "") As Object
-    Dim d As Object
-    Set d = CreateObject("Scripting.Dictionary")
-    d("RuleName") = ruleName_
-    d("Location") = location_
-    d("Issue") = issue_
-    d("Suggestion") = suggestion_
-    d("RangeStart") = rangeStart_
-    d("RangeEnd") = rangeEnd_
-    d("Severity") = severity_
-    d("AutoFixSafe") = autoFixSafe_
-    If autoFixSafe_ Then d("ReplacementText") = replacementText_
-    Set CreateIssueDict = d
-End Function
-
-
 ' ============================================================
 '  PUBLIC: Default brand-rules file path (cross-platform)
 '  Called by frmPleadingsChecker and PleadingsLauncher via
@@ -296,32 +239,4 @@ Public Function GetDefaultBrandRulesPath() As String
     #Else
         GetDefaultBrandRulesPath = Environ("APPDATA") & sep & "PleadingsChecker" & sep & "brand_rules.txt"
     #End If
-End Function
-
-' ----------------------------------------------------------------
-'  Late-bound wrapper: PleadingsEngine.IsInPageRange
-' ----------------------------------------------------------------
-Private Function EngineIsInPageRange(rng As Object) As Boolean
-    On Error Resume Next
-    EngineIsInPageRange = Application.Run("PleadingsEngine.IsInPageRange", rng)
-    If Err.Number <> 0 Then
-        Debug.Print "EngineIsInPageRange: fallback (Err " & Err.Number & ": " & Err.Description & ")"
-        EngineIsInPageRange = True
-        Err.Clear
-    End If
-    On Error GoTo 0
-End Function
-
-' ----------------------------------------------------------------
-'  Late-bound wrapper: PleadingsEngine.GetLocationString
-' ----------------------------------------------------------------
-Private Function EngineGetLocationString(rng As Object, doc As Document) As String
-    On Error Resume Next
-    EngineGetLocationString = Application.Run("PleadingsEngine.GetLocationString", rng, doc)
-    If Err.Number <> 0 Then
-        Debug.Print "EngineGetLocationString: fallback (Err " & Err.Number & ": " & Err.Description & ")"
-        EngineGetLocationString = "unknown location"
-        Err.Clear
-    End If
-    On Error GoTo 0
 End Function
