@@ -201,7 +201,8 @@ Private Sub InitGroupedReportState()
     gCommentSafeRules("mandated_legal_term_forms") = True
     gCommentSafeRules("brand_name_enforcement") = True
     gCommentSafeRules("custom_rule") = True
-    gCommentSafeRules("bracket_integrity") = True
+    ' bracket_integrity is intentionally EXCLUDED from comment-safe.
+    ' Bracket findings are structural and should be report-only.
     ' Footnote rules are intentionally EXCLUDED from comment-safe.
     ' They default to grouped/report mode, not inline comments.
     gCommentSafeRules("known_anglicised_terms_not_italic") = True
@@ -383,12 +384,30 @@ Public Function GetFindingOutputMode(ByVal finding As Object, _
 
     ' Step 0: Hard-block -- these rules must NEVER be tracked-safe,
     ' regardless of AutoFixSafe, allow-list contents, or any other gate.
+    ' Defence-in-depth: even if gTrackedSafeRules is accidentally populated,
+    ' these rules cannot become OUTPUT_TRACKED_SAFE.
     Dim hardBlock As Boolean
     hardBlock = False
     Select Case rn
+        ' Spelling / legal terms
         Case "spellchecker", "licence_license", "check_cheque", _
              "repeated_words", "always_capitalise_terms", _
              "mandated_legal_term_forms"
+            hardBlock = True
+        ' Structural / punctuation / spacing
+        Case "hyphens", "dash_usage", "bracket_integrity", _
+             "slash_style", "triplicate_punctuation", _
+             "double_spaces", "missing_space_after_dot", _
+             "space_before_punct", "double_commas", "trailing_spaces"
+            hardBlock = True
+        ' Footnote rules
+        Case "footnote_integrity", "footnote_harts", _
+             "footnote_terminal_full_stop", "footnote_initial_capital", _
+             "footnote_abbreviation", "footnote_abbreviation_dictionary", _
+             "footnotes_not_endnotes", "footnote_rules", "duplicate_footnotes"
+            hardBlock = True
+        ' Brand / custom rules
+        Case "brand_name_enforcement", "custom_rule"
             hardBlock = True
     End Select
 
@@ -442,8 +461,10 @@ End Sub
 ' Is this rule allowed to create inline comments?
 Public Function IsCommentSafeRule(ByVal ruleName As String) As Boolean
     If gCommentSafeRules Is Nothing Then
-        ' Before initialisation, allow all comments
-        IsCommentSafeRule = True
+        ' Before initialisation, default to safe (no comments).
+        ' This prevents accidental inline comments if a caller
+        ' invokes comment logic before InitGroupedReportState.
+        IsCommentSafeRule = False
         Exit Function
     End If
     IsCommentSafeRule = gCommentSafeRules.Exists(LCase$(ruleName))
@@ -3161,6 +3182,13 @@ Public Function ShouldCreateCommentForRule(ByVal ruleName As String, _
 
     ' Gate 2: Dash/hyphen rules -- never create comments
     If bucket = "dash" Then
+        ShouldCreateCommentForRule = False
+        Exit Function
+    End If
+
+    ' Gate 2b: Footnote rules -- never create inline comments.
+    ' Footnote findings are structural and overload documents.
+    If bucket = "footnote" Then
         ShouldCreateCommentForRule = False
         Exit Function
     End If
